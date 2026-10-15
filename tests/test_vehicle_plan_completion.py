@@ -82,8 +82,8 @@ async def test_dependency_and_authorized_prerequisite_instruction_reaches_talker
     await wait_for(queue, 'stream.done')
     instructions = ark.requests[0]['messages'][0]['content']
     assert instructions.startswith(load_prompt('talker').split('{{hot_tool_names}}', 1)[0])
-    assert '动作之间有先后关系' in instructions
-    assert '比如"先解锁，再开窗"' in instructions
-    assert '就把整句话一次交给 delegate_vehicle_control' in instructions
-    assert '两层同时操作车辆会互相冲突' in instructions
+    assert '必须等另一个动作完成才能做' in instructions
+    assert '先解除童锁才能开窗' in instructions
+    assert '就把整句话一次交给车控规划层（delegate_vehicle_control）' in instructions
+    assert '前台和车控规划层同时操作车辆会互相冲突' in instructions
     assert actor.vehicle['windows']['child_lock'] is True

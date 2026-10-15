@@ -10,7 +10,7 @@ import pytest
 from backend.app import actors, app
 from backend.db import Database
 from backend.session import SessionActor
-from vehicle_fakes import FakeVehiclePlanner, plan_response, expected_talker_tool_names
+from vehicle_fakes import FakeVehiclePlanner, plan_response, expected_talker_tool_names, route_reply
 
 
 def tool_call(name, arguments, call_id):
@@ -27,6 +27,10 @@ class ScriptedArk:
 
     async def stream(self, messages, tools):
         self.requests.append(copy.deepcopy({"messages": messages, "tools": tools}))
+        routed = route_reply(messages, tools, self.responses[0]["message"] if self.responses else None)
+        if routed:
+            yield {"type": "message", "message": routed, "meta": {"usage": None}}
+            return
         item = copy.deepcopy(self.responses.pop(0))
         if item["message"].get("content"):
             yield {"type": "delta", "text": item["message"]["content"]}
@@ -130,7 +134,8 @@ async def test_actual_long_content_and_returned_reasoning_are_not_truncated(trac
     await actor.post({"type": "input", "text": "展示注入响应"})
     done, _ = await receive(queue, "stream.done")
     events = await recorded(actor)
-    result = next(event for event in events if event["kind"] == "model.completed")
+    result = next(event for event in events if event["kind"] == "model.completed"
+                  and event["data"]["message"].get("content") == content)  # skips the routing call
     assert result["data"]["message"] == item["message"]
     assert result["data"]["meta"]["usage"] is None
     assert done["text"] == content

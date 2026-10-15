@@ -185,7 +185,7 @@ async def test_spoken_place_ordinals_match_cards_even_if_model_reorders(actor_fa
     maps.search_places = search
     await actor.post({'type': 'input', 'text': '找巴黎咖啡馆'})
     done, _ = await wait_for(q, 'stream.done')
-    assert '第一个是甲店，第二个是乙店' in done['text']
+    assert '找到两个地方：甲店、乙店' in done['text']
     assert actor.current.messages[-1]['content'] == done['text']
     assert [p['place_id'] for p in actor.recent_places] == ['a', 'b']
 

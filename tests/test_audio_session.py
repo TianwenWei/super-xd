@@ -7,6 +7,7 @@ import pytest
 
 from backend.db import Database
 from backend.session import SessionActor
+from vehicle_fakes import route_reply
 
 
 def tool(name, args, call_id='audio_call'):
@@ -20,6 +21,10 @@ class ControlledArk:
         self.delta_sent = asyncio.Event()
 
     async def stream(self, messages, tools):
+        routed = route_reply(messages, tools, {k: v for k, v in self.responses[0].items() if k not in {'gate', 'deltas'}})
+        if routed:
+            yield {'type': 'message', 'message': routed}
+            return
         response = self.responses.pop(0)
         for text in response.get('deltas', [response.get('content', '')]):
             if text:
@@ -115,7 +120,8 @@ async def test_explicit_full_report_read_cleans_markup_before_persona_and_keeps_
 async def test_tts_connects_early_but_chat_text_waits_for_routing_completion(audio_actor):
     model_gate, finish_gate = asyncio.Event(), asyncio.Event()
     actor, control, audio, ark, tts = await audio_actor(
-        [{'content': '很高兴陪你出发。', 'deltas': ['很高兴', '陪你出发。'], 'gate': model_gate}],
+        [{'content': '{"response_mode":"chat"}', 'gate': model_gate},
+         {'content': '很高兴陪你出发。', 'deltas': ['很高兴', '陪你出发。']}],
         StreamingTTS(finish_gate=finish_gate))
     await submit(actor)
     started, _ = await until(control, 'turn.started')

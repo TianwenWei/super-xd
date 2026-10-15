@@ -6,7 +6,7 @@ import pytest
 from backend.db import Database
 from backend.session import SessionActor, Turn, effective_text
 from backend.catalog import TOOLS
-from vehicle_fakes import FakeVehiclePlanner, plan_response, planned, expected_talker_tool_names
+from vehicle_fakes import FakeVehiclePlanner, plan_response, planned, expected_talker_tool_names, route_reply
 
 
 def call(name, arguments=None, id='call_1'):
@@ -20,6 +20,10 @@ class FakeArk:
 
     async def stream(self, messages, tools):
         self.requests.append({'messages': copy.deepcopy(messages), 'tools': copy.deepcopy(tools)})
+        routed = route_reply(messages, tools, self.responses[0] if self.responses else None)
+        if routed:
+            yield {'type': 'message', 'message': routed}
+            return
         response = self.responses.pop(0)
         if isinstance(response, Exception):
             raise response
@@ -394,7 +398,7 @@ async def test_model_failure_after_partial_execution_still_reports_verified_acti
     await actor.post({'type': 'input', 'text': '打开空调，再读主驾车窗状态'})
     done, _ = await wait_for(q, 'stream.done', actor)
     assert actor.vehicle['climate']['power'] is True
-    assert '空调开了' in done['text'] and '还有请求未确认' in done['text']
+    assert '空调开了' in done['text'] and '还有请求没确认' in done['text']
     assert '读取指定车窗' not in done['text']
     assert done['metrics']['error']
 
@@ -548,6 +552,10 @@ class HeldDeltaArk(FakeArk):
 
     async def stream(self, messages, tools):
         self.requests.append({'messages': copy.deepcopy(messages), 'tools': copy.deepcopy(tools)})
+        routed = route_reply(messages, tools, {k: v for k, v in self.responses[0].items() if k != 'gate'})
+        if routed:
+            yield {'type': 'message', 'message': routed}
+            return
         response = copy.copy(self.responses.pop(0))
         gate = response.pop('gate', None)
         if response.get('content'):
@@ -632,7 +640,7 @@ async def test_chat_state_queries_new_queries_and_negations_use_normal_model_out
     weather_tasks(actor)
     await actor.post({'type': 'input', 'text': text})
     done, _ = await wait_for(q, 'stream.done')
-    assert done['text'] == '这是测试模型的直接回答。' and len(ark.requests) == 1
+    assert done['text'] == '这是测试模型的直接回答。' and len(ark.requests) == 2
     assert not hasattr(actor.current, 'task_read_required')
 
 
@@ -640,7 +648,7 @@ async def test_explicit_existing_result_without_any_task_remains_normal_model_an
     actor, q, ark = await make_actor([{'content': '当前没有后台任务结果。'}])
     await actor.post({'type': 'input', 'text': '用已有结果回答。'})
     done, _ = await wait_for(q, 'stream.done')
-    assert len(ark.requests) == 1 and done['text'] == '当前没有后台任务结果。'
+    assert len(ark.requests) == 2 and done['text'] == '当前没有后台任务结果。'
     assert not hasattr(actor.current, 'task_read_required')
 
 
@@ -654,7 +662,7 @@ async def test_quoted_stroke_list_as_literal_target_is_not_rejected_or_rewritten
     actor, q, ark = await make_actor([{'content': '横、竖。'}])
     await actor.post({'type': 'input', 'text': '“横、竖”怎么写？'})
     done, _ = await wait_for(q, 'stream.done')
-    assert done['text'] == '横、竖。' and len(ark.requests) == 1 and not hasattr(actor.current, 'word_shape_only')
+    assert done['text'] == '横、竖。' and len(ark.requests) == 2 and not hasattr(actor.current, 'word_shape_only')
 
 
 async def test_existing_records_car_state_question_does_not_read_unrelated_background_tasks(make_actor):
@@ -663,7 +671,7 @@ async def test_existing_records_car_state_question_does_not_read_unrelated_backg
     before = copy.deepcopy(actor.vehicle)
     await actor.post({'type': 'input', 'text': '根据已有记录回答，现在全部车窗都关着吗？'})
     done, events = await wait_for(q, 'stream.done')
-    assert len(ark.requests) == 1 and not hasattr(actor.current, 'task_read_required')
+    assert len(ark.requests) == 2 and not hasattr(actor.current, 'task_read_required')
     assert done['text'] == '全部车窗都关着。' and done['metrics']['error'] is None
     assert actor.vehicle == before and not actor.current.tool_results
     assert not any(e['type'] == 'vehicle.command' for e in events)
@@ -711,7 +719,7 @@ async def test_typed_weather_profile_rejects_before_registration_then_same_talke
     assert error['data']['result']['code'] == 'weather_quick_required'
     assert any(e['kind'] == 'model.completed' and e['data']['message'].get('tool_calls') == [original_call] for e in traces)
     schema = next(t['function']['parameters']['properties'] for t in ark.requests[0]['tools'] if t['function']['name'] == 'delegate_task')
-    assert 'weather' in schema['query_mode']['description'] and 'quick' in schema['query_domain']['description']
+    assert 'weather' in schema['query_domain']['description'] and 'quick' in schema['query_domain']['description']
 
 
 @pytest.mark.parametrize('mode', ['research', None])
@@ -776,7 +784,7 @@ async def test_prompt_decisions_do_not_create_text_classification_or_rejection_r
     await actor.post({'type': 'input', 'text': utterance})
     done, events = await wait_for(q, 'stream.done')
     await actor.trace_queue.join()
-    assert done['text'] == answer and len(ark.requests) == 1
+    assert done['text'] == answer and len(ark.requests) == 2
     assert not any(hasattr(actor.current, field) for field in (
         'task_read_required', 'task_read_rejections', 'word_shape_only', 'word_scope_rejections'))
     assert not any(event['kind'] == 'model.output_rejected' for event in actor.db.traces_after(actor.id))
@@ -838,3 +846,33 @@ async def test_persona_only_reaches_the_tool_free_chat_call(make_actor, preset):
     assert decision['tools'] and not any(m.get('content') == persona for m in decision['messages'])
     assert chat['tools'] == [] and any(m.get('content') == persona for m in chat['messages'])
     assert done['text'] == '秋天很适合出游。'
+
+
+async def test_routing_format_violation_is_retried_once_before_chat(tmp_path):
+    """A routing reply that is neither a tool call nor the chat marker gets one retry."""
+    class RawArk:
+        def __init__(self, replies):
+            self.replies, self.requests = list(replies), []
+
+        async def stream(self, messages, tools):
+            self.requests.append({'messages': copy.deepcopy(messages), 'tools': copy.deepcopy(tools)})
+            yield {'type': 'message', 'message': {'role': 'assistant', **self.replies.pop(0)}}
+
+    ark = RawArk([{'content': '好的，我这就帮你打开车内灯。'},
+                  {'content': '这就打开车内灯。', 'tool_calls': [call('set_interior_light', {'zone': 'all', 'enabled': True})]}])
+    actor = SessionActor('route-retry', Database(tmp_path / 'r.sqlite3'), ark, vehicle_planner=FakeVehiclePlanner())
+    try:
+        q = await actor.attach(); await q.get()
+        await actor.post({'type': 'input', 'text': '不是要关车内灯，是要打开'})
+        done, events = await wait_for(q, 'stream.done', actor)
+        assert [e['name'] for e in events if e['type'] == 'vehicle.command'] == ['set_interior_light']
+        assert '好的，我这就帮你打开车内灯' not in done['text'] and len(ark.requests) == 2
+        assert ark.requests[1]['messages'][-1]['content'].startswith('上一条回复既没有工具调用')
+    finally:
+        await actor.close()
+
+
+@pytest.mark.parametrize('content', ['{"response_mode":"chat"}', ' {"response_mode": "chat"}\n', '```json\n{"response_mode":"chat"}\n```'])
+def test_chat_route_marker_tolerates_format_noise(content):
+    from backend.session import is_chat_route
+    assert is_chat_route(content) and not is_chat_route('好的，我来回答。')

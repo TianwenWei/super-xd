@@ -36,22 +36,23 @@ def function(name, description, properties=None, required=None):
 STR = {'type': 'string', 'minLength': 1, 'maxLength': 4000}
 TASK_ID = {'type': 'string', 'minLength': 1, 'pattern': r'[\s\S]*\S[\s\S]*', 'description': '明确任务id；仅有一个活跃任务可省略'}
 CONTROL_TOOLS = [
-    function('delegate_vehicle_control', '委托专门车控规划层处理非热工具或复杂组合车控。只选择涉及的子系统；系统传递未经改写的本轮原句，不要在参数里重写需求。混合热与非热车控必须整句只委托一次，不能同时调用任何车控函数。此工具等待实际执行回执，不是后台调研建议。',
+    function('delegate_vehicle_control', '交给车控规划层：本轮有不在常驻工具里的车控，或者某个动作必须等另一个动作完成才能做。整句只交一次，同一次调用里不能再有任何车控函数。系统会把用户本轮原话传过去，不要在参数里改写需求。结果以车辆回执为准。',
              {'skill_ids': {'type': 'array', 'items': {'type': 'string', 'enum': list(SKILLS)},
                             'maxItems': 10, 'uniqueItems': True,
-                            'description': '涉及的车辆子系统；不能确定可传空数组，由规划层选择。'}}, ['skill_ids']),
-    function('delegate_task', '复杂隐含意图、多步推理、实时信息委托后台，保留goal完整要求。',
-             {'goal': STR, 'spoken_goal': {'type': 'string', 'maxLength': 80, 'description': '自然短称，概括主题约8–15字；不复述查询过程/来源要求，完整条件全部写goal；不能称已完成'},
+                            'description': '涉及的车辆子系统；不能确定时传空数组，由车控规划层选择。'}}, ['skill_ids']),
+    function('delegate_task', '交给后台任务：需要联网的实时事实（天气除外）、多步调研、按多个条件比较后推荐，或者核实指定来源。goal 写全用户的所有条件。',
+             {'goal': STR,
+              'spoken_goal': {'type': 'string', 'maxLength': 80, 'description': '一个动宾短语，8到15字，能接在"我帮你"后面，比如"挑能停车的火锅店"。不写来源要求，完整条件写在goal里。'},
               'read_details': {'type': 'boolean', 'description': '仅用户明确要求详细朗读最终报告时为true，默认false'},
-              'query_domain': {'type': 'string', 'enum': ['weather', 'general'], 'description': '城市天气预报/气温查询填weather，以核对目标日预报证据；本原型weather入口仅支持quick，必须同时显式填写query_mode=quick，包括指定官网天气查询。车内温控不是天气。其他任务general。'},
-              'query_mode': {'type': 'string', 'enum': ['quick', 'research'], 'description': 'quick用于一个明确地点/日期的简单事实查询；query_domain=weather在本原型只能显式选quick，不能research或省略模式。其他领域的比较、调研、多条件规划或复杂推理可research。缺少必要地点先询问，不委托空目标。'},
+              'query_domain': {'type': 'string', 'enum': ['weather', 'general'], 'description': '只有用户要求核实指定来源上的天气时填weather，此时query_mode必须是quick；普通天气查询用get_weather，不用本工具。其他任务填general。'},
+              'query_mode': {'type': 'string', 'enum': ['quick', 'research'], 'description': 'quick：一个明确的事实查询；research：比较、调研或多条件规划。缺少必要地点时先问用户，不委托空目标。'},
               'required_source_domains': {'type': 'array', 'maxItems': 5, 'uniqueItems': True,
                                           'items': {'type': 'string', 'minLength': 3, 'maxLength': 253},
                                           'description': '仅当用户要求核实某个官方网站且你确知其域名时填写，如metoffice.gov.uk；不确定就不填，不要问用户要网址。'}}, ['goal']),
-    function('manage_task', '处理已有任务。等待澄清时，用户提供该任务缺少的城市/日期等条件必须reply原任务，不另delegate；补充或修改已有任务的条件用update。多个明确任务的进度用task_ids一次读取全部。车况与新话题不使用本工具。',
+    function('manage_task', '处理已有的后台任务。get读取进度或结果，可用task_ids一次读多个；reply回复正在等用户补充的任务；update补充或修改已有任务的条件；cancel取消任务。车控和新话题不用本工具。',
              {'action': {'type':'string','enum':['get','reply','update','cancel'], 'description':'get读取进度或结果；reply回答等待补充任务的问题；update补充或修改已有任务条件；cancel取消任务。'}, 'task_id': TASK_ID,
-              'task_ids': {'type':'array','items':TASK_ID,'minItems':1,'maxItems':8,'uniqueItems':True,'description':'仅get可用，与task_id互斥；用户指定的所有任务ID，不漏任何一项'},
-              'text': {**STR, 'description':'reply时完整保留对等待补充问题的回答；update时完整保留新增或修改条件，不丢失地点、日期、筛选和来源要求。'},
+              'task_ids': {'type':'array','items':TASK_ID,'minItems':1,'maxItems':8,'uniqueItems':True,'description':'仅get可用，与task_id互斥；列出用户指的所有任务id'},
+              'text': {**STR, 'description':'reply时完整保留用户对等待问题的回答；update时完整保留新增或修改的条件，不丢地点、日期、筛选和来源要求。'},
               'read_details': {'type':'boolean','description':'仅用户明确要求详细朗读已有结果时为true，默认false'}}, ['action']),
 ]
 CONTROL_BY_NAME = {t['function']['name']: t for t in CONTROL_TOOLS}
@@ -90,10 +91,24 @@ def places_sentence(names):
     names = [halfwidth_alnum(name) for name in names]  # Full-width letters read badly.
     if len(names) == 1:
         return f'找到一个地方：{names[0]}。要去这里吗？'
-    ordinals = '一二三'
-    named = '，'.join(f'第{ordinals[i]}个是{name}' for i, name in enumerate(names[:3]))
-    more = f'，还有另外{count_words(len(names) - 3)}个' if len(names) > 3 else ''
-    return f'找到{count_words(len(names))}个地方，{named}{more}。要去哪一个？'
+    if len(names) <= 3:
+        return f'找到{count_words(len(names))}个地方：{"、".join(names)}。要去哪一个？'
+    return f'找到{count_words(len(names))}个地方，前三个是{"、".join(names[:3])}。要去哪一个？'
+
+
+ROUTE_RETRY_NOTICE = render_prompt('route_retry')
+
+
+def is_chat_route(content):
+    """Exact routing marker, tolerating whitespace and a ```json fence."""
+    text = (content or '').strip()
+    if text.startswith('```') and text.endswith('```'):
+        text = text[3:-3].strip()
+        text = text[4:].strip() if text.startswith('json') else text
+    try:
+        return json.loads(text) == {'response_mode': 'chat'}
+    except (ValueError, TypeError):
+        return False
 
 
 def effective_text(text):
@@ -238,6 +253,7 @@ class Turn:
     played_text: str = ''
     dispatch_announced: bool = False
     preface: str = ''  # What the model said it is doing (progressive/future tense), already spoken
+    route_retried: bool = False
     chat_streaming: bool = False
     routing: bool = False
     sentence_buffer: str = ''
@@ -680,7 +696,7 @@ class SessionActor:
                 if verified:
                     turn.output = turn.preface
                     self.append_text(turn, verified, speak=not turn.dispatch_announced, source='verified_partial_receipts')
-                self.append_text(turn, render(turn.persona, 'error', '后续处理连接出了问题，还有请求未确认。请稍后再试。' if verified else '这次连接出了问题，暂时没能回答。请稍后再试。'),
+                self.append_text(turn, render(turn.persona, 'error', '后续处理时连接出了问题，还有请求没确认。请稍后再试。' if verified else '连接出了问题，暂时没能回答。请稍后再试。'),
                                  source='error_template', original_text=e['error'])
                 self.finish(turn, error=e['error'])
         elif kind == '_tool_result':
@@ -813,7 +829,7 @@ class SessionActor:
         # This bounded interface never grows after delegation or prior turns.
         return [TOOLS[name].openai_tool() for name in HOT_TOOL_NAMES] + CONTROL_TOOLS + MAPS_TOOLS
 
-    def launch_model(self, turn):
+    def launch_model(self, turn, notice=None):
         if turn.model_calls >= 5:
             verified = self.receipt_feedback(turn, mutations_only=True)
             if verified:
@@ -823,7 +839,7 @@ class SessionActor:
             return
         # Text and voice share one protocol, so evals exercise the production
         # path: the first call only routes; chat prose comes from a tools=[] call.
-        turn.routing = turn.model_calls == 0
+        turn.routing = turn.model_calls == 0 or notice is not None
         turn.model_calls += 1
         messages, tools = self.messages_for(turn), self.tools_for(turn)
         if turn.chat_streaming:
@@ -834,7 +850,9 @@ class SessionActor:
             messages.pop(1)
             messages[1:1] = copy.deepcopy(TALKER_EXAMPLES)
             if turn.routing:
-                messages[0] = {'role': 'system', 'content': CORE_PROMPT + '\n' + SPEECH_ROUTE_PROMPT}
+                messages[0] = {'role': 'system', 'content': CORE_PROMPT + '\n\n' + SPEECH_ROUTE_PROMPT}
+            if notice:
+                messages.append({'role': 'system', 'content': notice})
         model_call_index, call_id = turn.model_calls, uuid4().hex
         self.trace('model.started', {'model_call_index': model_call_index, 'messages': messages,
                                     'tools': tools}, turn, call_id=call_id, status='running')
@@ -884,16 +902,22 @@ class SessionActor:
             self.finish(turn)
             return
         if turn.routing and not calls:
-            try:
-                decision = json.loads(message.get('content') or '')
-            except (ValueError, TypeError):
-                decision = None
-            if decision == {'response_mode': 'chat'}:
-                turn.chat_streaming = True
+            if not is_chat_route(message.get('content')) and not turn.route_retried:
+                # Neither a tool call nor the chat marker: a format violation (often
+                # "这就帮你打开……" with the call forgotten). Ask once more; this is an
+                # exact-format check, not a reading of what the text means.
+                turn.route_retried = True
                 turn.model_text_pending = turn.output = ''
-                self.trace('speech.route_confirmed', {'mode': 'chat', 'tools_disabled': True}, turn)
-                self.launch_model(turn)
+                self.trace('speech.route_retry', {'route_content': message.get('content')}, turn)
+                self.launch_model(turn, notice=ROUTE_RETRY_NOTICE)
                 return
+            # Otherwise it is chat. Never speak routing text: it lacks the persona (invariant 6).
+            turn.chat_streaming = True
+            turn.model_text_pending = turn.output = ''
+            self.trace('speech.route_confirmed', {'mode': 'chat', 'tools_disabled': True,
+                       'route_content': message.get('content')}, turn)
+            self.launch_model(turn)
+            return
         turn.messages.append(message)
         if not calls:
             original = turn.model_text_pending or message.get('content') or ''
