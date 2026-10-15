@@ -10,7 +10,7 @@ import pytest
 from backend.app import actors, app
 from backend.db import Database
 from backend.session import SessionActor
-from vehicle_fakes import FakeVehiclePlanner, plan_response, expected_talker_tool_names, route_reply
+from vehicle_fakes import FakeVehiclePlanner, plan_response, expected_talker_tool_names
 
 
 def tool_call(name, arguments, call_id):
@@ -27,10 +27,6 @@ class ScriptedArk:
 
     async def stream(self, messages, tools):
         self.requests.append(copy.deepcopy({"messages": messages, "tools": tools}))
-        routed = route_reply(messages, tools, self.responses[0]["message"] if self.responses else None)
-        if routed:
-            yield {"type": "message", "message": routed, "meta": {"usage": None}}
-            return
         item = copy.deepcopy(self.responses.pop(0))
         if item["message"].get("content"):
             yield {"type": "delta", "text": item["message"]["content"]}

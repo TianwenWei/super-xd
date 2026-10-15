@@ -59,8 +59,6 @@ CONTROL_BY_NAME = {t['function']['name']: t for t in CONTROL_TOOLS}
 CORE_PROMPT = render_prompt(
     'talker', hot_tool_names=', '.join(HOT_TOOL_NAMES),
     skill_index='; '.join(f'{key}:{value.name}，{value.description}' for key, value in SKILLS.items()))
-SPEECH_ROUTE_PROMPT = render_prompt('speech_route')
-CHAT_SPEECH_PROMPT = render_prompt('speech_chat')
 CURRENT_TURN_PROMPT = render_prompt('current_turn')
 TASK_SNAPSHOT_NOTICE = render_prompt('task_snapshot_notice')
 # Native tool-call few-shots for decisions. In live A/B runs prose examples
@@ -96,19 +94,7 @@ def places_sentence(names):
     return f'找到{count_words(len(names))}个地方，前三个是{"、".join(names[:3])}。要去哪一个？'
 
 
-ROUTE_RETRY_NOTICE = render_prompt('route_retry')
-
-
-def is_chat_route(content):
-    """Exact routing marker, tolerating whitespace and a ```json fence."""
-    text = (content or '').strip()
-    if text.startswith('```') and text.endswith('```'):
-        text = text[3:-3].strip()
-        text = text[4:].strip() if text.startswith('json') else text
-    try:
-        return json.loads(text) == {'response_mode': 'chat'}
-    except (ValueError, TypeError):
-        return False
+FIRST_CLAUSE_MIN_CHARS = 8  # Shorter openers ("好，") wait for the rest of the sentence.
 
 
 def effective_text(text):
@@ -253,9 +239,7 @@ class Turn:
     played_text: str = ''
     dispatch_announced: bool = False
     preface: str = ''  # What the model said it is doing (progressive/future tense), already spoken
-    route_retried: bool = False
-    chat_streaming: bool = False
-    routing: bool = False
+    first_clause_fed: bool = False
     sentence_buffer: str = ''
     vehicle_plans: dict = field(default_factory=dict)
     vehicle_plan_tasks: dict = field(default_factory=dict)
@@ -402,6 +386,9 @@ class SessionActor:
 
     def feed_audio(self, turn, text, source='persona_template', original_text=None):
         clean = speech_text(text)
+        if clean and self.is_current(turn):
+            # When the first words were ready for TTS, with or without an audio client.
+            turn.metrics.setdefault('first_speech_ms', (time.perf_counter() - turn.started) * 1000)
         if clean and turn.audio_queue is not None and self.audio_valid(turn) and not turn.audio_input_closed:
             if 'server_first_text_ms' not in turn.metrics:
                 turn.metrics['server_first_text_ms'] = (time.perf_counter() - turn.started) * 1000
@@ -415,12 +402,17 @@ class SessionActor:
     def feed_sentences(self, turn, final=False):
         end = 0
         for index, character in enumerate(turn.sentence_buffer):
-            if character in '。！？!?\n':
-                self.feed_audio(turn, turn.sentence_buffer[end:index + 1], 'model_chat_stream')
+            # The first chunk may end at a comma so audio starts before the whole
+            # sentence has streamed; later chunks keep full-sentence prosody.
+            early = (not turn.first_clause_fed and character in '，,；;：:'
+                     and len(turn.sentence_buffer[end:index].strip()) >= FIRST_CLAUSE_MIN_CHARS)
+            if character in '。！？!?\n' or early:
+                self.feed_audio(turn, turn.sentence_buffer[end:index + 1], 'model_stream')
+                turn.first_clause_fed = True
                 end = index + 1
         turn.sentence_buffer = turn.sentence_buffer[end:]
         if final and turn.sentence_buffer:
-            self.feed_audio(turn, turn.sentence_buffer, 'model_chat_stream')
+            self.feed_audio(turn, turn.sentence_buffer, 'model_stream')
             turn.sentence_buffer = ''
 
     def close_audio_input(self, turn):
@@ -613,15 +605,13 @@ class SessionActor:
             turn = e['turn']
             if self.is_current(turn):
                 turn.metrics.setdefault('server_first_model_text_ms', (time.perf_counter() - turn.started) * 1000)
-                # SSE content can precede tool_calls in the same response. It
-                # is displayed immediately, but speech eligibility waits for
-                # the completed routing decision to avoid premature success.
+                # Spoken as it streams, sentence by sentence: an answer, or the
+                # progressive-tense sentence that comes with tool calls. Results
+                # still come from receipts (invariant 4).
                 turn.model_text_pending += e['text']
-                if not turn.routing:
-                    self.append_text(turn, e['text'], speak=False)
-                if turn.chat_streaming:
-                    turn.sentence_buffer += e['text']
-                    self.feed_sentences(turn)
+                self.append_text(turn, e['text'], speak=False)
+                turn.sentence_buffer += e['text']
+                self.feed_sentences(turn)
         elif kind == '_audio_item':
             turn, item = e['turn'], e['item']
             if not self.audio_valid(turn): return
@@ -694,7 +684,6 @@ class SessionActor:
             if self.is_current(turn):
                 verified = self.receipt_feedback(turn, mutations_only=True, failures_only=bool(turn.preface))
                 if verified:
-                    turn.output = turn.preface
                     self.append_text(turn, verified, speak=not turn.dispatch_announced, source='verified_partial_receipts')
                 self.append_text(turn, render(turn.persona, 'error', '后续处理时连接出了问题，还有请求没确认。请稍后再试。' if verified else '连接出了问题，暂时没能回答。请稍后再试。'),
                                  source='error_template', original_text=e['error'])
@@ -829,7 +818,7 @@ class SessionActor:
         # This bounded interface never grows after delegation or prior turns.
         return [TOOLS[name].openai_tool() for name in HOT_TOOL_NAMES] + CONTROL_TOOLS + MAPS_TOOLS
 
-    def launch_model(self, turn, notice=None):
+    def launch_model(self, turn):
         if turn.model_calls >= 5:
             verified = self.receipt_feedback(turn, mutations_only=True)
             if verified:
@@ -837,22 +826,12 @@ class SessionActor:
             self.append_text(turn, '这次没能确认可用的功能，请把需求再具体一点。')
             self.finish(turn, error='model_step_limit')
             return
-        # Text and voice share one protocol, so evals exercise the production
-        # path: the first call only routes; chat prose comes from a tools=[] call.
-        turn.routing = turn.model_calls == 0 or notice is not None
+        # One streamed call both decides and speaks; a separate routing call cost
+        # a full model round trip per chat turn. The persona is in the prompt, so
+        # invariant 6 is checked by evals comparing tool calls across personas.
         turn.model_calls += 1
         messages, tools = self.messages_for(turn), self.tools_for(turn)
-        if turn.chat_streaming:
-            tools = []
-            messages[0] = {'role': 'system', 'content': CHAT_SPEECH_PROMPT}
-        else:
-            # Invariant 6: no call that can choose tools sees the persona.
-            messages.pop(1)
-            messages[1:1] = copy.deepcopy(TALKER_EXAMPLES)
-            if turn.routing:
-                messages[0] = {'role': 'system', 'content': CORE_PROMPT + '\n\n' + SPEECH_ROUTE_PROMPT}
-            if notice:
-                messages.append({'role': 'system', 'content': notice})
+        messages[2:2] = copy.deepcopy(TALKER_EXAMPLES)  # fixed rules, persona, examples, history
         model_call_index, call_id = turn.model_calls, uuid4().hex
         self.trace('model.started', {'model_call_index': model_call_index, 'messages': messages,
                                     'tools': tools}, turn, call_id=call_id, status='running')
@@ -892,81 +871,26 @@ class SessionActor:
         if not self.is_current(turn):
             return
         calls = message.get('tool_calls', [])
-        if turn.chat_streaming:
-            if calls:
-                self.cancel_audio(turn, 'chat_protocol_violation')
-                self.finish(turn, error='chat_protocol_violation')
-                return
-            self.feed_sentences(turn, final=True)
-            turn.messages.append(message)
-            self.finish(turn)
-            return
-        if turn.routing and not calls:
-            if not is_chat_route(message.get('content')) and not turn.route_retried:
-                # Neither a tool call nor the chat marker: a format violation (often
-                # "这就帮你打开……" with the call forgotten). Ask once more; this is an
-                # exact-format check, not a reading of what the text means.
-                turn.route_retried = True
-                turn.model_text_pending = turn.output = ''
-                self.trace('speech.route_retry', {'route_content': message.get('content')}, turn)
-                self.launch_model(turn, notice=ROUTE_RETRY_NOTICE)
-                return
-            # Otherwise it is chat. Never speak routing text: it lacks the persona (invariant 6).
-            turn.chat_streaming = True
-            turn.model_text_pending = turn.output = ''
-            self.trace('speech.route_confirmed', {'mode': 'chat', 'tools_disabled': True,
-                       'route_content': message.get('content')}, turn)
-            self.launch_model(turn)
-            return
+        self.feed_sentences(turn, final=True)  # Text already streamed; flush the last clause.
+        said = turn.model_text_pending
+        turn.model_text_pending = ''
         turn.messages.append(message)
         if not calls:
-            original = turn.model_text_pending or message.get('content') or ''
-            lookup_names = {item['function']['name'] for record in turn.messages
-                            for item in record.get('tool_calls', [])}
-            if lookup_names == {'search_places'} and len(turn.lookup_results) == 1:
-                places_result = turn.lookup_results[0]['result']
-                places = places_result.get('places', [])
-                if places_result.get('ok') and places:
-                    # Ordinals must mean the same thing in speech, the result
-                    # card and recent_places. The raw model text stays in trace.
-                    text = places_sentence([p['name'] for p in places])
-                    turn.output = turn.model_text_pending = ''
-                    self.append_text(turn, text, source='verified_place_results')
-                    turn.metrics['output_source'] = 'verified_place_results'
-                    message['content'] = text
-                    self.finish(turn)
-                    return
-            if turn.preface:
-                # The user already heard what is being done; add only what went
-                # wrong, then the model's answer (e.g. facts it just read).
-                turn.output = turn.preface
-                failures = self.receipt_feedback(turn, mutations_only=True, failures_only=True)
-                if failures:
-                    self.append_text(turn, failures, source='receipt_failures')
-                if original.strip():
-                    self.append_text(turn, original, source='model_content', original_text=original)
-                turn.model_text_pending = ''
-                self.finish(turn, error=self.vehicle_plan_error(turn))
-                return
-            handled = self.handled_vehicle_settings(turn)
-            verified = self.receipt_feedback(turn, mutations_only=True) if turn.has_reads or handled or turn.vehicle_plans else ''
-            if verified:
-                turn.output = ''
-                self.append_text(turn, verified, speak=not turn.dispatch_announced, source='verified_partial_receipts')
-                if turn.dispatch_announced:
-                    self.speak_vehicle_failures(turn)
-                if turn.has_reads:
-                    self.append_text(turn, original, source='model_content', original_text=original)
+            # The answer has been spoken. Earlier tool groups in this turn add only
+            # what went wrong; success was announced or is evident from the answer.
+            if said.strip():
+                extra = self.receipt_feedback(turn, mutations_only=True, failures_only=True) if (
+                    turn.commands or turn.vehicle_plans) else ''
             else:
-                turn.output = speech_text(original)
-                self.feed_audio(turn, original, 'model_content', original)
-            turn.model_text_pending = ''
+                extra = self.receipt_feedback(turn, failures_only=bool(turn.preface))
+            if extra:
+                self.append_text(turn, extra, source='receipt_feedback')
             self.finish(turn, error=self.vehicle_plan_error(turn))
             return
-        turn.model_text_pending = ''
-        # Unchecked text from a tool-calling message is never shown; speak_preface
-        # adds it back once the group has passed local checks.
-        turn.output = turn.preface
+        if said.strip():
+            turn.dispatch_announced = True  # Replaces the "正在为你……" template.
+            turn.preface += speech_text(said)
+            turn.metrics.setdefault('preface_ms', turn.metrics.get('server_first_model_text_ms'))
         turn.group, turn.group_results, turn.needs_model, turn.feedback = calls, {}, False, []
         turn.route = 'tool'
         names = [call.get('function', {}).get('name') for call in calls]
@@ -1001,13 +925,6 @@ class SessionActor:
                        'arguments': call.get('function', {}).get('arguments'), 'model_call_id': model_call_id},
                        turn, call_id=call['id'], status='running')
             checked.append((call, *self.precheck(turn, call)))
-        # The model's own sentence is spoken only once every call passed local
-        # checks, so it never announces something that is then sent back for
-        # a retry. Results still come from receipts: success stays silent,
-        # failures are reported (invariant 4).
-        preface = (message.get('content') or '').strip()
-        if preface and not any(error for _, _, _, error in checked):
-            self.speak_preface(turn, preface)
         for call, name, arguments, error in checked:
             if error is not None:
                 if error.get('retry_model'):
@@ -1037,12 +954,15 @@ class SessionActor:
                 if name == 'search_places':
                     # Provenance of the search area, like destinations: no GPS,
                     # so "nearest X" needs a place the user actually said.
-                    area = arguments.pop('area')
-                    if not destination_grounded(area, self.destination_sources(turn)):
+                    # Models often append a country ("杭州 中国"); keep the parts the
+                    # user actually said and refuse only when none of them is grounded.
+                    sources = self.destination_sources(turn)
+                    grounded = [part for part in arguments.pop('area').split() if destination_grounded(part, sources)]
+                    if not grounded:
                         return name, arguments, dict(AREA_NOT_GROUNDED)
                     # Places text search has no GPS bias; without the area, results
                     # fall back to the server's IP location.
-                    arguments['near'] = area
+                    arguments['near'] = ' '.join(grounded)
                 elif name == 'start_poi_navigation':
                     error = self.poi_error(turn, arguments['place_id'])
                     if error:
@@ -1056,8 +976,11 @@ class SessionActor:
                     return name, arguments, error
             return name, arguments, None
         except (ValueError, KeyError, TypeError, ValidationError) as exc:
+            # Lookups and task tools: the same Talker fixes the arguments (e.g. a
+            # date of "后天"). Vehicle values are reported instead, so the model
+            # never substitutes a value the user did not ask for.
             return name, None, {'ok': False, 'reason': f'参数校验失败：{str(exc).splitlines()[0][:180]}',
-                                'spoken_reason': validation_feedback(exc, name)}
+                                'spoken_reason': validation_feedback(exc, name), 'retry_model': name not in TOOLS}
 
     def dispatch_call(self, turn, call, name, arguments):
         if name in TOOLS:
@@ -1082,14 +1005,6 @@ class SessionActor:
                 if result.get('retry_model'):
                     turn.needs_model = True
                 self.tool_result(turn, call, result)
-
-    def speak_preface(self, turn, text):
-        turn.dispatch_announced = True  # Replaces the "正在为你……" template.
-        turn.output = turn.preface
-        turn.preface += speech_text(text)
-        turn.metrics.setdefault('preface_ms', (time.perf_counter() - turn.started) * 1000)
-        self.append_text(turn, text, source='model_preface', original_text=text)
-        self.trace('speech.preface', {'text': text, 'spoken': speech_text(text)}, turn, status='spoken')
 
     def destination_sources(self, turn):
         """Texts a destination may be copied from: this request, recent dialogue, found places."""
@@ -1768,6 +1683,15 @@ class SessionActor:
         turn.group = []
         if not self.is_current(turn):
             return
+        places = self.places_answer(turn)
+        if places:
+            # Ordinals must match the result card and recent_places, so search
+            # results are read from a template; no model call is needed.
+            self.append_text(turn, places, source='verified_place_results')
+            turn.metrics['output_source'] = 'verified_place_results'
+            turn.messages.append({'role': 'assistant', 'content': places})
+            self.finish(turn)
+            return
         if turn.needs_model or turn.has_reads:
             self.launch_model(turn)
             return
@@ -1781,7 +1705,10 @@ class SessionActor:
                 turn.messages.append({'role': 'assistant', 'content': text})
             self.finish(turn, error=self.vehicle_plan_error(turn))
             return
-        text = self.receipt_feedback(turn) or '工具执行结束。'
+        text = self.receipt_feedback(turn)
+        if not text:  # Nothing new to tell the user (e.g. success after a spoken sentence).
+            self.finish(turn, error=self.vehicle_plan_error(turn))
+            return
         if turn.dispatch_announced:
             turn.output = ''
             self.append_text(turn, text, speak=False)
@@ -1790,6 +1717,14 @@ class SessionActor:
             self.append_text(turn, text)
         turn.messages.append({'role': 'assistant', 'content': text})
         self.finish(turn, error=self.vehicle_plan_error(turn))
+
+    def places_answer(self, turn):
+        names = {item['function']['name'] for record in turn.messages for item in record.get('tool_calls', [])}
+        if names != {'search_places'} or len(turn.lookup_results) != 1:
+            return ''
+        result = turn.lookup_results[0]['result']
+        places = result.get('places', []) if result.get('ok') else []
+        return places_sentence([p['name'] for p in places]) if places else ''
 
     def speak_vehicle_failures(self, turn):
         failures = []
@@ -1851,7 +1786,9 @@ class SessionActor:
         turn.finished, self.generating = True, False
         metrics = {'first_effective_ms': turn.first_effective_ms, 'total_ms': (time.perf_counter() - turn.started) * 1000,
                    'model_calls': turn.model_calls, 'route': turn.route, 'commands': turn.commands, 'error': error,
-                   'preface': turn.preface or None}
+                   'preface': turn.preface or None,
+                   'first_model_text_ms': turn.metrics.get('server_first_model_text_ms'),
+                   'first_speech_ms': turn.metrics.get('first_speech_ms')}
         turn.metrics.update(metrics)
         self.close_audio_input(turn)
         self.trace('turn.completed', {'output': turn.output, 'metrics': metrics,

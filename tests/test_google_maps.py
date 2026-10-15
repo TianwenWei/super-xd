@@ -142,7 +142,7 @@ async def test_foreground_weather_continues_same_model_without_task(actor_factor
 
 async def test_poi_query_then_selection_uses_real_identity_and_receipt(actor_factory):
     actor, q, _, _ = await actor_factory([
-        {'tool_calls': [call('search_places', {'query': '巴黎卢浮宫', 'area': '巴黎'})]}, {'content': '找到了卢浮宫。'},
+        {'tool_calls': [call('search_places', {'query': '巴黎卢浮宫', 'area': '巴黎'})]},
         {'tool_calls': [call('start_poi_navigation', {'place_id': POI['place_id']}, id='navigate')]}])
     await actor.post({'type': 'input', 'text': '查巴黎卢浮宫'})
     await wait_for(q, 'stream.done')
@@ -163,16 +163,15 @@ async def test_fabricated_poi_id_never_dispatches(actor_factory):
     assert not actor.vehicle['navigation']['active'] and not any(e['type'] == 'vehicle.command' for e in events)
 
 
-async def test_same_turn_search_result_is_not_a_user_choice(actor_factory):
+async def test_search_results_are_read_from_template_without_another_model_call(actor_factory):
     actor, q, ark, _ = await actor_factory([
-        {'tool_calls': [call('search_places', {'query': '巴黎卢浮宫', 'area': '巴黎'}, id='search')]},
-        {'tool_calls': [call('start_poi_navigation', {'place_id': POI['place_id']}, id='navigate')]},
-        {'content': '找到卢浮宫，要导航过去吗？'}])
+        {'tool_calls': [call('search_places', {'query': '巴黎卢浮宫', 'area': '巴黎'}, id='search')]}])
     await actor.post({'type': 'input', 'text': '导航到巴黎卢浮宫'})
     done, events = await wait_for(q, 'stream.done', actor)
-    assert len(ark.requests) == 3 and not any(e['type'] == 'vehicle.command' for e in events)
-    assert actor.current.tool_results['navigate']['code'] == 'place_not_confirmed'
-    assert done['text'] == '找到卢浮宫，要导航过去吗？'
+    assert len(ark.requests) == 1 and not any(e['type'] == 'vehicle.command' for e in events)
+    assert done['text'].startswith('找到一个地方') and done['text'].endswith('要去这里吗？')
+    # A result surfaced in this turn is not yet the user's choice.
+    assert actor.poi_error(actor.current, POI['place_id'])['code'] == 'place_not_confirmed'
 
 
 async def test_spoken_place_ordinals_match_cards_even_if_model_reorders(actor_factory):
@@ -241,3 +240,21 @@ async def test_search_area_biases_the_places_query(actor_factory):
     await actor.post({'type': 'input', 'text': '我在上海人民广场，找机场'})
     await wait_for(q, 'stream.done')
     assert seen == [{'query': '机场', 'near': '上海人民广场'}]
+
+
+async def test_search_area_keeps_only_the_parts_the_user_said(actor_factory):
+    actor, q, _, maps = await actor_factory([
+        {'tool_calls': [call('search_places', {'query': '咖啡馆', 'area': '杭州西湖 中国'})]}])
+    seen = []
+    async def search(**args):
+        seen.append(args)
+        return {'ok': True, 'kind': 'places', 'places': [POI], 'provider': 'Google Maps'}
+    maps.search_places = search
+    await actor.post({'type': 'input', 'text': '找一下杭州西湖附近的咖啡馆'})
+    await wait_for(q, 'stream.done')
+    assert seen == [{'query': '咖啡馆', 'near': '杭州西湖'}]
+
+
+def test_weather_date_accepts_day_after_tomorrow():
+    from datetime import date
+    assert GoogleMapsClient.target_date('day_after_tomorrow', date(2026, 10, 15)) == date(2026, 10, 17)

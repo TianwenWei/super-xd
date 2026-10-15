@@ -52,5 +52,7 @@ async def test_runner_drives_simulated_device_and_checks_persona_invariance():
                 yield item
 
     results = await run_all([case], PerRun(), concurrency=2, planner=FakeVehiclePlanner())
-    assert summarize(results) == {'total': 2, 'passed': 2, 'pass_rate': 1.0, 'failed': {}}
+    summary = summarize(results)
+    assert {k: summary[k] for k in ('total', 'passed', 'pass_rate', 'failed')} == {'total': 2, 'passed': 2, 'pass_rate': 1.0, 'failed': {}}
+    assert summary['latency']['all']['turns'] == 2
     assert results[0]['turns'][0]['commands'] == [{'name': 'set_volume', 'arguments': {'volume': 35}, 'source': 'talker'}]

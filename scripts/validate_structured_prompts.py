@@ -97,11 +97,8 @@ async def capture_case(runtime, case, fixed_time):
         actor.turns.append(turn)
     turn = session.Turn(case['id'], case['text'], actor.persona.model_copy(deep=True), 1)
     turn.messages = [{'role': 'user', 'content': case['text']}]
-    if case.get('speech_mode') in {'route', 'answer'}:
-        turn.audio_queue = asyncio.Queue()
-    if case.get('speech_mode') == 'answer':
-        turn.chat_streaming = True
-        turn.model_calls = 1
+    if case.get('speech_mode'):
+        turn.audio_queue = asyncio.Queue()  # Voice and text now share one request shape.
     actor.turns.append(turn)
     actor.current = turn
     actor.trace = lambda *args, **kwargs: None

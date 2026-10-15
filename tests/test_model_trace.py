@@ -236,3 +236,21 @@ async def test_complete_optional_tool_choice_and_token_budget_do_not_change_defa
     assert requests[1]['model'] == requests[0]['model'] and requests[1]['thinking'] == {'type': 'disabled'}
     assert requests[2]['tool_choice'] == 'auto' and requests[2]['max_tokens'] == 6000
     assert requests[2]['thinking'] == {'type': 'enabled'}
+
+
+@pytest.mark.parametrize('status,retried', [(502, True), (503, True), (504, True), (400, False), (401, False)])
+async def test_stream_retries_once_on_transient_status_before_any_output(status, retried):
+    ok = sse({'choices': [{'delta': {'content': '好的。'}, 'finish_reason': 'stop'}]}) + b'data: [DONE]\n\n'
+    calls = []
+    def respond(request):
+        calls.append(1)
+        return httpx.Response(status) if len(calls) == 1 else httpx.Response(200, stream=Frames([ok]))
+    async with httpx.AsyncClient(base_url='https://provider.test/', transport=httpx.MockTransport(respond)) as client:
+        stream = ArkClient(client).stream([{'role': 'user', 'content': '你好'}])
+        if retried:
+            records = [item async for item in stream]
+            assert records[-1]['message']['content'] == '好的。' and len(calls) == 2
+        else:
+            with pytest.raises(RuntimeError):
+                _ = [item async for item in stream]
+            assert len(calls) == 1

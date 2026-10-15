@@ -127,7 +127,6 @@ def grade(expect, observed):
 async def _drive_turn(actor, outgoing, text):
     """Send one input and play the device role until the turn completes."""
     before = copy.deepcopy(actor.vehicle)
-    request_index = len(getattr(actor.ark, 'requests', []))
     await actor.post({'type': 'input', 'text': text})
     commands, cards, turn_id, receipts, lookups = [], [], None, [], []
 
@@ -167,15 +166,13 @@ async def _drive_turn(actor, outgoing, text):
             'vehicle_before': before, 'tasks_created': len(cards), 'route': done['metrics'].get('route'),
             'error': done['metrics'].get('error'), 'text': done['text'], 'preface': done['metrics'].get('preface'),
             'model_calls': done['metrics'].get('model_calls'), 'total_ms': done['metrics'].get('total_ms'),
-            # The first tool-enabled request is the routing decision invariant 6 is about.
-            'decision_input': next((without_clock(r['messages']) for r in getattr(actor.ark, 'requests', [])[request_index:]
-                                    if r['tools']), None)}
+            'first_speech_ms': done['metrics'].get('first_speech_ms')}
 
 
 async def run_case(case, ark, *, persona='warm', planner=None, maps=None, repeat=0):
     with tempfile.TemporaryDirectory() as directory:
         db = Database(Path(directory) / 'eval.sqlite3')
-        actor = SessionActor(f"eval-{case['id']}", db, RecordingArk(ark), vehicle_planner=planner, maps=maps)
+        actor = SessionActor(f"eval-{case['id']}", db, ark, vehicle_planner=planner, maps=maps)
         try:
             outgoing = await actor.attach()
             await outgoing.get()
@@ -214,34 +211,6 @@ async def run_case(case, ark, *, persona='warm', planner=None, maps=None, repeat
             await actor.close()
 
 
-class RecordingArk:
-    """Forwards to the real client and keeps every Talker request for inspection."""
-
-    def __init__(self, ark):
-        self.ark, self.requests = ark, []
-
-    def stream(self, messages, tools=None):
-        self.requests.append({'messages': copy.deepcopy(messages), 'tools': copy.deepcopy(tools)})
-        return self.ark.stream(messages, tools)
-
-    def __getattr__(self, name):
-        return getattr(self.ark, name)
-
-
-def without_clock(messages):
-    """Drop the snapshot's current_utc so identical inputs compare equal across runs."""
-    marker = '"current_utc":"'
-    result = []
-    for message in messages:
-        content = message.get('content')
-        if isinstance(content, str) and marker in content:
-            start = content.index(marker) + len(marker)
-            content = content[:start] + content[content.index('"', start):]
-            message = {**message, 'content': content}
-        result.append(message)
-    return result
-
-
 def persona_signature(result):
     return [[(c['name'], json.dumps(c['arguments'], sort_keys=True, ensure_ascii=False)) for c in turn.get('talker_calls', [])]
             + [(c['name'], json.dumps(c['arguments'], sort_keys=True, ensure_ascii=False)) for c in turn.get('commands', [])]
@@ -258,23 +227,18 @@ async def run_all(cases, ark, *, concurrency=4, planner=None, maps=None, repeat=
     jobs = [one(case, persona, index) for index in range(repeat) for case in cases
             for persona in case.get('personas', ['warm'])]
     results = await asyncio.gather(*jobs)
-    # Invariant 6 is checked on the decision call's input: it must be identical
-    # under every persona. Differing outputs from identical inputs are sampling
-    # noise and are reported, not failed, so they are not mistaken for persona leaks.
-    groups = {}
+    # Invariant 6: the persona is in the prompt, so it must not change tool calls.
+    # Sampling varies run to run, so a case fails only if no tool-call sequence
+    # is shared by every persona across all repeats.
+    by_case = {}
     for result in results:
-        groups.setdefault((result['id'], result['repeat']), []).append(result)
-    for group in groups.values():
-        if len(group) < 2:
-            continue
-        inputs = {json.dumps([t.get('decision_input') for t in r['turns'][:1]], ensure_ascii=False) for r in group}
-        if len(inputs) > 1:
-            for result in group:
-                result['passed'] = False
-                result.setdefault('failures', []).append('persona changed the decision-call input')
-        elif len({json.dumps(persona_signature(r)) for r in group}) > 1:
-            for result in group:
-                result['notes'] = ['tool calls varied across personas with identical input (sampling noise)']
+        by_case.setdefault(result['id'], {}).setdefault(result['persona'], set()).add(json.dumps(persona_signature(result)))
+    for identity, personas in by_case.items():
+        if len(personas) > 1 and not set.intersection(*personas.values()):
+            for result in results:
+                if result['id'] == identity:
+                    result['passed'] = False
+                    result.setdefault('failures', []).append('tool calls differ across personas in every repeat')
     return results
 
 
@@ -286,7 +250,32 @@ def summarize(results):
         runs[0] += result['passed']; runs[1] += 1
     return {'total': len(results), 'passed': passed,
             'pass_rate': round(passed / len(results), 4) if results else None,
-            'failed': {identity: f'{ok}/{total}' for identity, (ok, total) in sorted(per_case.items()) if ok < total}}
+            'failed': {identity: f'{ok}/{total}' for identity, (ok, total) in sorted(per_case.items()) if ok < total},
+            'latency': latency_summary(results)}
+
+
+def percentile(values, q):
+    values = sorted(values)
+    return round(values[min(len(values) - 1, int(q * len(values)))]) if values else None
+
+
+def latency_summary(results):
+    """Per-turn latency from text input (no ASR), grouped by route.
+
+    first_speech_ms: when the first words were ready for TTS. total_ms: turn
+    done, including simulated vehicle receipts. model_calls: Talker calls.
+    """
+    turns = [t for r in results for t in r['turns'] if t.get('total_ms') is not None]
+    out = {}
+    for route in sorted({t.get('route') for t in turns} | {'all'}):
+        group = [t for t in turns if route == 'all' or t.get('route') == route]
+        speech = [t['first_speech_ms'] for t in group if t.get('first_speech_ms') is not None]
+        out[route] = {'turns': len(group),
+                      'first_speech_p50': percentile(speech, .5), 'first_speech_p90': percentile(speech, .9),
+                      'total_p50': percentile([t['total_ms'] for t in group], .5),
+                      'total_p90': percentile([t['total_ms'] for t in group], .9),
+                      'model_calls_mean': round(sum(t.get('model_calls') or 0 for t in group) / len(group), 2)}
+    return out
 
 
 async def main(argv=None):

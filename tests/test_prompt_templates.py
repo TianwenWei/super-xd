@@ -94,10 +94,11 @@ async def test_history_precedes_dynamic_snapshot_and_latest_input(monkeypatch):
                           (item.get('content') or '').startswith('当前会话快照'))
     current_index = next(index for index, item in enumerate(messages) if item.get('content') == case['text'])
     assert messages[0]['role'] == 'system' and messages[0]['content'].startswith('# ')
-    # Invariant 6: a call that can choose tools never carries the persona.
+    # Fixed rules, then persona, then native examples, then history (AGENTS §5).
     persona_header = prompt_templates.load_prompt('persona').split('{{', 1)[0]
-    assert not any(persona_header in (item.get('content') or '') for item in messages)
-    assert 0 < history_index < snapshot_index < current_index
+    assert messages[1]['role'] == 'system' and messages[1]['content'].startswith(persona_header)
+    examples_end = next(i for i, m in enumerate(messages) if m.get('content') == '示例结束。下面才是和当前用户的真实对话。')
+    assert 1 < examples_end < history_index < snapshot_index < current_index
 
 
 async def test_dynamic_state_does_not_change_stable_prefix_or_tools(monkeypatch):
@@ -113,22 +114,15 @@ async def test_dynamic_state_does_not_change_stable_prefix_or_tools(monkeypatch)
     assert before['messages'] != after['messages']
 
 
-# Text mode uses the same routing protocol as voice, so evals exercise the production path.
-@pytest.mark.parametrize('mode,tool_count,route_count', [(None, 21, 1), ('route', 21, 1), ('answer', 0, 0)])
-async def test_text_speech_route_and_speech_answer_keep_distinct_protocols(monkeypatch, mode, tool_count, route_count):
+@pytest.mark.parametrize('mode', [None, 'route'])
+async def test_voice_and_text_send_the_same_single_request_shape(monkeypatch, mode):
     runtime = import_runtime(None)
     monkeypatch.setattr(runtime.session, 'utcnow', runtime.session.utcnow)
     case = {'id': 'speech-contract', 'role': 'talker', 'text': '简单介绍秋天。', 'speech_mode': mode}
     request = await capture_case(runtime, case, '2026-10-14T12:00:00+00:00')
-    route = prompt_templates.load_prompt('speech_route')
-    assert len(request['tools']) == tool_count
-    assert sum(route in (item.get('content') or '') for item in request['messages'] if item['role'] == 'system') == route_count
-    if mode == 'answer':
-        assert request['messages'][0]['content'] == prompt_templates.load_prompt('speech_chat')
-        assert request['messages'][1]['role'] == 'system'
-        assert '{{' not in request['messages'][1]['content']
-    else:
-        assert request['messages'][0]['content'].startswith(prompt_templates.load_prompt('talker').split('{{hot_tool_names}}', 1)[0])
+    assert len(request['tools']) == 21
+    assert request['messages'][0]['content'].startswith(prompt_templates.load_prompt('talker').split('{{hot_tool_names}}', 1)[0])
+    assert not any('response_mode' in (m.get('content') or '') for m in request['messages'])
 
 
 async def test_native_assistant_and_tool_history_remains_protocol_valid(monkeypatch):

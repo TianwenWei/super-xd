@@ -97,6 +97,23 @@ class ArkClient:
             raise RuntimeError(f'Ark 调用失败：{sanitized_error(exc)}') from None
 
     async def stream(self, messages, tools=None):
+        """Stream one completion; retry once if the provider fails before any output.
+
+        Ark intermittently answers 502/503/504. Nothing has been shown or spoken
+        at that point, so a single retry is invisible to the user.
+        """
+        for attempt in (1, 2):
+            produced = False
+            try:
+                async for item in self._stream_once(messages, tools):
+                    produced = True
+                    yield item
+                return
+            except RuntimeError as exc:
+                if produced or attempt == 2 or not getattr(exc, 'retryable', False):
+                    raise
+
+    async def _stream_once(self, messages, tools=None):
         started = time.perf_counter()
         content, reasoning, calls, raw_chunks, extra = '', '', {}, [], {}
         meta = {'provider_id': None, 'model': None, 'created': None, 'finish_reason': None,
@@ -172,6 +189,9 @@ class ArkClient:
         except (httpx.HTTPError, KeyError, ValueError) as exc:
             error = RuntimeError(f'Ark 流式调用失败：{sanitized_error(exc)}')
             error.trace_partial = observed()
+            error.retryable = not raw_chunks and (
+                isinstance(exc, httpx.TransportError) or
+                isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in {502, 503, 504})
             raise error from None
 
     async def prewarm(self):

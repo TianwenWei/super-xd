@@ -70,19 +70,3 @@ def expected_talker_tool_names():
     from backend.catalog import HOT_TOOL_NAMES
     return [*HOT_TOOL_NAMES, *[t["function"]["name"] for t in CONTROL_TOOLS + MAPS_TOOLS]]
 
-
-ROUTE_CHAT = '{"response_mode":"chat"}'
-
-
-def route_reply(messages, tools, response):
-    """What a protocol-following model returns on a routing call.
-
-    Scripts list the answer the user should hear; the routing call before it
-    answers with the chat marker without consuming that scripted answer.
-    """
-    from backend.session import SPEECH_ROUTE_PROMPT
-    if (tools and isinstance(response, dict) and not response.get('tool_calls')
-            and response.get('content') != ROUTE_CHAT and messages
-            and SPEECH_ROUTE_PROMPT in (messages[0].get('content') or '')):
-        return {'role': 'assistant', 'content': ROUTE_CHAT}
-    return None

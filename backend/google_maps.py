@@ -119,7 +119,8 @@ class GoogleMapsClient:
 
     @staticmethod
     def target_date(value, today):
-        target = today if value in ('today', 'now') else today + timedelta(days=1) if value == 'tomorrow' else Date.fromisoformat(value)
+        relative = {'today': 0, 'now': 0, 'tomorrow': 1, 'day_after_tomorrow': 2}
+        target = today + timedelta(days=relative[value]) if value in relative else Date.fromisoformat(value)
         if not 0 <= (target - today).days <= 9:
             raise MapsError('date_out_of_range', '天气直查支持当地今天至未来九天；历史日期不使用预报替代。')
         return target

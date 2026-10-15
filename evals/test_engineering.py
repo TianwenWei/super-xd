@@ -144,8 +144,7 @@ async def test_timezone_comes_from_vehicle_settings(tmp_path):
 
 async def test_confirmed_chat_streams_sentence_before_model_end(tmp_path):
     gate=asyncio.Event()
-    ark=ControlledArk([{'content':'{"response_mode":"chat"}'},
-        {'content':'第一句。第二句。','deltas':['第一句。','第二句。'],'gate':gate}])
+    ark=ControlledArk([{'content':'第一句。第二句。','deltas':['第一句。','第二句。'],'gate':gate}])
     tts=StreamingTTS()
     actor=SessionActor('chat',Database(tmp_path/'chat.sqlite'),ark,tts)
     try:
