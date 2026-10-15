@@ -31,6 +31,9 @@ WMO_CONDITIONS = {
 }
 
 
+NEAR_RADIUS_M = 50000  # Bias radius; a city's airports can be 30+ km from its centre.
+
+
 class GoogleMapsClient:
     def __init__(self, client=None, api_key=None, now=None):
         self.key = os.getenv('GOOGLE_MAPS_API_KEY', '') if api_key is None else api_key
@@ -79,10 +82,20 @@ class GoogleMapsClient:
             raise MapsError('upstream_error', f'服务请求失败（HTTP {response.status_code}）。')
         return data
 
-    async def search_places(self, query, max_results=5, *, cities_only=False):
+    async def search_places(self, query, max_results=5, *, cities_only=False, near=None):
         body = {'textQuery': query, 'languageCode': 'zh-CN', 'pageSize': max_results}
         if cities_only:
             body.update(includedType='locality', strictTypeFiltering=True)
+        anchor = None
+        if near:
+            # Text search has no GPS; bias it to the place the user named instead
+            # of mixing that name into the query (which returned the landmark itself).
+            found = await self.search_places(near, max_results=1)
+            if not found['places']:
+                return {'ok': False, 'code': 'area_not_found', 'provider': 'Google Maps', 'kind': 'places',
+                        'reason': f'没有找到“{near}”这个位置，请换个说法。', 'places': []}
+            anchor = found['places'][0]
+            body['locationBias'] = {'circle': {'center': anchor['location'], 'radius': NEAR_RADIUS_M}}
         data = await self._request('POST', 'https://places.googleapis.com/v1/places:searchText', body=body,
             fields='places.id,places.displayName,places.formattedAddress,places.location,places.googleMapsUri,places.addressComponents,places.attributions')
         places = []
@@ -97,7 +110,10 @@ class GoogleMapsClient:
                            'address': item.get('formattedAddress', ''), 'location': loc,
                            'country_code': country, 'maps_url': item.get('googleMapsUri'),
                            'attributions': item.get('attributions', [])})
+        if anchor:
+            places = [place for place in places if place['place_id'] != anchor['place_id']]
         return {'ok': True, 'provider': 'Google Maps', 'kind': 'places', 'query': query,
+                'near': {'name': anchor['name'], 'place_id': anchor['place_id']} if anchor else None,
                 'queried_at': self.now().isoformat(), 'places': places,
                 'notice': '搜索相关性排序，不代表驾车距离最近。' if places else '没有找到匹配地点，请提供更明确的位置或名称。'}
 

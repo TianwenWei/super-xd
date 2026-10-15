@@ -147,61 +147,74 @@ async def test_tts_connects_early_but_chat_text_waits_for_routing_completion(aud
     assert not actor.speaking
 
 
-async def test_mixed_model_content_is_suppressed_but_dispatch_progress_speaks_immediately(audio_actor):
+async def test_model_preface_is_spoken_after_local_checks_and_success_stays_silent(audio_actor):
     gate = asyncio.Event()
     actor, control, audio, ark, tts = await audio_actor([
-        {'content': '空调已经调好了。', 'gate': gate,
+        {'content': '这就把主驾调到二十三度。', 'gate': gate,
          'tool_calls': [tool('set_temperature', {'zone': 'driver', 'temperature': 23})]}])
     old = copy.deepcopy(actor.vehicle)
     await submit(actor, '把空调温度设为23度')
     await asyncio.wait_for(ark.delta_sent.wait(), 1)
     await actor.queue.join()
-    assert tts.calls == [[]]
+    assert tts.calls == [[]]  # Nothing is spoken before the whole message passed checks.
     gate.set()
     command, _ = await until(control, 'vehicle.command')
     await actor.queue.join()
     await until(audio, 'pcm')
-    assert actor.vehicle == old and '正在' in ''.join(tts.calls[0])
+    assert actor.vehicle == old and tts.calls[0] == ['这就把主驾调到二十三度。']
     await actor.post({'type': 'vehicle.execute', 'command_id': command['command_id']})
     receipt, _ = await until(control, 'vehicle.result')
     done, _ = await until(control, 'stream.done')
-    assert receipt['result']['ok']
-    assert '23度' in tts.calls[0][0] and len(tts.calls[0]) == 1
-    assert '空调已经调好了。' not in ''.join(tts.calls[0])
-    assert done['metrics']['route'] == 'tool'
+    assert receipt['result']['ok'] and tts.calls[0] == ['这就把主驾调到二十三度。']
+    assert done['metrics']['route'] == 'tool' and done['metrics']['preface'] == '这就把主驾调到二十三度。'
 
 
-async def test_tool_timeout_speaks_failure_and_preserves_state(audio_actor, monkeypatch):
+async def test_without_a_preface_the_dispatch_template_still_speaks(audio_actor):
+    actor, control, audio, _, tts = await audio_actor([
+        {'tool_calls': [tool('set_temperature', {'zone': 'driver', 'temperature': 23})]}])
+    await submit(actor, '把空调温度设为23度')
+    await until(control, 'vehicle.command')
+    await until(audio, 'pcm')
+    assert '正在' in ''.join(tts.calls[0])
+
+
+async def test_tool_timeout_after_preface_reports_failure_and_preserves_state(audio_actor, monkeypatch):
     monkeypatch.setattr('backend.session.TOOL_TIMEOUT', .02)
     actor, control, audio, _, tts = await audio_actor([
-        {'content': '已完成。', 'tool_calls': [tool('set_volume', {'volume': 35})]}])
+        {'content': '这就把音量调到三十五。', 'tool_calls': [tool('set_volume', {'volume': 35})]}])
     old = copy.deepcopy(actor.vehicle)
     await submit(actor, '音量设为35%')
     await until(control, 'vehicle.command')
     await until(audio, 'pcm')
-    assert '正在' in ''.join(tts.calls[0])
     receipt, _ = await until(control, 'vehicle.result')
-    await until(control, 'stream.done')
+    done, _ = await until(control, 'stream.done')
     await until(audio, 'pcm')
     assert not receipt['result']['ok'] and actor.vehicle == old
-    assert '状态尚未确认' in ''.join(tts.calls[0]) and '已完成。' not in ''.join(tts.calls[0])
+    spoken = ''.join(tts.calls[0])
+    assert spoken.startswith('这就把音量调到三十五。') and '状态尚未确认' in spoken
+    assert '状态尚未确认' in done['text']
 
 
-async def test_delegate_ack_uses_registered_task_without_generated_preface(audio_actor):
-    goal = '查询巴黎天气，并按实际查询时间与官网信息核对当地降雨、温度和适合出发的时段，同时比较室内与室外活动方案并保留无法核实的地方，涉及预约的方案必须先确认预约成功才能推荐入场，不要订票或修改车辆。'
+async def test_delegate_preface_replaces_the_template_ack_once_registered(audio_actor):
+    goal = '查询巴黎天气，并比较室内与室外活动方案。'
     actor, control, audio, _, tts = await audio_actor([
-        {'content': '已经查到天气。', 'tool_calls': [tool('delegate_task', {'goal': goal})]}])
-    await submit(actor, '请查询巴黎今天的天气')
+        {'content': '我去查一下，有结果告诉你。', 'tool_calls': [tool('delegate_task', {'goal': goal})]}])
+    await submit(actor, '查一下巴黎天气，顺便看看室内室外活动')
     done, _ = await until(control, 'stream.done')
     await until(audio, 'pcm')
     tasks = actor.db.list_tasks(actor.id)
-    assert len(tasks) == 1 and tasks[0]['status'] == 'queued'
-    assert tasks[0]['goal'] == goal
-    assert done['metrics']['route'] == 'delegate'
-    assert '已经查到天气。' not in ''.join(tts.calls[0])
-    assert '查询巴黎天气' in ''.join(tts.calls[0])
-    assert '必须先确认预约成功才能推荐入场，不要订票或修改车辆' in ''.join(tts.calls[0])
-    assert '有结果告诉你' in ''.join(tts.calls[0])
+    assert len(tasks) == 1 and tasks[0]['goal'] == goal and done['metrics']['route'] == 'delegate'
+    assert tts.calls[0] == ['我去查一下，有结果告诉你。']
+
+
+async def test_rejected_group_never_speaks_its_preface(audio_actor):
+    actor, control, audio, ark, tts = await audio_actor([
+        {'content': '这就导航过去。', 'tool_calls': [tool('set_navigation_destination', {'destination': '虹桥机场'})]},
+        {'content': '你要去哪里？'}])
+    await submit(actor, '导航去机场')
+    done, _ = await until(control, 'stream.done')
+    assert '这就导航过去' not in ''.join(sum(tts.calls, [])) and '这就导航过去' not in done['text']
+    assert done['metrics']['preface'] is None
 
 
 async def test_new_turn_cancels_old_stream_and_rejects_late_audio_and_old_playback(audio_actor):

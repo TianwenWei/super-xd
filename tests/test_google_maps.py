@@ -153,7 +153,7 @@ async def test_poi_query_then_selection_uses_real_identity_and_receipt(actor_fac
     await actor.post({'type': 'vehicle.execute', 'command_id': command['command_id']})
     done, _ = await wait_for(q, 'stream.done')
     assert actor.vehicle['navigation']['destination_place'] == POI
-    assert actor.vehicle['navigation']['destination'] == POI['name'] and '模拟导航' in done['text']
+    assert actor.vehicle['navigation']['destination'] == POI['name'] and done['text'] == f"导航设好了，去{POI['name']}。"
 
 
 async def test_fabricated_poi_id_never_dispatches(actor_factory):
@@ -185,7 +185,7 @@ async def test_spoken_place_ordinals_match_cards_even_if_model_reorders(actor_fa
     maps.search_places = search
     await actor.post({'type': 'input', 'text': '找巴黎咖啡馆'})
     done, _ = await wait_for(q, 'stream.done')
-    assert '1，甲店、2，乙店' in done['text']
+    assert '第一个是甲店，第二个是乙店' in done['text']
     assert actor.current.messages[-1]['content'] == done['text']
     assert [p['place_id'] for p in actor.recent_places] == ['a', 'b']
 
@@ -230,7 +230,7 @@ async def test_search_area_must_come_from_user_words(actor_factory):
     assert done['text'] == '你现在在哪个城市或者哪条路附近？'
 
 
-async def test_search_area_is_part_of_the_query_sent_to_places(actor_factory):
+async def test_search_area_biases_the_places_query(actor_factory):
     actor, q, _, maps = await actor_factory([
         {'tool_calls': [call('search_places', {'query': '机场', 'area': '上海人民广场'})]}, {'content': '找到了。'}])
     seen = []
@@ -240,4 +240,4 @@ async def test_search_area_is_part_of_the_query_sent_to_places(actor_factory):
     maps.search_places = search
     await actor.post({'type': 'input', 'text': '我在上海人民广场，找机场'})
     await wait_for(q, 'stream.done')
-    assert seen == [{'query': '上海人民广场 机场'}]
+    assert seen == [{'query': '机场', 'near': '上海人民广场'}]

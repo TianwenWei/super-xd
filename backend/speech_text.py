@@ -7,7 +7,7 @@ import json
 
 from markdown_it import MarkdownIt
 
-from backend.textutil import collapse_ws, remove_urls
+from backend.textutil import collapse_ws, halfwidth_alnum, remove_urls
 
 _MARKDOWN = MarkdownIt('commonmark').enable('table').enable('strikethrough')
 _LABELS = {'结论', '调研结果', '查询结果', '详细报告', '来源', '参考来源', '回答', '建议', '核查结果', '结果'}
@@ -210,7 +210,7 @@ def speech_text(text: str) -> str:
     and units cannot leak through an incremental boundary. No semantic length
     cutoff is applied here; the model/receipt/result contract controls length.
     """
-    text = _inline_json(str(text or '').strip())
+    text = _inline_json(halfwidth_alnum(str(text or '')).strip())
     lines = _blocks(text)
     output, had_url = [], False
     for line in lines:

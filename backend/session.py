@@ -25,7 +25,7 @@ from backend.google_maps import GoogleMapsClient, MapsError
 from backend.vehicle_simulator import VehicleSimulator
 from backend.vehicle_feedback import dispatch_feedback
 from backend.maps_tools import MAPS_TOOLS, MAPS_BY_NAME, READ_TOOLS
-from backend.textutil import is_domain, is_identifier, is_snake_code
+from backend.textutil import halfwidth_alnum, is_domain, is_identifier, is_snake_code
 from backend.db import TERMINAL as TERMINAL_TASK, step_summary, task_card
 
 
@@ -79,6 +79,21 @@ AREA_NOT_GROUNDED = {
     'ok': False, 'executed': False, 'retry_model': True, 'code': 'area_not_from_user',
     'reason': '搜索范围必须逐字取自用户说过的城市、地址或地标；没有定位能力，未搜索。请直接问用户现在在哪个城市或地址。',
     'spoken_reason': '你现在在哪个城市或者哪条路附近？'}
+
+
+def count_words(n):
+    return '两' if n == 2 else spoken_number(n)
+
+
+def places_sentence(names):
+    """Spoken summary of search results; ordinals match the result card."""
+    names = [halfwidth_alnum(name) for name in names]  # Full-width letters read badly.
+    if len(names) == 1:
+        return f'找到一个地方：{names[0]}。要去这里吗？'
+    ordinals = '一二三'
+    named = '，'.join(f'第{ordinals[i]}个是{name}' for i, name in enumerate(names[:3]))
+    more = f'，还有另外{count_words(len(names) - 3)}个' if len(names) > 3 else ''
+    return f'找到{count_words(len(names))}个地方，{named}{more}。要去哪一个？'
 
 
 def effective_text(text):
@@ -174,7 +189,7 @@ def validation_feedback(exc, name):
         if exc.validator in {'minimum', 'maximum'} and 'minimum' in spec and 'maximum' in spec:
             label = {'volume': '音量', 'temperature': '温度', 'level': '档位', 'position': '车窗开度'}.get(field_name, '这个数值')
             unit = '度' if field_name == 'temperature' else ''
-            return f'{label}只能调到{spoken_number(spec["minimum"])}到{spoken_number(spec["maximum"])}{unit}，这次没有调整。'
+            return f'{label}只能在{spoken_number(spec["minimum"])}到{spoken_number(spec["maximum"])}{unit}之间。'
         return '这次的执行指令格式出了问题，没有调整。可以再试一次。'
     return spoken_reason(f'参数校验失败：{str(exc).splitlines()[0][:180]}')
 
@@ -222,6 +237,7 @@ class Turn:
     played_ms: float = 0
     played_text: str = ''
     dispatch_announced: bool = False
+    preface: str = ''  # What the model said it is doing (progressive/future tense), already spoken
     chat_streaming: bool = False
     routing: bool = False
     sentence_buffer: str = ''
@@ -660,9 +676,9 @@ class SessionActor:
                        'partial': e.get('partial'), 'observed_at': e.get('observed_at', utcnow())},
                        turn, call_id=e.get('call_id'), status='failed' if self.is_current(turn) else 'stale')
             if self.is_current(turn):
-                verified = self.receipt_feedback(turn, mutations_only=True)
+                verified = self.receipt_feedback(turn, mutations_only=True, failures_only=bool(turn.preface))
                 if verified:
-                    turn.output = ''
+                    turn.output = turn.preface
                     self.append_text(turn, verified, speak=not turn.dispatch_announced, source='verified_partial_receipts')
                 self.append_text(turn, render(turn.persona, 'error', '后续处理连接出了问题，还有请求未确认。请稍后再试。' if verified else '这次连接出了问题，暂时没能回答。请稍后再试。'),
                                  source='error_template', original_text=e['error'])
@@ -889,14 +905,25 @@ class SessionActor:
                 if places_result.get('ok') and places:
                     # Ordinals must mean the same thing in speech, the result
                     # card and recent_places. The raw model text stays in trace.
-                    ordered = '、'.join(f'{i}，{p["name"]}' for i, p in enumerate(places, 1))
-                    text = f'找到{len(places)}个地点，按结果卡顺序是：{ordered}。可以告诉我名称或序号。'
+                    text = places_sentence([p['name'] for p in places])
                     turn.output = turn.model_text_pending = ''
                     self.append_text(turn, text, source='verified_place_results')
                     turn.metrics['output_source'] = 'verified_place_results'
                     message['content'] = text
                     self.finish(turn)
                     return
+            if turn.preface:
+                # The user already heard what is being done; add only what went
+                # wrong, then the model's answer (e.g. facts it just read).
+                turn.output = turn.preface
+                failures = self.receipt_feedback(turn, mutations_only=True, failures_only=True)
+                if failures:
+                    self.append_text(turn, failures, source='receipt_failures')
+                if original.strip():
+                    self.append_text(turn, original, source='model_content', original_text=original)
+                turn.model_text_pending = ''
+                self.finish(turn, error=self.vehicle_plan_error(turn))
+                return
             handled = self.handled_vehicle_settings(turn)
             verified = self.receipt_feedback(turn, mutations_only=True) if turn.has_reads or handled or turn.vehicle_plans else ''
             if verified:
@@ -913,7 +940,9 @@ class SessionActor:
             self.finish(turn, error=self.vehicle_plan_error(turn))
             return
         turn.model_text_pending = ''
-        turn.output = ''  # Tool-call prefaces are retained in raw model trace, not final feedback.
+        # Unchecked text from a tool-calling message is never shown; speak_preface
+        # adds it back once the group has passed local checks.
+        turn.output = turn.preface
         turn.group, turn.group_results, turn.needs_model, turn.feedback = calls, {}, False, []
         turn.route = 'tool'
         names = [call.get('function', {}).get('name') for call in calls]
@@ -939,6 +968,7 @@ class SessionActor:
                 self.tool_result(turn, call, {'ok': False, 'executed': False,
                     'retry_model': True, **group_error})
             return
+        checked = []
         for call in calls:
             if call.get('function', {}).get('name') in TOOLS:
                 self.emit('vehicle.function_call', turn_id=turn.id, call=call)
@@ -946,60 +976,96 @@ class SessionActor:
             self.trace('tool.started', {'name': call.get('function', {}).get('name'),
                        'arguments': call.get('function', {}).get('arguments'), 'model_call_id': model_call_id},
                        turn, call_id=call['id'], status='running')
+            checked.append((call, *self.precheck(turn, call)))
+        # The model's own sentence is spoken only once every call passed local
+        # checks, so it never announces something that is then sent back for
+        # a retry. Results still come from receipts: success stays silent,
+        # failures are reported (invariant 4).
+        preface = (message.get('content') or '').strip()
+        if preface and not any(error for _, _, _, error in checked):
+            self.speak_preface(turn, preface)
+        for call, name, arguments, error in checked:
+            if error is not None:
+                if error.get('retry_model'):
+                    turn.needs_model = True
+                self.tool_result(turn, call, error)
+                continue
             try:
-                name = call['function']['name']
-                arguments = json.loads(call['function'].get('arguments', '{}'))
-                if name in TOOLS:
-                    if name not in HOT_TOOL_NAMES:
-                        raise ValueError('非热车控必须delegate_vehicle_control')
-                    validate(arguments, TOOLS[name].parameters)
-                    if name == 'set_navigation_destination' and not destination_grounded(
-                            arguments['destination'], self.destination_sources(turn)):
-                        turn.needs_model = True
-                        self.tool_result(turn, call, dict(DESTINATION_NOT_GROUNDED))
-                        continue
-                    if TOOLS[name].state_mapping.get('operation') == 'read':
-                        turn.has_reads = True
-                        turn.needs_model = True  # Reading must answer the returned facts, not a generic success template.
-                    self.send_command(turn, call, name, arguments)
-                elif name in MAPS_BY_NAME:
-                    validate(arguments, MAPS_BY_NAME[name]['function']['parameters'])
-                    if name == 'search_places':
-                        # Provenance of the search area, like destinations: no GPS,
-                        # so "nearest X" needs a place the user actually said.
-                        area = arguments.pop('area')
-                        if not destination_grounded(area, self.destination_sources(turn)):
-                            turn.needs_model = True
-                            self.tool_result(turn, call, dict(AREA_NOT_GROUNDED))
-                            continue
-                        # Places text search has no GPS bias; the area must be in the query
-                        # or results fall back to the server's IP location.
-                        if ''.join(area.split()) not in ''.join(arguments['query'].split()):
-                            arguments['query'] = f"{area} {arguments['query']}"
-                    if name in READ_TOOLS:
-                        turn.has_reads = turn.needs_model = True
-                        turn.route = 'lookup'
-                        self.launch_lookup(turn, call, name, arguments)
-                    else:
-                        self.start_poi_navigation(turn, call, arguments['place_id'])
-                else:
-                    if name not in CONTROL_BY_NAME:
-                        raise ValueError('未知工具')
-                    validate(arguments, CONTROL_BY_NAME[name]['function']['parameters'])
-                    if name == 'delegate_vehicle_control':
-                        self.launch_vehicle_plan(turn, call, arguments)
-                    else:
-                        if name == 'delegate_task':
-                            turn.route = 'delegate'
-                        # Writes complete off-loop and come back as _task_write.
-                        result = self.task_tool(name, arguments, turn=turn, call=call)
-                        if result is not None:
-                            if result.get('retry_model'):
-                                turn.needs_model = True
-                            self.tool_result(turn, call, result)
+                self.dispatch_call(turn, call, name, arguments)
             except (ValueError, KeyError, ValidationError) as exc:
                 self.tool_result(turn, call, {'ok': False, 'reason': f'参数校验失败：{str(exc).splitlines()[0][:180]}',
-                                             'spoken_reason': validation_feedback(exc, call.get('function', {}).get('name'))})
+                                             'spoken_reason': validation_feedback(exc, name)})
+
+    def precheck(self, turn, call):
+        """Validate one call without side effects: (name, arguments, error_or_None)."""
+        name = call.get('function', {}).get('name')
+        try:
+            arguments = json.loads(call['function'].get('arguments') or '{}')
+            if name in TOOLS:
+                if name not in HOT_TOOL_NAMES:
+                    raise ValueError('非热车控必须delegate_vehicle_control')
+                validate(arguments, TOOLS[name].parameters)
+                if name == 'set_navigation_destination' and not destination_grounded(
+                        arguments['destination'], self.destination_sources(turn)):
+                    return name, arguments, dict(DESTINATION_NOT_GROUNDED)
+            elif name in MAPS_BY_NAME:
+                validate(arguments, MAPS_BY_NAME[name]['function']['parameters'])
+                if name == 'search_places':
+                    # Provenance of the search area, like destinations: no GPS,
+                    # so "nearest X" needs a place the user actually said.
+                    area = arguments.pop('area')
+                    if not destination_grounded(area, self.destination_sources(turn)):
+                        return name, arguments, dict(AREA_NOT_GROUNDED)
+                    # Places text search has no GPS bias; without the area, results
+                    # fall back to the server's IP location.
+                    arguments['near'] = area
+                elif name == 'start_poi_navigation':
+                    error = self.poi_error(turn, arguments['place_id'])
+                    if error:
+                        return name, arguments, error
+            else:
+                if name not in CONTROL_BY_NAME:
+                    raise ValueError('未知工具')
+                validate(arguments, CONTROL_BY_NAME[name]['function']['parameters'])
+                error = self.task_precheck(name, arguments)
+                if error:
+                    return name, arguments, error
+            return name, arguments, None
+        except (ValueError, KeyError, TypeError, ValidationError) as exc:
+            return name, None, {'ok': False, 'reason': f'参数校验失败：{str(exc).splitlines()[0][:180]}',
+                                'spoken_reason': validation_feedback(exc, name)}
+
+    def dispatch_call(self, turn, call, name, arguments):
+        if name in TOOLS:
+            if TOOLS[name].state_mapping.get('operation') == 'read':
+                turn.has_reads = True
+                turn.needs_model = True  # Reading must answer the returned facts, not a generic success template.
+            self.send_command(turn, call, name, arguments)
+        elif name in READ_TOOLS:
+            turn.has_reads = turn.needs_model = True
+            turn.route = 'lookup'
+            self.launch_lookup(turn, call, name, arguments)
+        elif name == 'start_poi_navigation':
+            self.start_poi_navigation(turn, call, arguments['place_id'])
+        elif name == 'delegate_vehicle_control':
+            self.launch_vehicle_plan(turn, call, arguments)
+        else:
+            if name == 'delegate_task':
+                turn.route = 'delegate'
+            # Writes complete off-loop and come back as _task_write.
+            result = self.task_tool(name, arguments, turn=turn, call=call)
+            if result is not None:
+                if result.get('retry_model'):
+                    turn.needs_model = True
+                self.tool_result(turn, call, result)
+
+    def speak_preface(self, turn, text):
+        turn.dispatch_announced = True  # Replaces the "正在为你……" template.
+        turn.output = turn.preface
+        turn.preface += speech_text(text)
+        turn.metrics.setdefault('preface_ms', (time.perf_counter() - turn.started) * 1000)
+        self.append_text(turn, text, source='model_preface', original_text=text)
+        self.trace('speech.preface', {'text': text, 'spoken': speech_text(text)}, turn, status='spoken')
 
     def destination_sources(self, turn):
         """Texts a destination may be copied from: this request, recent dialogue, found places."""
@@ -1044,23 +1110,26 @@ class SessionActor:
             self.emit('lookup.result', turn_id=turn.id, **record)
         self.tool_result(turn, call, result)
 
-    def start_poi_navigation(self, turn, call, place_id):
-        place = self.places.get(place_id)
-        if not place:
-            turn.needs_model = True
-            self.tool_result(turn, call, {'ok': False, 'executed': False, 'retry_model': True,
-                'code': 'unknown_place', 'reason': '该地点不在本会话真实查询结果中，请先search_places或重新选择。'})
-            return
+    def poi_error(self, turn, place_id):
+        if place_id not in self.places:
+            return {'ok': False, 'executed': False, 'retry_model': True,
+                    'code': 'unknown_place', 'reason': '该地点不在本会话真实查询结果中，请先search_places或重新选择。'}
         if self.place_turns.get(place_id) == turn.id:
             # The user has not heard this result yet, so it is not their choice.
             # Live evals showed same-turn search→navigate picking a parking exit
             # for a named terminal and an arbitrary airport for "nearest airport".
+            return {'ok': False, 'executed': False, 'retry_model': True, 'code': 'place_not_confirmed',
+                    'reason': '搜索结果还没让用户确认，未导航。用户说的是明确地名时直接用set_navigation_destination原样填写；'
+                              '需要从结果中挑选时先把候选告诉用户，等用户选定后再导航。'}
+        return None
+
+    def start_poi_navigation(self, turn, call, place_id):
+        error = self.poi_error(turn, place_id)
+        if error:
             turn.needs_model = True
-            self.tool_result(turn, call, {'ok': False, 'executed': False, 'retry_model': True,
-                'code': 'place_not_confirmed',
-                'reason': '搜索结果还没让用户确认，未导航。用户说的是明确地名时直接用set_navigation_destination原样填写；'
-                          '需要从结果中挑选时先把候选告诉用户，等用户选定后再导航。'})
+            self.tool_result(turn, call, error)
             return
+        place = self.places[place_id]
         turn.poi_commands[call['id']] = copy.deepcopy(place)
         # Once a search has supplied the selected destination, the vehicle
         # receipt is the final answer. Retain continuation for other read work.
@@ -1353,11 +1422,11 @@ class SessionActor:
             turn.needs_model = True
         self.tool_result(turn, execution['call'], result)
 
-    def vehicle_plan_feedback(self, turn, result, *, mutations_only=False):
+    def vehicle_plan_feedback(self, turn, result, *, mutations_only=False, failures_only=False):
         feedback = []
         for item in result.get('action_receipts', []):
             name, body = item['name'], item['result']
-            if TOOLS[name].state_mapping.get('operation') == 'read' and body.get('ok'):
+            if (TOOLS[name].state_mapping.get('operation') == 'read' or failures_only) and body.get('ok'):
                 continue
             if body.get('ok'):
                 feedback.append(render(turn.persona, 'success', receipt_detail(name, item['arguments'], body)))
@@ -1365,8 +1434,8 @@ class SessionActor:
                 kind = 'result' if body.get('reason_code') == 'receipt_timeout' else 'refused'
                 feedback.append(render(turn.persona, kind, body.get('spoken_reason') or spoken_reason(body.get('reason', '动作未执行'))))
         if not mutations_only:
-            if any(item.get('status') == 'kept' for item in result.get('intents', [])):
-                feedback.append('要求保持的设置未调整。')
+            if not failures_only and any(item.get('status') == 'kept' for item in result.get('intents', [])):
+                feedback.append('要求保持的设置没动。')
             feedback.extend(item['reason'] for item in result.get('intents', [])
                             if item.get('status') == 'failed' and item.get('keep_paths') and item.get('reason'))
             if not result.get('action_receipts') and not result.get('ok'):
@@ -1419,8 +1488,8 @@ class SessionActor:
                 'captured_at': utcnow(), 'timezone': self.vehicle['_meta']['timezone'],
                 'notice': TASK_SNAPSHOT_NOTICE}
 
-    def task_tool(self, name, args, *, turn=None, call=None):
-        """Return a result for reads; for writes launch them and return None."""
+    def task_precheck(self, name, args):
+        """Side-effect-free rejections for task tools, run before anything is spoken."""
         if name == 'delegate_task':
             # A typed product profile, not weather detection or a router.
             # Reject the original incompatible parameters before any task
@@ -1432,6 +1501,22 @@ class SessionActor:
                             'query_domain': 'weather', 'requested_query_mode': args.get('query_mode'),
                             'supported_query_mode': 'quick'},
                         'reason': '本原型weather入口只支持显式query_mode=quick，包括官网天气查询。当前参数不符合入口配置，尚未登记任务；请由同一Talker重新核对并选择参数，不能改走非天气领域冒充。'}
+            return None
+        if name == 'manage_task':
+            if 'task_ids' in args:
+                # Batch get has no side effects, so its own validation runs here.
+                result = self.task_tool(name, args) if args.get('action') == 'get' else \
+                    {'ok': False, 'reason': 'task_ids只用于批量get，不能同时指定task_id。'}
+                return None if result.get('ok') else result
+            return self.resolve_task(args.get('task_id'))[1]
+        return None
+
+    def task_tool(self, name, args, *, turn=None, call=None):
+        """Return a result for reads; for writes launch them and return None."""
+        if name == 'delegate_task':
+            error = self.task_precheck(name, args)
+            if error:
+                return error
             origin = self.current.id if self.current else None
             context = self.task_context(origin, args.get('read_details') is True,
                                         args.get('query_mode', 'research'), args.get('spoken_goal'),
@@ -1581,7 +1666,7 @@ class SessionActor:
         if result.get('ok') and poi:
             self.vehicle['navigation']['destination_place'] = copy.deepcopy(poi)
             result['state'] = copy.deepcopy(self.vehicle)
-            result.update(feedback_kind='result', detail=f'已将模拟导航目的地设为{poi["name"]}，未计算实际路线。',
+            result.update(feedback_kind='result', detail=f'导航设好了，去{halfwidth_alnum(poi["name"])}。',
                           place=copy.deepcopy(poi))
         latency = (time.perf_counter() - turn.started) * 1000
         self.completed_commands[command_id] = result
@@ -1664,6 +1749,14 @@ class SessionActor:
             return
         # The outer delegated call closes only after its per-intent ledger is
         # terminal; action-count floors never decide a Pro plan's completion.
+        if turn.preface:
+            # Success was announced in progressive tense; receipts add failures only.
+            text = self.receipt_feedback(turn, failures_only=True)
+            if text:
+                self.append_text(turn, text, source='receipt_failures')
+                turn.messages.append({'role': 'assistant', 'content': text})
+            self.finish(turn, error=self.vehicle_plan_error(turn))
+            return
         text = self.receipt_feedback(turn) or '工具执行结束。'
         if turn.dispatch_announced:
             turn.output = ''
@@ -1687,7 +1780,10 @@ class SessionActor:
         if failures:
             self.feed_audio(turn, '抱歉，' + '；'.join(dict.fromkeys(failures)), 'vehicle_failure')
 
-    def receipt_feedback(self, turn, mutations_only=False):
+    def receipt_feedback(self, turn, mutations_only=False, failures_only=False):
+        """Spoken results from receipts. failures_only drops plain success
+        confirmations (already announced) but keeps refusals, clarifications
+        and information the user asked for, such as task progress."""
         feedback = []
         all_calls = [call for message in turn.messages for call in message.get('tool_calls', [])
                      if call['id'] in turn.tool_results and
@@ -1701,7 +1797,10 @@ class SessionActor:
         for item in all_calls:
             body = turn.tool_results[item['id']]
             if item['function']['name'] == 'delegate_vehicle_control' and body.get('source') == 'vehicle_plan':
-                feedback.extend(self.vehicle_plan_feedback(turn, body, mutations_only=mutations_only))
+                feedback.extend(self.vehicle_plan_feedback(turn, body, mutations_only=mutations_only,
+                                                           failures_only=failures_only))
+                continue
+            if body.get('ok', True) and failures_only and body.get('feedback_kind') != 'progress':
                 continue
             if body.get('ok', True):
                 if body.get('feedback_kind'):
@@ -1727,7 +1826,8 @@ class SessionActor:
             return
         turn.finished, self.generating = True, False
         metrics = {'first_effective_ms': turn.first_effective_ms, 'total_ms': (time.perf_counter() - turn.started) * 1000,
-                   'model_calls': turn.model_calls, 'route': turn.route, 'commands': turn.commands, 'error': error}
+                   'model_calls': turn.model_calls, 'route': turn.route, 'commands': turn.commands, 'error': error,
+                   'preface': turn.preface or None}
         turn.metrics.update(metrics)
         self.close_audio_input(turn)
         self.trace('turn.completed', {'output': turn.output, 'metrics': metrics,

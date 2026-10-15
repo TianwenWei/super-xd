@@ -49,3 +49,7 @@ def test_legacy_short_report_keeps_later_booking_condition_and_alternative():
 def test_reference_words_in_actual_statements_are_not_source_labels():
     original = '沿途风景可供参考。路线只作为参考。这项建议仅供参考。'
     assert speech_text(original) == original
+
+
+def test_full_width_letters_become_ascii_but_cjk_punctuation_stays():
+    assert speech_text('好，导航去ｉ１７ ＣＡＦＥ？') == '好，导航去i17 CAFE？'

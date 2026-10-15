@@ -15,6 +15,16 @@ SECRET_ENV = ('ARK_API_KEY', 'TAVILY_API_KEY', 'OPENAI_API_KEY', 'GOOGLE_MAPS_AP
 URL_TERMINATORS = frozenset(' \t\r\n<>"\'，。！？；）)]】》」』')
 
 
+def halfwidth_alnum(text: str) -> str:
+    """Full-width letters/digits (ＣＡＦＥ１７) to ASCII; CJK punctuation is kept.
+
+    unicodedata NFKC would also turn ，！？： into ASCII, which the speech
+    path relies on for sentence boundaries.
+    """
+    return ''.join(chr(ord(c) - 0xFEE0) if ('０' <= c <= '９' or 'Ａ' <= c <= 'Ｚ' or 'ａ' <= c <= 'ｚ')
+                   else ' ' if c == '\u3000' else c for c in text)
+
+
 def collapse_ws(text) -> str:
     return ' '.join(str(text or '').split())
 

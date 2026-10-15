@@ -165,7 +165,7 @@ async def _drive_turn(actor, outgoing, text):
             talker.append({'name': call['function']['name'], 'arguments': arguments})
     return {'commands': commands, 'talker_calls': talker, 'lookups': lookups, 'vehicle': copy.deepcopy(actor.vehicle),
             'vehicle_before': before, 'tasks_created': len(cards), 'route': done['metrics'].get('route'),
-            'error': done['metrics'].get('error'), 'text': done['text'],
+            'error': done['metrics'].get('error'), 'text': done['text'], 'preface': done['metrics'].get('preface'),
             'model_calls': done['metrics'].get('model_calls'), 'total_ms': done['metrics'].get('total_ms'),
             # The first tool-enabled request is the routing decision invariant 6 is about.
             'decision_input': next((without_clock(r['messages']) for r in getattr(actor.ark, 'requests', [])[request_index:]

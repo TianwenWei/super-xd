@@ -241,7 +241,7 @@ async def test_invalid_arguments_do_not_change_state(make_actor):
     assert not any(e['type']=='vehicle.command' for e in events)
     assert [e['call'] for e in events if e['type'] == 'vehicle.function_call'] == [call('set_volume', {'volume': 999})]
     assert actor.snapshot()['turns'][0]['vehicle_calls'] == [call('set_volume', {'volume': 999})]
-    assert '零到一百' in done['text'] and '这次没有调整' in done['text']
+    assert '零到一百之间' in done['text'] and '没能执行' in done['text']
     assert '没确认清楚' not in done['text']
 
 
