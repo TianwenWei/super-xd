@@ -14,6 +14,11 @@ JSON_FIELDS = {'constraints', 'result', 'sources', 'transcript', 'context', 'che
 TERMINAL = {'completed', 'failed', 'cancelled'}
 
 
+def task_card(task):
+    """Task fields the actor and UI use; transcripts/checkpoints stay in the row."""
+    return {key: value for key, value in task.items() if key not in {'transcript', 'checkpoint'}} if task else task
+
+
 def step_summary(step):
     """Generic per-step progress text; the actor recognises it by equality, not parsing."""
     return f'正在推理，第 {step} 步。'
@@ -125,7 +130,9 @@ class Database:
         return self.decode(con.execute('SELECT * FROM tasks WHERE id=?', (task_id,)).fetchone())
 
     def _event(self, con, task, kind, payload=None):
-        payload = payload if payload is not None else {'task': task}
+        # Events carry the card view: repeating the whole transcript on every
+        # progress step made the events/trace tables grow quadratically.
+        payload = payload if payload is not None else {'task': task_card(task)}
         cur = con.execute('INSERT INTO events(task_id,session_id,revision,kind,payload,created_at) VALUES(?,?,?,?,?,?)',
                           (task['id'], task['session_id'], task['revision'], kind,
                            json.dumps(payload, ensure_ascii=False), utcnow()))

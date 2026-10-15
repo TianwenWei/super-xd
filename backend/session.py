@@ -25,7 +25,7 @@ from backend.vehicle_simulator import VehicleSimulator
 from backend.vehicle_feedback import dispatch_feedback
 from backend.maps_tools import MAPS_TOOLS, MAPS_BY_NAME, READ_TOOLS
 from backend.textutil import is_domain, is_identifier, is_snake_code
-from backend.db import step_summary
+from backend.db import TERMINAL as TERMINAL_TASK, step_summary, task_card
 
 
 def function(name, description, properties=None, required=None):
@@ -252,6 +252,9 @@ class SessionActor:
         self.event_id = 0
         self.announced_keys = set()
         self.announcements = {}  # task id -> newest revision terminal/clarification snapshot
+        # Read-side mirror of this session's tasks, fed by the event poller and
+        # by this actor's own writes, so handle() never blocks on SQLite.
+        self.tasks = {}
         self.background = set()
         self.trace_queue = asyncio.Queue()
         self.trace_error = None
@@ -389,7 +392,7 @@ class SessionActor:
 
     def snapshot(self):
         result = SessionSnapshot(session_id=self.id, persona=self.persona, persona_version=self.persona_version,
-                                 vehicle=self.vehicle, tasks=self.db.list_tasks(self.id), history=self.history()).model_dump()
+                                 vehicle=self.vehicle, tasks=self.task_list(), history=self.history()).model_dump()
         result['turns'] = [{'turn_id': turn.id, 'text': turn.text, 'output': turn.output,
                             'finished': turn.finished, 'proactive': turn.proactive, 'task_id': turn.task_id,
                             'state': 'interrupted' if turn.interrupted else 'done' if turn.finished else 'streaming',
@@ -413,12 +416,29 @@ class SessionActor:
         return outgoing
 
     async def poll_events(self):
+        tasks = await asyncio.to_thread(self.db.list_tasks, self.id)
+        await self.post({'type': '_tasks_loaded', 'tasks': [task_card(task) for task in tasks]})
         cursor = 0
         while True:
-            for event in self.db.events_after(cursor, self.id):
+            for event in await asyncio.to_thread(self.db.events_after, cursor, self.id):
                 cursor = event['event_id']
+                if not isinstance(event['payload'].get('task'), dict):
+                    event['payload']['task'] = task_card(await asyncio.to_thread(self.db.get_task, event['task_id']))
                 await self.post({'type': '_task_event', 'event': event})
             await asyncio.sleep(.15)
+
+    def task_list(self):
+        return sorted(self.tasks.values(), key=lambda task: (task['created_at'], task['id']))
+
+    def remember_task(self, task):
+        """Keep the newest revision. A terminal status is final for its revision,
+        mirroring db.save_task, so a replayed event cannot revive a task."""
+        known = self.tasks.get(task['id']) if task else None
+        if not task or (known and (task['revision'] < known['revision'] or (
+                task['revision'] == known['revision'] and known['status'] in TERMINAL_TASK
+                and task['status'] != known['status']))):
+            return
+        self.tasks[task['id']] = task_card(task)
 
     async def run(self):
         while True:
@@ -664,6 +684,11 @@ class SessionActor:
             self.command_timeout(e['command_id'])
         elif kind == '_task_event':
             self.task_event(e['event'])
+        elif kind == '_tasks_loaded':
+            for task in e['tasks']:
+                self.remember_task(task)
+        elif kind == '_task_write':
+            self.task_write_done(e)
         elif kind.startswith('task.'):
             self.explicit_task(kind[5:], e)
         else:
@@ -713,7 +738,7 @@ class SessionActor:
     def messages_for(self, turn):
         # Completed results remain attributable alongside unfinished tasks.
         # Reuse the prompt-copy helper; full reports/raw evidence stay in DB.
-        tasks = compact_tool_result({'tasks': self.db.list_tasks(self.id)[-8:]}, 'manage_task')['tasks']
+        tasks = compact_tool_result({'tasks': self.task_list()[-8:]}, 'manage_task')['tasks']
         # Actual read-only state is data, not a cold tool schema. Cold schemas
         # belong exclusively to the dedicated vehicle planner.
         vehicle = {skill_id: {key: copy.deepcopy(value) for key, value in values.items() if key != 'memories'}
@@ -936,12 +961,14 @@ class SessionActor:
                     if name == 'delegate_vehicle_control':
                         self.launch_vehicle_plan(turn, call, arguments)
                     else:
-                        result = self.task_tool(name, arguments)
-                        if result.get('retry_model'):
-                            turn.needs_model = True
                         if name == 'delegate_task':
                             turn.route = 'delegate'
-                        self.tool_result(turn, call, result)
+                        # Writes complete off-loop and come back as _task_write.
+                        result = self.task_tool(name, arguments, turn=turn, call=call)
+                        if result is not None:
+                            if result.get('retry_model'):
+                                turn.needs_model = True
+                            self.tool_result(turn, call, result)
             except (ValueError, KeyError, ValidationError) as exc:
                 self.tool_result(turn, call, {'ok': False, 'reason': f'参数校验失败：{str(exc).splitlines()[0][:180]}',
                                              'spoken_reason': validation_feedback(exc, call.get('function', {}).get('name'))})
@@ -1322,7 +1349,7 @@ class SessionActor:
 
 
     def resolve_task(self, task_id=None):
-        tasks = self.db.list_tasks(self.id)
+        tasks = self.task_list()
         if not tasks:
             return None, {'ok': False, 'code': 'no_task', 'retry_model': True, 'executed': False,
                           'reason': '本会话尚无后台任务，不能manage_task。请根据本轮原句重新选择直接回答或实际可用功能；车控缺功能时delegate_vehicle_control，不要创建无关后台任务。'}
@@ -1348,12 +1375,13 @@ class SessionActor:
                 'query_domain': query_domain,
                 'required_source_domains': [d.lower() for d in required_source_domains if is_domain(d)],
                 'read_details': read_details,
-                'active_tasks': [{k:t[k] for k in ('id','goal','status','summary')} for t in self.db.list_tasks(self.id)
+                'active_tasks': [{k:t[k] for k in ('id','goal','status','summary')} for t in self.task_list()
                                  if t['status'] not in {'completed','failed','cancelled'}],
                 'captured_at': utcnow(), 'timezone': self.vehicle['_meta']['timezone'],
                 'notice': TASK_SNAPSHOT_NOTICE}
 
-    def task_tool(self, name, args):
+    def task_tool(self, name, args, *, turn=None, call=None):
+        """Return a result for reads; for writes launch them and return None."""
         if name == 'delegate_task':
             # A typed product profile, not weather detection or a router.
             # Reject the original incompatible parameters before any task
@@ -1365,15 +1393,15 @@ class SessionActor:
                             'query_domain': 'weather', 'requested_query_mode': args.get('query_mode'),
                             'supported_query_mode': 'quick'},
                         'reason': '本原型weather入口只支持显式query_mode=quick，包括官网天气查询。当前参数不符合入口配置，尚未登记任务；请由同一Talker重新核对并选择参数，不能改走非天气领域冒充。'}
-            task = self.db.create_task(self.id, args['goal'],
-                                       context=self.task_context(self.current.id if self.current else None,
-                                                                 args.get('read_details') is True,
-                                                                 args.get('query_mode', 'research'), args.get('spoken_goal'),
-                                                                 args.get('query_domain', 'general'),
-                                                                 args.get('required_source_domains', ())))
-            self.emit('ui.card', task=task, origin_turn_id=self.current.id if self.current else None)
-            goal = speech_text(args.get('spoken_goal') or task['goal']).rstrip('。')
-            return {'ok': True, 'task': task, 'feedback_kind': 'delegated', 'detail': goal}
+            origin = self.current.id if self.current else None
+            context = self.task_context(origin, args.get('read_details') is True,
+                                        args.get('query_mode', 'research'), args.get('spoken_goal'),
+                                        args.get('query_domain', 'general'),
+                                        args.get('required_source_domains', ()))
+            goal = speech_text(args.get('spoken_goal') or args['goal']).rstrip('。')
+            self.launch_task_write(self.db.create_task, (self.id, args['goal'], context), turn=turn, call=call,
+                                   meta={'kind': 'delegated', 'origin_turn_id': origin, 'detail': goal})
+            return None
         if 'task_ids' in args:
             if args.get('action') != 'get' or args.get('task_id') is not None:
                 return {'ok': False, 'reason': 'task_ids只用于批量get，不能同时指定task_id。'}
@@ -1406,22 +1434,47 @@ class SessionActor:
                     detail = '还在分析，结果出来就告诉你。'
             return {'ok': True, 'task': task, 'feedback_kind': 'progress', 'detail': detail}
         action = args['action']
-        try:
-            updated = self.db.mutate_task(task['id'], action, args.get('text', ''), args.get('expected_revision'))
-            self.emit('ui.card', task=updated)
+        self.launch_task_write(self.db.mutate_task, (task['id'], action, args.get('text', ''), args.get('expected_revision')),
+                               turn=turn, call=call,
+                               meta={'kind': 'cancel' if action == 'cancel' else 'updated',
+                                     'detail': '正在取消这项任务。' if action == 'cancel' else '新条件记下了，会按这些要求继续。'})
+        return None
+
+    def launch_task_write(self, operation, arguments, *, turn=None, call=None, meta=None):
+        async def write():
+            try:
+                outcome = {'task': await asyncio.to_thread(operation, *arguments)}
+            except ValueError as exc:
+                outcome = {'error': str(exc)}
+            except Exception as exc:
+                outcome = {'error': '任务记录失败：' + sanitized_error(exc)}
+            await self.post({'type': '_task_write', 'turn': turn, 'call': call, 'meta': meta or {}, **outcome})
+        self.spawn(write())
+
+    def task_write_done(self, e):
+        task, meta = e.get('task'), e['meta']
+        if task:
+            self.remember_task(task)
             self.announcements.pop(task['id'], None)
-            return {'ok': True, 'task': updated, 'feedback_kind': 'cancel' if action == 'cancel' else 'updated',
-                    'detail': '正在取消这项任务。' if action == 'cancel' else '新条件记下了，会按这些要求继续。'}
-        except ValueError as exc:
-            return {'ok': False, 'reason': str(exc)}
+            card = task_card(task)
+            if meta.get('kind') == 'delegated':
+                self.emit('ui.card', task=card, origin_turn_id=meta.get('origin_turn_id'))
+            else:
+                self.emit('ui.card', task=card)
+        if e['call'] is None:  # Explicit UI action: no Talker turn waits for it.
+            if not task:
+                self.emit('error', code='task_error', message=e['error'])
+            return
+        result = ({'ok': True, 'task': task_card(task), 'feedback_kind': meta['kind'], 'detail': meta['detail']}
+                  if task else {'ok': False, 'reason': e['error']})
+        self.tool_result(e['turn'], e['call'], result)
 
     def explicit_task(self, action, event):
         if action == 'create':
             goal = str(event.get('goal', '')).strip()
             if not goal or len(goal) > 4000:
                 raise ValueError('任务目标需为1–4000字')
-            task = self.db.create_task(self.id, goal, context=self.task_context())
-            self.emit('ui.card', task=task)
+            self.launch_task_write(self.db.create_task, (self.id, goal, self.task_context()), meta={'kind': 'created'})
             return
         task, error = self.resolve_task(event.get('task_id'))
         if error:
@@ -1430,10 +1483,8 @@ class SessionActor:
         if action == 'get':
             self.emit('ui.card', task=task)
             return
-        updated = self.db.mutate_task(task['id'], action, str(event.get('text', '')),
-                                      event.get('expected_revision'))
-        self.announcements.pop(task['id'], None)
-        self.emit('ui.card', task=updated)
+        self.launch_task_write(self.db.mutate_task, (task['id'], action, str(event.get('text', '')),
+                                                     event.get('expected_revision')), meta={'kind': action})
 
     def send_command(self, turn, call, name, arguments, *, plan_parent_id=None, plan_action=None):
         command_id = uuid4().hex[:12]
@@ -1651,11 +1702,12 @@ class SessionActor:
         if event['event_id'] <= self.event_id:
             return
         self.event_id = event['event_id']
-        task = event['payload'].get('task') or self.db.get_task(event['task_id'])
-        latest = self.db.get_task(event['task_id'])
-        if not task or not latest or event['revision'] < latest['revision']:
+        # Events arrive in commit order, so the mirror holds the newest state;
+        # an event older than a revision this actor already wrote is skipped.
+        self.remember_task(event['payload'].get('task'))
+        task = self.tasks.get(event['task_id'])
+        if not task or event['revision'] < task['revision']:
             return
-        task = latest  # Never replay an old same-revision progress snapshot over a newer terminal card.
         self.emit('task.event', task=task, event_id=event['event_id'], revision=event['revision'])
         key = (task['id'], task['revision'], task['status'])
         if task['status'] in {'completed', 'failed', 'waiting_clarification', 'cancelled'} and key not in self.announced_keys:
@@ -1673,7 +1725,7 @@ class SessionActor:
             return
         task_id = next(iter(self.announcements))
         task = self.announcements.pop(task_id)
-        latest = self.db.get_task(task_id)
+        latest = self.tasks.get(task_id)
         if not latest or latest['revision'] != task['revision'] or latest['status'] != task['status']:
             return
         self.announced_keys.add((task['id'], task['revision'], task['status']))

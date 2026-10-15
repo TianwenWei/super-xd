@@ -220,6 +220,7 @@ async def test_capture_holds_proactive_result_until_released_and_ignores_old_rel
     task = actor.db.create_task(actor.id, '测试后台结果')
     actor.db.save_task(task['id'], 1, status='completed', summary='已完成',
                        result={'summary': '官方核对已完成。', 'spoken_summary': '官方核对已完成。'})
+    actor.remember_task(actor.db.get_task(task['id']))  # as the event poller would
     actor.announcements[task['id']] = actor.db.get_task(task['id'])
     actor.handle({'type': 'asr.capture', 'capture_id': 'capture-new', 'active': True})
     actor.announce()

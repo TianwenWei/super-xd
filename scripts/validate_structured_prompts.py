@@ -80,6 +80,7 @@ async def capture_case(runtime, case, fixed_time):
     actor = object.__new__(session.SessionActor)
     actor.id = 'synthetic-prompt-evaluation'
     actor.db = SimpleNamespace(list_tasks=lambda session_id: deepcopy(case.get('tasks', [])))
+    actor.tasks = {task['id']: deepcopy(task) for task in case.get('tasks', [])}
     actor.vehicle = runtime.catalog.initial_vehicle_state()
     for path, value in case.get('vehicle_overrides', {}).items():
         set_path(actor.vehicle, path, value)

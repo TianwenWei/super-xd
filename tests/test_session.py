@@ -47,6 +47,12 @@ async def make_actor(tmp_path):
     await asyncio.gather(*(a.close() for a in actors))
 
 
+def sync_tasks(actor):
+    """Mirror rows written straight to SQLite, as the actor's event poller would."""
+    for task in actor.db.list_tasks(actor.id):
+        actor.remember_task(task)
+
+
 async def wait_for(q, type_, ack_actor=None, timeout=2):
     events = []
     async with asyncio.timeout(timeout):
@@ -132,6 +138,7 @@ async def test_two_tasks_require_cancel_disambiguation(make_actor):
     actor, q, ark = await make_actor([{'tool_calls': [call('manage_task', {'action':'cancel'})]}])
     a = actor.db.create_task(actor.id, '调研甲')
     b = actor.db.create_task(actor.id, '调研乙')
+    sync_tasks(actor)
     await actor.post({'type': 'input', 'text': '把那个取消'})
     done, _ = await wait_for(q, 'stream.done')
     assert '哪项任务' in done['text'] and done['text'].count('？') == 1
@@ -188,9 +195,10 @@ async def test_clarification_switch_persona_keeps_task_and_constraints(make_acto
     actor, q, ark = await make_actor([])
     task = actor.db.create_task(actor.id, '查餐厅')
     actor.db.save_task(task['id'], 1, status='waiting_clarification', question='哪个城市？', summary='待回复')
+    sync_tasks(actor)
     await actor.post({'type': 'persona.set', 'preset': 'playful'})
     await actor.post({'type': 'task.reply', 'task_id': task['id'], 'text': '上海，只要素食', 'expected_revision': 1})
-    await actor.queue.join()
+    await wait_for(q, 'ui.card')  # the write completes off the actor loop
     current = actor.db.get_task(task['id'])
     assert current['constraints'] == ['上海，只要素食']
     assert current['id'] == task['id'] and current['revision'] == 2
@@ -412,6 +420,7 @@ async def test_batch_task_progress_returns_each_selected_task_and_rejects_foreig
     actor, _, _ = await make_actor([])
     a = actor.db.create_task(actor.id, '科学工业城研究', context={'spoken_goal': '科学工业城研究'})
     b = actor.db.create_task(actor.id, '自然历史博物馆研究', context={'spoken_goal': '自然历史博物馆研究'})
+    sync_tasks(actor)
     result = actor.task_tool('manage_task', {'action': 'get', 'task_ids': [a['id'], b['id']]})
     assert result['ok'] and [task['id'] for task in result['tasks']] == [a['id'], b['id']]
     assert all(task['goal'] in result['detail'] for task in (a, b))
@@ -528,6 +537,7 @@ def weather_tasks(actor):
     official = actor.db.create_task(actor.id, '查询法国气象局官网，核对法国巴黎明天温度')
     actor.db.save_task(official['id'], 1, status='waiting_clarification', summary='等待官网条件',
                        question='请提供法国气象局官网网址。')
+    sync_tasks(actor)
     return actor.db.get_task(ordinary['id']), actor.db.get_task(official['id'])
 
 
@@ -576,6 +586,7 @@ async def test_proactive_history_keeps_exact_text_and_immutable_task_attribution
     assert attribution == {key: ordinary[key] for key in ('id', 'goal', 'revision', 'status')}
     assert announced.messages[1] == {'role': 'assistant', 'content': text}
     actor.db.mutate_task(ordinary['id'], 'update', '改查后天')
+    sync_tasks(actor)
     await actor.post({'type': 'input', 'text': '你好'})
     await wait_for(q, 'stream.done')
     context = actor.messages_for(actor.current)
@@ -596,6 +607,7 @@ async def test_current_task_references_include_recent_completed_results_without_
                            result={'summary': '完整报告' * 100, 'spoken_summary': f'真实短结论{index}'})
         ids.append(task['id'])
     before = copy.deepcopy(actor.db.list_tasks(actor.id))
+    sync_tasks(actor)
     turn = Turn('current', '你好', actor.persona, 1)
     context = json.loads(actor.messages_for(turn)[2]['content'].splitlines()[-1])
     refs = context['background_tasks_reference_only']
@@ -704,11 +716,13 @@ async def test_typed_weather_profile_rejects_before_registration_then_same_talke
 
 @pytest.mark.parametrize('mode', ['research', None])
 async def test_nonweather_research_profile_and_existing_default_are_unchanged(make_actor, mode):
-    actor, _, _ = await make_actor([])
     args = {'goal': '比较科学工业城与自然博物馆官网信息和预约条件', 'query_domain': 'general'}
     if mode is not None:
         args['query_mode'] = mode
-    result = actor.task_tool('delegate_task', args)
+    actor, q, _ = await make_actor([{'tool_calls': [call('delegate_task', args, 'task')]}])
+    await actor.post({'type': 'input', 'text': args['goal']})
+    await wait_for(q, 'stream.done')
+    result = actor.current.tool_results['task']
     assert result['ok'] is True and len(actor.db.list_tasks(actor.id)) == 1
     assert result['task']['context']['query_mode'] == 'research'
 
@@ -771,3 +785,41 @@ async def test_prompt_decisions_do_not_create_text_classification_or_rejection_r
                  if message['role'] == 'system' and message['content'].startswith('当前会话快照')]
     assert len(snapshots) == 1
     assert 'answer_constraints' not in json.loads(snapshots[0].splitlines()[-1])
+
+
+async def test_actor_never_calls_sqlite_on_the_event_loop_thread(tmp_path):
+    """Invariant 2: every database call from the actor runs in a worker thread."""
+    import threading
+    loop_thread = threading.get_ident()
+    guarded = {'create_task', 'mutate_task', 'list_tasks', 'get_task', 'events_after', 'append_trace', 'save_task'}
+
+    class GuardedDatabase(Database):
+        def __getattribute__(self, name):
+            value = object.__getattribute__(self, name)
+            if name not in guarded:
+                return value
+            def checked(*args, **kwargs):
+                if threading.get_ident() == loop_thread:
+                    raise AssertionError(f'{name} called on the event loop')
+                return value(*args, **kwargs)
+            return checked
+
+    db = GuardedDatabase(tmp_path / 'guarded.sqlite3')
+    ark = FakeArk([{'tool_calls': [call('delegate_task', {'goal': '比较两家酒店'}, 'create')]},
+                   {'tool_calls': [call('manage_task', {'action': 'update', 'text': '只看有停车场的'}, 'update')]}])
+    actor = SessionActor('guarded', db, ark, vehicle_planner=FakeVehiclePlanner())
+    try:
+        q = await actor.attach()
+        await q.get()
+        await actor.post({'type': 'input', 'text': '比较两家酒店'})
+        await wait_for(q, 'stream.done')
+        task_id = actor.current.tool_results['create']['task']['id']
+        await actor.post({'type': 'input', 'text': '只看有停车场的'})
+        await wait_for(q, 'stream.done')
+        claimed = await asyncio.to_thread(db.claim_next)
+        await asyncio.to_thread(db.save_task, claimed['id'], claimed['revision'], status='completed',
+                                result={'summary': '两家都有停车场'}, summary='完成')
+        done, _ = await wait_for(q, 'stream.done', timeout=3)
+        assert done['text'] == '两家都有停车场。' and actor.tasks[task_id]['status'] == 'completed'
+    finally:
+        await actor.close()
