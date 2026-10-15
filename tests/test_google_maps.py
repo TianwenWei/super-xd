@@ -142,7 +142,7 @@ async def test_foreground_weather_continues_same_model_without_task(actor_factor
 
 async def test_poi_query_then_selection_uses_real_identity_and_receipt(actor_factory):
     actor, q, _, _ = await actor_factory([
-        {'tool_calls': [call('search_places', {'query': '巴黎卢浮宫'})]}, {'content': '找到了卢浮宫。'},
+        {'tool_calls': [call('search_places', {'query': '巴黎卢浮宫', 'area': '巴黎'})]}, {'content': '找到了卢浮宫。'},
         {'tool_calls': [call('start_poi_navigation', {'place_id': POI['place_id']}, id='navigate')]}])
     await actor.post({'type': 'input', 'text': '查巴黎卢浮宫'})
     await wait_for(q, 'stream.done')
@@ -163,19 +163,21 @@ async def test_fabricated_poi_id_never_dispatches(actor_factory):
     assert not actor.vehicle['navigation']['active'] and not any(e['type'] == 'vehicle.command' for e in events)
 
 
-async def test_direct_poi_navigation_finishes_after_receipt_without_extra_model(actor_factory):
+async def test_same_turn_search_result_is_not_a_user_choice(actor_factory):
     actor, q, ark, _ = await actor_factory([
-        {'tool_calls': [call('search_places', {'query': '巴黎卢浮宫'}, id='search')]},
-        {'tool_calls': [call('start_poi_navigation', {'place_id': POI['place_id']}, id='navigate')]}])
+        {'tool_calls': [call('search_places', {'query': '巴黎卢浮宫', 'area': '巴黎'}, id='search')]},
+        {'tool_calls': [call('start_poi_navigation', {'place_id': POI['place_id']}, id='navigate')]},
+        {'content': '找到卢浮宫，要导航过去吗？'}])
     await actor.post({'type': 'input', 'text': '导航到巴黎卢浮宫'})
-    done, _ = await wait_for(q, 'stream.done', actor)
-    assert len(ark.requests) == 2
-    assert done['text'] == '已将模拟导航目的地设为卢浮宫，未计算实际路线。'
+    done, events = await wait_for(q, 'stream.done', actor)
+    assert len(ark.requests) == 3 and not any(e['type'] == 'vehicle.command' for e in events)
+    assert actor.current.tool_results['navigate']['code'] == 'place_not_confirmed'
+    assert done['text'] == '找到卢浮宫，要导航过去吗？'
 
 
 async def test_spoken_place_ordinals_match_cards_even_if_model_reorders(actor_factory):
     actor, q, _, maps = await actor_factory([
-        {'tool_calls': [call('search_places', {'query': '巴黎咖啡馆'})]},
+        {'tool_calls': [call('search_places', {'query': '巴黎咖啡馆', 'area': '巴黎'})]},
         {'content': '第一个是乙店，第二个是甲店。'}])
     places = [{**POI, 'place_id': 'a', 'name': '甲店'}, {**POI, 'place_id': 'b', 'name': '乙店'}]
     async def search(**args):
@@ -190,7 +192,7 @@ async def test_spoken_place_ordinals_match_cards_even_if_model_reorders(actor_fa
 
 async def test_lookup_timeout_returns_error_and_no_background_task(actor_factory):
     actor, q, _, maps = await actor_factory([
-        {'tool_calls': [call('search_places', {'query': '巴黎餐厅'})]}, {'content': '地点查询超时。'}])
+        {'tool_calls': [call('search_places', {'query': '巴黎餐厅', 'area': '巴黎'})]}, {'content': '地点查询超时。'}])
     maps.wait, actor.lookup_timeout = True, 0.01
     await actor.post({'type': 'input', 'text': '找巴黎餐厅'})
     _, events = await wait_for(q, 'stream.done')
@@ -200,7 +202,7 @@ async def test_lookup_timeout_returns_error_and_no_background_task(actor_factory
 
 
 async def test_new_input_cancels_lookup_and_late_result_cannot_register_poi(actor_factory):
-    actor, q, _, maps = await actor_factory([{'tool_calls': [call('search_places', {'query': '巴黎'})]}, {'content': '你好。'}])
+    actor, q, _, maps = await actor_factory([{'tool_calls': [call('search_places', {'query': '巴黎', 'area': '巴黎'})]}, {'content': '你好。'}])
     maps.wait = True
     await actor.post({'type': 'input', 'text': '找巴黎餐厅'})
     await asyncio.wait_for(maps.started.wait(), 1)
@@ -215,3 +217,14 @@ async def test_new_input_cancels_lookup_and_late_result_cannot_register_poi(acto
 def test_google_secret_redaction(monkeypatch):
     monkeypatch.setenv('GOOGLE_MAPS_API_KEY', 'secret-key')
     assert 'secret-key' not in json.dumps(_trace_data({'X-Goog-Api-Key': 'secret-key', 'message': 'secret-key'}))
+
+
+async def test_search_area_must_come_from_user_words(actor_factory):
+    actor, q, ark, maps = await actor_factory([
+        {'tool_calls': [call('search_places', {'query': '最近的机场', 'area': '北京'}, id='guess')]},
+        {'content': '你现在在哪个城市或者哪条路附近？'}])
+    await actor.post({'type': 'input', 'text': '导航去最近的机场'})
+    done, _ = await wait_for(q, 'stream.done')
+    assert actor.current.tool_results['guess']['code'] == 'area_not_from_user'
+    assert not maps.started.is_set() and len(ark.requests) == 2
+    assert done['text'] == '你现在在哪个城市或者哪条路附近？'

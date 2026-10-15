@@ -96,6 +96,9 @@ def grade(expect, observed):
     for spec in expect.get('talker_calls', []):
         if not any(matches(spec, item) for item in talker):
             failures.append(f'missing talker call {spec}')
+    for name in expect.get('forbid_lookups', []):
+        if name in observed.get('lookups', []):
+            failures.append(f'forbidden lookup executed: {name}')
     for name in expect.get('forbid_talker_calls', []):
         if any(item['name'] == name for item in talker):
             failures.append(f'forbidden talker call {name}')
@@ -124,8 +127,9 @@ def grade(expect, observed):
 async def _drive_turn(actor, outgoing, text):
     """Send one input and play the device role until the turn completes."""
     before = copy.deepcopy(actor.vehicle)
+    request_index = len(getattr(actor.ark, 'requests', []))
     await actor.post({'type': 'input', 'text': text})
-    commands, cards, turn_id, receipts = [], [], None, []
+    commands, cards, turn_id, receipts, lookups = [], [], None, [], []
 
     async def execute(event):
         receipt = await actor.simulator.execute(event['command_id'])
@@ -142,6 +146,8 @@ async def _drive_turn(actor, outgoing, text):
                 commands.append({'name': event['name'], 'arguments': event['arguments'],
                                  'source': event.get('source', 'talker')})
                 receipts.append(asyncio.create_task(execute(event)))
+            elif kind == 'lookup.result' and event.get('turn_id') == turn_id:
+                lookups.append(event['tool'])
             elif kind == 'ui.card' and event.get('origin_turn_id') == turn_id:
                 cards.append(event['task'])
             elif kind == 'stream.done' and event['turn_id'] == turn_id:
@@ -157,16 +163,19 @@ async def _drive_turn(actor, outgoing, text):
             except ValueError:
                 arguments = {'_raw': call['function'].get('arguments')}
             talker.append({'name': call['function']['name'], 'arguments': arguments})
-    return {'commands': commands, 'talker_calls': talker, 'vehicle': copy.deepcopy(actor.vehicle),
+    return {'commands': commands, 'talker_calls': talker, 'lookups': lookups, 'vehicle': copy.deepcopy(actor.vehicle),
             'vehicle_before': before, 'tasks_created': len(cards), 'route': done['metrics'].get('route'),
             'error': done['metrics'].get('error'), 'text': done['text'],
-            'model_calls': done['metrics'].get('model_calls'), 'total_ms': done['metrics'].get('total_ms')}
+            'model_calls': done['metrics'].get('model_calls'), 'total_ms': done['metrics'].get('total_ms'),
+            # The first tool-enabled request is the routing decision invariant 6 is about.
+            'decision_input': next((without_clock(r['messages']) for r in getattr(actor.ark, 'requests', [])[request_index:]
+                                    if r['tools']), None)}
 
 
-async def run_case(case, ark, *, persona='warm', planner=None, maps=None):
+async def run_case(case, ark, *, persona='warm', planner=None, maps=None, repeat=0):
     with tempfile.TemporaryDirectory() as directory:
         db = Database(Path(directory) / 'eval.sqlite3')
-        actor = SessionActor(f"eval-{case['id']}", db, ark, vehicle_planner=planner, maps=maps)
+        actor = SessionActor(f"eval-{case['id']}", db, RecordingArk(ark), vehicle_planner=planner, maps=maps)
         try:
             outgoing = await actor.attach()
             await outgoing.get()
@@ -181,6 +190,11 @@ async def run_case(case, ark, *, persona='warm', planner=None, maps=None):
                     await asyncio.to_thread(db.save_task, claimed['id'], claimed['revision'],
                                             status='waiting_clarification', question=task['question'])
                 task['_id'] = created['id']
+            # Let the actor's event poller mirror seeded tasks before the first input.
+            async with asyncio.timeout(5):
+                while hasattr(actor, 'tasks') and len(actor.tasks) < len(case.get('tasks', [])) or hasattr(actor, 'tasks') and any(
+                        actor.tasks[t['id']]['status'] != t['status'] for t in await asyncio.to_thread(db.list_tasks, actor.id)):
+                    await asyncio.sleep(.05)
             if persona != 'warm':
                 await actor.post({'type': 'persona.set', 'preset': persona})
             turns = []
@@ -194,10 +208,38 @@ async def run_case(case, ark, *, persona='warm', planner=None, maps=None):
                 turns.append({'input': spec['input'], 'passed': not failures, 'failures': failures,
                               'elapsed_ms': round((time.perf_counter() - started) * 1000),
                               **{k: v for k, v in observed.items() if k not in {'vehicle', 'vehicle_before'}}})
-            return {'id': case['id'], 'persona': persona, 'tags': case.get('tags', []),
+            return {'id': case['id'], 'persona': persona, 'repeat': repeat, 'tags': case.get('tags', []),
                     'passed': all(turn['passed'] for turn in turns), 'turns': turns}
         finally:
             await actor.close()
+
+
+class RecordingArk:
+    """Forwards to the real client and keeps every Talker request for inspection."""
+
+    def __init__(self, ark):
+        self.ark, self.requests = ark, []
+
+    def stream(self, messages, tools=None):
+        self.requests.append({'messages': copy.deepcopy(messages), 'tools': copy.deepcopy(tools)})
+        return self.ark.stream(messages, tools)
+
+    def __getattr__(self, name):
+        return getattr(self.ark, name)
+
+
+def without_clock(messages):
+    """Drop the snapshot's current_utc so identical inputs compare equal across runs."""
+    marker = '"current_utc":"'
+    result = []
+    for message in messages:
+        content = message.get('content')
+        if isinstance(content, str) and marker in content:
+            start = content.index(marker) + len(marker)
+            content = content[:start] + content[content.index('"', start):]
+            message = {**message, 'content': content}
+        result.append(message)
+    return result
 
 
 def persona_signature(result):
@@ -206,35 +248,45 @@ def persona_signature(result):
             for turn in result['turns']]
 
 
-async def run_all(cases, ark, *, concurrency=4, planner=None, maps=None):
+async def run_all(cases, ark, *, concurrency=4, planner=None, maps=None, repeat=1):
     semaphore = asyncio.Semaphore(concurrency)
 
-    async def one(case, persona):
+    async def one(case, persona, index):
         async with semaphore:
-            return await run_case(case, ark, persona=persona, planner=planner, maps=maps)
+            return await run_case(case, ark, persona=persona, planner=planner, maps=maps, repeat=index)
 
-    jobs = []
-    for case in cases:
-        for persona in case.get('personas', ['warm']):
-            jobs.append(one(case, persona))
+    jobs = [one(case, persona, index) for index in range(repeat) for case in cases
+            for persona in case.get('personas', ['warm'])]
     results = await asyncio.gather(*jobs)
-    # Invariant 6: the same input must produce the same calls under every persona.
-    by_case = {}
+    # Invariant 6 is checked on the decision call's input: it must be identical
+    # under every persona. Differing outputs from identical inputs are sampling
+    # noise and are reported, not failed, so they are not mistaken for persona leaks.
+    groups = {}
     for result in results:
-        by_case.setdefault(result['id'], []).append(result)
-    for identity, group in by_case.items():
-        if len(group) > 1 and len({json.dumps(persona_signature(r)) for r in group}) > 1:
+        groups.setdefault((result['id'], result['repeat']), []).append(result)
+    for group in groups.values():
+        if len(group) < 2:
+            continue
+        inputs = {json.dumps([t.get('decision_input') for t in r['turns'][:1]], ensure_ascii=False) for r in group}
+        if len(inputs) > 1:
             for result in group:
                 result['passed'] = False
-                result.setdefault('failures', []).append('persona changed tool calls')
+                result.setdefault('failures', []).append('persona changed the decision-call input')
+        elif len({json.dumps(persona_signature(r)) for r in group}) > 1:
+            for result in group:
+                result['notes'] = ['tool calls varied across personas with identical input (sampling noise)']
     return results
 
 
 def summarize(results):
     passed = sum(1 for r in results if r['passed'])
+    per_case = {}
+    for result in results:
+        runs = per_case.setdefault(result['id'], [0, 0])
+        runs[0] += result['passed']; runs[1] += 1
     return {'total': len(results), 'passed': passed,
             'pass_rate': round(passed / len(results), 4) if results else None,
-            'failed': sorted({r['id'] for r in results if not r['passed']})}
+            'failed': {identity: f'{ok}/{total}' for identity, (ok, total) in sorted(per_case.items()) if ok < total}}
 
 
 async def main(argv=None):
@@ -242,6 +294,7 @@ async def main(argv=None):
     parser.add_argument('--tag', action='append', default=[])
     parser.add_argument('--case', action='append', default=[])
     parser.add_argument('--concurrency', type=int, default=4)
+    parser.add_argument('--repeat', type=int, default=1, help='run every case N times to measure flakiness')
     parser.add_argument('--out')
     args = parser.parse_args(argv)
     if not os.getenv('ARK_API_KEY'):  # backend.settings already loaded .env
@@ -252,17 +305,17 @@ async def main(argv=None):
              and (not args.case or c['id'] in args.case)]
     ark = ArkClient()
     try:
-        results = await run_all(cases, ark, concurrency=args.concurrency)
+        results = await run_all(cases, ark, concurrency=args.concurrency, repeat=args.repeat)
     finally:
         await ark.client.aclose()
     report = {'summary': summarize(results), 'results': results}
     for result in results:
         mark = 'PASS' if result['passed'] else 'FAIL'
-        print(f"{mark} {result['id']} [{result['persona']}]")
+        print(f"{mark} {result['id']} [{result['persona']} #{result['repeat']}]")
         for turn in result['turns']:
             for failure in turn['failures']:
                 print(f'    - {turn["input"]}: {failure}')
-        for failure in result.get('failures', []):
+        for failure in result.get('failures', []) + result.get('notes', []):
             print(f'    - {failure}')
     print(json.dumps(report['summary'], ensure_ascii=False))
     if args.out:

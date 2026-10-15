@@ -12,7 +12,7 @@ def observed(**overrides):
 
 def test_cases_load_with_unique_ids_and_known_expectations():
     known = {'commands', 'commands_exact', 'no_commands', 'forbid_commands', 'talker_calls',
-             'forbid_talker_calls', 'no_talker_calls', 'state', 'unchanged', 'tasks_created', 'route', 'allow_error'}
+             'forbid_talker_calls', 'forbid_lookups', 'no_talker_calls', 'state', 'unchanged', 'tasks_created', 'route', 'allow_error'}
     cases = load_cases()
     assert len(cases) >= 20
     for case in cases:
@@ -52,5 +52,5 @@ async def test_runner_drives_simulated_device_and_checks_persona_invariance():
                 yield item
 
     results = await run_all([case], PerRun(), concurrency=2, planner=FakeVehiclePlanner())
-    assert summarize(results) == {'total': 2, 'passed': 2, 'pass_rate': 1.0, 'failed': []}
+    assert summarize(results) == {'total': 2, 'passed': 2, 'pass_rate': 1.0, 'failed': {}}
     assert results[0]['turns'][0]['commands'] == [{'name': 'set_volume', 'arguments': {'volume': 35}, 'source': 'talker'}]

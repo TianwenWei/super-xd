@@ -1,0 +1,14 @@
+[
+  {"role": "system", "content": "以下是几段示例对话，演示一句话里有多个要求时怎样调用工具。它们不是本会话的真实历史，车况也不以它们为准。"},
+  {"role": "user", "content": "把风量调到3档，音量调到40，后排温度保持不变"},
+  {"role": "assistant", "content": null, "tool_calls": [{"id": "example_1", "type": "function", "function": {"name": "set_fan_speed", "arguments": "{\"level\": 3}"}}, {"id": "example_2", "type": "function", "function": {"name": "set_volume", "arguments": "{\"volume\": 40}"}}]},
+  {"role": "tool", "tool_call_id": "example_1", "content": "{\"ok\": true, \"example\": true}"},
+  {"role": "tool", "tool_call_id": "example_2", "content": "{\"ok\": true, \"example\": true}"},
+  {"role": "user", "content": "风量开到2档，车窗先别开"},
+  {"role": "assistant", "content": null, "tool_calls": [{"id": "example_3", "type": "function", "function": {"name": "set_fan_speed", "arguments": "{\"level\": 2}"}}]},
+  {"role": "tool", "tool_call_id": "example_3", "content": "{\"ok\": true, \"example\": true}"},
+  {"role": "user", "content": "车窗先别开，风量开到2档"},
+  {"role": "assistant", "content": null, "tool_calls": [{"id": "example_4", "type": "function", "function": {"name": "set_fan_speed", "arguments": "{\"level\": 2}"}}]},
+  {"role": "tool", "tool_call_id": "example_4", "content": "{\"ok\": true, \"example\": true}"},
+  {"role": "assistant", "content": "（示例结束）"}
+]

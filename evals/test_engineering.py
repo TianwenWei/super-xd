@@ -175,7 +175,7 @@ async def test_played_history_is_completed_sentences_only(tmp_path):
         await actor.post({'type':'audio.cancel','turn_id':old.id,'playback_id':old.playback_id})
         await actor.post({'type':'input','text':'停一下'})
         await wait_for(q,'stream.done')
-        heard=[m['content'] for m in ark.requests[-1]['messages'] if m['role']=='assistant']
+        heard=[m['content'] for m in ark.requests[-1]['messages'] if m['role']=='assistant' and m.get('content')]
         assert any('第一句。' in text for text in heard)
         assert not any('第二句。' in text for text in heard)
         assert old.messages[-1]['content']=='第一句。第二句。'

@@ -75,8 +75,7 @@ def names(request):
 
 def action_names(request):
     submit = next(t for t in request['tools'] if t['function']['name'] == 'submit_vehicle_plan')
-    variants = submit['function']['parameters']['properties']['actions']['items']['anyOf']
-    return {item['properties']['name']['enum'][0] for item in variants}
+    return set(submit['function']['parameters']['properties']['actions']['items']['properties']['name']['enum'])
 
 
 async def test_one_pro_submission_returns_bound_plan_and_only_simulates_private_state():
@@ -118,11 +117,9 @@ async def test_initial_tools_are_hot15_plus_only_requested_skills_and_submit_sch
     assert names(request) == {'load_skill', 'submit_vehicle_plan'}
     assert actual == set(HOT_TOOL_NAMES) | set(SKILLS['mirrors'].tool_names)
     assert 'set_child_lock' not in actual and 'set_door_lock' not in actual
-    submit = next(t for t in request['tools'] if t['function']['name'] == 'submit_vehicle_plan')
-    variants = submit['function']['parameters']['properties']['actions']['items']['anyOf']
-    assert {item['properties']['name']['enum'][0] for item in variants} == actual
-    mirror = next(item for item in variants if item['properties']['name']['enum'] == ['set_mirror_heating'])
-    assert mirror['properties']['arguments'] == TOOLS['set_mirror_heating'].parameters
+    # Exact argument schemas travel as data; the wire schema stays compact.
+    assert set(payload['action_schemas']) == actual
+    assert payload['action_schemas']['set_mirror_heating'] == TOOLS['set_mirror_heating'].parameters
 
 
 async def test_pro_load_skill_expands_only_future_pro_tools_and_preserves_load_evidence():
@@ -353,12 +350,15 @@ def test_wire_schema_removes_offsets_and_repeated_path_enums_but_internal_schema
     assert 'windows.positions.front_passenger' in internal['properties']['keep_paths']['items']['enum']
     assert 'source_start' in internal['properties']['intents']['items']['required']
     assert len(json.dumps(internal,ensure_ascii=False))-len(json.dumps(wire,ensure_ascii=False))>20000
-    assert wire['properties']['actions']==internal['properties']['actions']
+    assert 'anyOf' in internal['properties']['actions']['items']
+    assert wire['properties']['actions']['items']['properties']['arguments']['type']=='object'
+    assert wire['properties']['actions']['items']['properties']['name']['enum']==list(HOT_TOOL_NAMES)
 
 
 def test_action_variants_preserve_actual_catalog_descriptions_and_exact_argument_schemas():
     state=initial_vehicle_state()
-    for build_schema in (plan_schema,submission_schema):
+    # Server-side validation keeps one exact variant per catalog function.
+    for build_schema in (plan_schema,):
         schema=build_schema(list(TOOLS),'设置温度。',state)
         variants=schema['properties']['actions']['items']['anyOf']
         assert len(variants)==len(TOOLS)

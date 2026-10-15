@@ -101,8 +101,18 @@ def plan_schema(allowed_names, request_text, vehicle):
 
 
 def _submission_schema(allowed_names, request_text, vehicle):
-    """Compact provider wire schema; internal validation stays state-exact."""
+    """Compact provider wire schema; internal validation stays state-exact.
+
+    Actions carry a plain ``arguments`` object. A per-function anyOf made the
+    Pro model emit malformed calls as text (8/12 planned, P90 50s vs 12/12,
+    P90 12s compact); the exact per-function schemas are supplied as data in
+    ``action_schemas`` and enforced by validate_vehicle_plan.
+    """
     schema = plan_schema(allowed_names, request_text, vehicle)
+    schema['properties']['actions']['items'] = _object({
+        'id': ID, 'intent_id': ID, 'name': {'type': 'string', 'enum': list(allowed_names)},
+        'arguments': {'type': 'object', 'description': '严格按 action_schemas 中该函数的参数 schema 填写'},
+        'depends_on': IDS})
     schema['properties']['keep_paths'] = deepcopy(schema['properties']['keep_paths'])
     intent = schema['properties']['intents']['items']
     for name in ('source_start', 'source_end'):
@@ -436,17 +446,18 @@ class VehicleControlPlanner:
         for index in range(1, MAX_MODEL_CALLS + 1):
             attempts += 1
             allowed = _names(loaded)
-            planning_input.update(loaded_skills=list(loaded), available_action_names=allowed)
+            planning_input.update(loaded_skills=list(loaded), available_action_names=allowed,
+                                  action_schemas={name: TOOLS[name].parameters for name in allowed})
             messages[1]['content'] = json.dumps(planning_input, ensure_ascii=False)
-            submit = {'type': 'function', 'function': {'name': 'submit_vehicle_plan', 'strict': True,
+            submit = {'type': 'function', 'function': {'name': 'submit_vehicle_plan',
                        'description': '提交整组结构化车辆计划；仅校验/模拟副本，不执行真实车辆。',
                        'parameters': _submission_schema(allowed, request_text, vehicle)}}
-            loader = {'type': 'function', 'function': {'name': 'load_skill', 'strict': True,
+            loader = {'type': 'function', 'function': {'name': 'load_skill',
                        'description': '仅为本Pro规划加载实际能力；不会执行，也不扩展Talker。',
                        'parameters': _object({'skill_id': {'type': 'string', 'enum': list(SKILLS)}})}}
-            # Actual catalog schemas live in submit.actions.anyOf. Offering
-            # them again as native tools would contradict the plan-only
-            # protocol and invite an unnecessary refused execution attempt.
+            # Catalog schemas travel as data (action_schemas). Offering them as
+            # native tools would contradict the plan-only protocol and invite
+            # an unnecessary refused execution attempt.
             tools = [loader, submit]
             model_call_id = uuid4().hex
             emit('model.started', {'plan_call_id': plan_call_id, 'model_call_index': index,

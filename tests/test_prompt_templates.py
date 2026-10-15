@@ -146,7 +146,7 @@ async def test_native_assistant_and_tool_history_remains_protocol_valid(monkeypa
             'history': [{'user': history[0]['content'], 'assistant': history[-1]['content'], 'messages': history}]}
     request = await capture_case(runtime, case, '2026-10-14T12:00:00+00:00')
     messages = request['messages']
-    assistant_index = next(index for index, item in enumerate(messages) if item.get('tool_calls'))
+    assistant_index = next(index for index, item in enumerate(messages) if item.get('tool_calls') == [tool_call])
     assert messages[assistant_index]['tool_calls'] == [tool_call]
     assert messages[assistant_index + 1]['role'] == 'tool'
     assert messages[assistant_index + 1]['tool_call_id'] == tool_call['id']

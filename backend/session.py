@@ -6,6 +6,7 @@ import logging
 import math
 import time
 import unicodedata
+from pathlib import Path
 from dataclasses import dataclass, field
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -61,6 +62,10 @@ SPEECH_ROUTE_PROMPT = render_prompt('speech_route')
 CHAT_SPEECH_PROMPT = render_prompt('speech_chat')
 CURRENT_TURN_PROMPT = render_prompt('current_turn')
 TASK_SNAPSHOT_NOTICE = render_prompt('task_snapshot_notice')
+# Native tool-call few-shots for decisions. In live A/B runs prose examples
+# still dropped one of several requested actions (87/100 exact), and "先别开"
+# was sometimes sent as an "off" command; these examples gave 100/100.
+TALKER_EXAMPLES = json.loads((Path(__file__).parent / 'prompts' / 'talker_examples.json').read_text(encoding='utf-8'))
 
 
 DESTINATION_NOT_GROUNDED = {
@@ -68,6 +73,12 @@ DESTINATION_NOT_GROUNDED = {
     'reason': '目的地必须逐字取自用户原话、近期对话或本会话查到的地点名，不能改写、补全或猜测；未执行。'
               '用户说的是相对地点（附近、最近）且没有给出位置时，直接问用户在哪里。',
     'spoken_reason': '目的地还没确认，暂时没有修改。你要去哪里？'}
+
+
+AREA_NOT_GROUNDED = {
+    'ok': False, 'executed': False, 'retry_model': True, 'code': 'area_not_from_user',
+    'reason': '搜索范围必须逐字取自用户说过的城市、地址或地标；没有定位能力，未搜索。请直接问用户现在在哪个城市或地址。',
+    'spoken_reason': '你现在在哪个城市或者哪条路附近？'}
 
 
 def effective_text(text):
@@ -231,6 +242,7 @@ class SessionActor:
         self.owns_maps = maps is None
         self.lookup_timeout = 25
         self.places = {}  # Session-local identities from successful, adopted search results.
+        self.place_turns = {}  # place_id -> turn whose search surfaced it
         self.recent_places = []
         self.audio_clients = set()
         self.audio_enabled = False
@@ -804,6 +816,7 @@ class SessionActor:
         else:
             # Invariant 6: no call that can choose tools sees the persona.
             messages.pop(1)
+            messages[1:1] = copy.deepcopy(TALKER_EXAMPLES)
             if turn.routing:
                 messages[0] = {'role': 'system', 'content': CORE_PROMPT + '\n' + SPEECH_ROUTE_PROMPT}
         model_call_index, call_id = turn.model_calls, uuid4().hex
@@ -951,6 +964,14 @@ class SessionActor:
                     self.send_command(turn, call, name, arguments)
                 elif name in MAPS_BY_NAME:
                     validate(arguments, MAPS_BY_NAME[name]['function']['parameters'])
+                    if name == 'search_places':
+                        # Provenance of the search area, like destinations: no GPS,
+                        # so "nearest X" needs a place the user actually said.
+                        area = arguments.pop('area')
+                        if not destination_grounded(area, self.destination_sources(turn)):
+                            turn.needs_model = True
+                            self.tool_result(turn, call, dict(AREA_NOT_GROUNDED))
+                            continue
                     if name in READ_TOOLS:
                         turn.has_reads = turn.needs_model = True
                         turn.route = 'lookup'
@@ -1011,8 +1032,9 @@ class SessionActor:
             if call['function']['name'] == 'search_places' and result.get('ok'):
                 self.recent_places = copy.deepcopy(result.get('places', []))
                 self.places.update({place['place_id']: copy.deepcopy(place) for place in self.recent_places})
+                self.place_turns.update({place['place_id']: turn.id for place in self.recent_places})
                 while len(self.places) > 50:
-                    self.places.pop(next(iter(self.places)))
+                    self.place_turns.pop(self.places.pop(next(iter(self.places)))['place_id'], None)
             record = {'call_id': call['id'], 'tool': call['function']['name'], 'result': copy.deepcopy(result)}
             turn.lookup_results.append(record)
             self.emit('lookup.result', turn_id=turn.id, **record)
@@ -1024,6 +1046,16 @@ class SessionActor:
             turn.needs_model = True
             self.tool_result(turn, call, {'ok': False, 'executed': False, 'retry_model': True,
                 'code': 'unknown_place', 'reason': '该地点不在本会话真实查询结果中，请先search_places或重新选择。'})
+            return
+        if self.place_turns.get(place_id) == turn.id:
+            # The user has not heard this result yet, so it is not their choice.
+            # Live evals showed same-turn search→navigate picking a parking exit
+            # for a named terminal and an arbitrary airport for "nearest airport".
+            turn.needs_model = True
+            self.tool_result(turn, call, {'ok': False, 'executed': False, 'retry_model': True,
+                'code': 'place_not_confirmed',
+                'reason': '搜索结果还没让用户确认，未导航。用户说的是明确地名时直接用set_navigation_destination原样填写；'
+                          '需要从结果中挑选时先把候选告诉用户，等用户选定后再导航。'})
             return
         turn.poi_commands[call['id']] = copy.deepcopy(place)
         # Once a search has supplied the selected destination, the vehicle
