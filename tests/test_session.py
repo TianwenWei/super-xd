@@ -823,3 +823,18 @@ async def test_actor_never_calls_sqlite_on_the_event_loop_thread(tmp_path):
         assert done['text'] == '两家都有停车场。' and actor.tasks[task_id]['status'] == 'completed'
     finally:
         await actor.close()
+
+
+@pytest.mark.parametrize('preset', ['professional', 'playful'])
+async def test_persona_only_reaches_the_tool_free_chat_call(make_actor, preset):
+    """Invariant 6: the call that can choose tools is identical for every persona."""
+    from backend.persona import PERSONAS, style_prompt
+    actor, q, ark = await make_actor([{'content': '{"response_mode":"chat"}'}, {'content': '秋天很适合出游。'}])
+    await actor.post({'type': 'persona.set', 'preset': preset})
+    await actor.post({'type': 'input', 'text': '聊聊秋天'})
+    done, _ = await wait_for(q, 'stream.done')
+    persona = style_prompt(PERSONAS[preset])
+    decision, chat = ark.requests
+    assert decision['tools'] and not any(m.get('content') == persona for m in decision['messages'])
+    assert chat['tools'] == [] and any(m.get('content') == persona for m in chat['messages'])
+    assert done['text'] == '秋天很适合出游。'

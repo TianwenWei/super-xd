@@ -212,7 +212,7 @@ class Turn:
     played_text: str = ''
     dispatch_announced: bool = False
     chat_streaming: bool = False
-    speech_routing: bool = False
+    routing: bool = False
     sentence_buffer: str = ''
     vehicle_plans: dict = field(default_factory=dict)
     vehicle_plan_tasks: dict = field(default_factory=dict)
@@ -573,7 +573,7 @@ class SessionActor:
                 # is displayed immediately, but speech eligibility waits for
                 # the completed routing decision to avoid premature success.
                 turn.model_text_pending += e['text']
-                if not turn.speech_routing:
+                if not turn.routing:
                     self.append_text(turn, e['text'], speak=False)
                 if turn.chat_streaming:
                     turn.sentence_buffer += e['text']
@@ -793,16 +793,19 @@ class SessionActor:
             self.append_text(turn, '这次没能确认可用的功能，请把需求再具体一点。')
             self.finish(turn, error='model_step_limit')
             return
-        turn.speech_routing = turn.model_calls == 0 and turn.audio_queue is not None
+        # Text and voice share one protocol, so evals exercise the production
+        # path: the first call only routes; chat prose comes from a tools=[] call.
+        turn.routing = turn.model_calls == 0
         turn.model_calls += 1
         messages, tools = self.messages_for(turn), self.tools_for(turn)
         if turn.chat_streaming:
             tools = []
             messages[0] = {'role': 'system', 'content': CHAT_SPEECH_PROMPT}
-        elif turn.speech_routing:
-            messages[0]['content'] += '\n' + SPEECH_ROUTE_PROMPT
-            # Decisions share one fixed policy; persona is applied only to prose.
+        else:
+            # Invariant 6: no call that can choose tools sees the persona.
             messages.pop(1)
+            if turn.routing:
+                messages[0] = {'role': 'system', 'content': CORE_PROMPT + '\n' + SPEECH_ROUTE_PROMPT}
         model_call_index, call_id = turn.model_calls, uuid4().hex
         self.trace('model.started', {'model_call_index': model_call_index, 'messages': messages,
                                     'tools': tools}, turn, call_id=call_id, status='running')
@@ -851,7 +854,7 @@ class SessionActor:
             turn.messages.append(message)
             self.finish(turn)
             return
-        if turn.speech_routing and not calls:
+        if turn.routing and not calls:
             try:
                 decision = json.loads(message.get('content') or '')
             except (ValueError, TypeError):

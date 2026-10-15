@@ -142,6 +142,8 @@ class InterruptedArk:
         self.calls = 0
         self.late = late
         self.release = asyncio.Event()
+        # The routing call withholds deltas from the UI, so tests wait on this.
+        self.streaming = asyncio.Event()
 
     async def stream(self, messages, tools):
         self.calls += 1
@@ -150,6 +152,7 @@ class InterruptedArk:
             yield {"type": "message", **observed("新轮次正常回答。", provider_id="new-provider")}
             return
         yield {"type": "delta", "text": "旧轮次已返回片段"}
+        self.streaming.set()
         try:
             await self.release.wait()
         except asyncio.CancelledError as exc:
@@ -171,7 +174,7 @@ async def test_cancelled_model_keeps_received_partial_under_old_turn(trace_conte
     ark = InterruptedArk()
     actor, queue = await make(ark)
     await actor.post({"type": "input", "text": "旧输入"})
-    await receive(queue, "stream.delta")
+    await asyncio.wait_for(ark.streaming.wait(), 3)
     old = actor.current
     await actor.post({"type": "input", "text": "新输入"})
     done, _ = await receive(queue, "stream.done")
@@ -194,7 +197,7 @@ async def test_late_old_model_callback_is_retained_without_new_turn_pollution(tr
     ark = InterruptedArk(late)
     actor, queue = await make(ark)
     await actor.post({"type": "input", "text": "旧输入"})
-    await receive(queue, "stream.delta")
+    await asyncio.wait_for(ark.streaming.wait(), 3)
     old = actor.current
     await actor.post({"type": "input", "text": "新输入"})
     done, _ = await receive(queue, "stream.done")
@@ -224,7 +227,7 @@ async def test_model_trace_status_follows_actor_queue_order(trace_context, late)
     ark = InterruptedArk(late)
     actor, queue = await make(ark)
     await actor.post({"type": "input", "text": "旧输入"})
-    await receive(queue, "stream.delta")
+    await asyncio.wait_for(ark.streaming.wait(), 3)
     old = actor.current
     # The old network task resumes first, but its callback is enqueued after
     # this new input. Status must follow actor consumption, not network timing.

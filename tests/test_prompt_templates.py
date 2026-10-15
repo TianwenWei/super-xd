@@ -93,10 +93,11 @@ async def test_history_precedes_dynamic_snapshot_and_latest_input(monkeypatch):
     snapshot_index = next(index for index, item in enumerate(messages) if item['role'] == 'system' and
                           (item.get('content') or '').startswith('当前会话快照'))
     current_index = next(index for index, item in enumerate(messages) if item.get('content') == case['text'])
-    assert messages[0]['role'] == messages[1]['role'] == 'system'
-    assert messages[0]['content'].startswith('# ')
-    assert messages[1]['content'].startswith('# ')
-    assert 1 < history_index < snapshot_index < current_index
+    assert messages[0]['role'] == 'system' and messages[0]['content'].startswith('# ')
+    # Invariant 6: a call that can choose tools never carries the persona.
+    persona_header = prompt_templates.load_prompt('persona').split('{{', 1)[0]
+    assert not any(persona_header in (item.get('content') or '') for item in messages)
+    assert 0 < history_index < snapshot_index < current_index
 
 
 async def test_dynamic_state_does_not_change_stable_prefix_or_tools(monkeypatch):
@@ -106,13 +107,14 @@ async def test_dynamic_state_does_not_change_stable_prefix_or_tools(monkeypatch)
     second = {'id': 'two', 'role': 'talker', 'text': '现在音量多少？', 'vehicle_overrides': {'media.volume': 70}}
     before = await capture_case(runtime, first, '2026-10-14T12:00:00+00:00')
     after = await capture_case(runtime, second, '2026-10-15T12:00:00+00:00')
-    assert before['messages'][:2] == after['messages'][:2]
+    assert before['messages'][:1] == after['messages'][:1]
     assert before['tools'] == after['tools']
     assert len(before['tools']) == 21
     assert before['messages'] != after['messages']
 
 
-@pytest.mark.parametrize('mode,tool_count,route_count', [(None, 21, 0), ('route', 21, 1), ('answer', 0, 0)])
+# Text mode uses the same routing protocol as voice, so evals exercise the production path.
+@pytest.mark.parametrize('mode,tool_count,route_count', [(None, 21, 1), ('route', 21, 1), ('answer', 0, 0)])
 async def test_text_speech_route_and_speech_answer_keep_distinct_protocols(monkeypatch, mode, tool_count, route_count):
     runtime = import_runtime(None)
     monkeypatch.setattr(runtime.session, 'utcnow', runtime.session.utcnow)
