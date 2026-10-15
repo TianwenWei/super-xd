@@ -13,7 +13,7 @@
 - **Talker（前台）**：`backend/session.py` 中的 `SessionActor`，每个会话一个。负责听、说、打断、直接回答、热车控、同步查询，以及把复杂需求委托出去。
 - **Vehicle Planner（车控规划层）**：`backend/vehicle_planner.py`。复合车控和非热车控由它生成结构化计划，actor 按真实回执逐项执行。
 - **Thinker（后台）**：`backend/worker.py` 中的 `ThinkerWorker`，独立进程。通过 SQLite 任务表领取任务，执行 ReAct 循环，结果以事件形式回流给 actor。
-- **前端**：`src/`，React + TypeScript。既是调试台，也充当模拟车机。
+- **前端**：`/frontend/src/`，React + TypeScript。既是调试台，也充当模拟车机。
 
 ### 目录
 
@@ -31,11 +31,18 @@
 | `backend/persona.py` | 人设配置与回执话术模板 |
 | `backend/speech_text.py` | 送 TTS 之前的展示语法清理 |
 | `backend/google_maps.py`、`maps_tools.py`、`weather.py` | POI 搜索、天气（Google，回退 Open-Meteo） |
-| `src/App.tsx` | 主界面、控制通道消息处理、模拟车机 |
-| `src/StreamingSpeech.ts` | 音频播放、播放状态与指标上报 |
-| `src/StreamingRecognition.ts` | 麦克风采集与 ASR 流程 |
+| `backend/vehicle_simulator.py` | 车端模拟器：独立持有车况，执行命令并返回回执（执行权威） |
+| `backend/vehicle_feedback.py` | 车控下发时的“正在为你……”话术 |
+| `backend/model_context.py` | 历史消息与工具结果进入模型前的压缩 |
+| `backend/prompt_templates.py`、`backend/prompts/` | prompt 模板加载；全部 prompt 文本与 Talker 原生示例（`talker_examples.json`） |
+| `backend/textutil.py` | 不用正则的格式工具：ID/域名校验、URL 提取、密钥脱敏、空白归一 |
+| `evals/` | 行为评测：`harness.py` 与 `cases/*.json` |
+| `/frontend/src/App.tsx` | 主界面、控制通道消息处理、模拟车机 |
+| `/frontend/src/StreamingSpeech.ts` | 音频播放、播放状态与指标上报 |
+| `/frontend/src/StreamingRecognition.ts` | 麦克风采集与 ASR 流程 |
+| `/frontend/src/text.ts` | 前端不用正则的格式工具 |
 
-后端读取的环境变量（见 `settings.py`、`models.py`、`worker.py`）：`ARK_API_KEY`、`ARK_BASE_URL`、`TALKER_MODEL`、`THINKER_MODEL`、`VEHICLE_CONTROL_MODEL`、`DATABASE_PATH`、`MODEL_TIMEOUT_SECONDS`、`TOOL_TIMEOUT_SECONDS`、`TAVILY_API_KEY`、`GOOGLE_MAPS_API_KEY`、`THINKER_CONCURRENCY`、`THINKER_MAX_STEPS`、`THINKER_TIMEOUT_SECONDS`。
+后端读取的环境变量（见 `settings.py`、`models.py`、`worker.py`）：`ARK_API_KEY`、`ARK_BASE_URL`、`TALKER_MODEL`、`THINKER_MODEL`、`VEHICLE_CONTROL_MODEL`、`DATABASE_PATH`、`MODEL_TIMEOUT_SECONDS`、`TOOL_TIMEOUT_SECONDS`、`TAVILY_API_KEY`、`GOOGLE_MAPS_API_KEY`、`THINKER_CONCURRENCY`、`THINKER_MAX_STEPS`、`THINKER_TIMEOUT_SECONDS`、`THINKER_CLARIFICATION_TIMEOUT_SECONDS`。语音另读 `VOLCENGINE_SPEECH_*` 与 `VOLCENGINE_ASR_*`（见 `tts.py`、`asr.py`、`.env.example`）。
 
 ## 2. 外部约束（不可改变）
 
@@ -62,6 +69,7 @@
 | Markdown 转纯文本（送 TTS 前） | `mistune` 或 `markdown-it-py` 渲染为纯文本 |
 
 - JSON Schema 中的 `pattern` 字段只允许用于工具参数的纯格式约束（如 `YYYY-MM-DD`），不得用来表达语义。
+- 上表中的写法已有现成实现：后端用 `backend/textutil.py`，Markdown 转朗读文本用 `backend/speech_text.py`（markdown-it-py），前端用 `frontend/src/text.ts`。优先复用，不要另写一套。
 
 ## 4. 架构不变量（改动不得破坏）
 
@@ -73,7 +81,7 @@
 ### 诚实性
 4. **说的和做的分开**：车控完成话术只能由真实回执生成（`receipt_detail` 加人设模板）。模型文本不得声称"已完成""已开始"。任务接手话术只能来自任务登记结果。
 5. **车端是执行权威**：车控动作的最终成功或失败以车端回执为准。模拟、预检只用于提前拒绝，不能当作回执。
-6. **人设只改说法**：同一输入在不同人设下，工具调用序列和参数必须完全一致。人设不能影响路由、工具选择、参数和权限。
+6. **人设只改说法**：同一输入在不同人设下，工具调用序列和参数必须完全一致。人设不能影响路由、工具选择、参数和权限。实现方式：凡是带工具的 Talker 调用都不放人设；人设只出现在 `tools=[]` 的回答调用和回执模板里。每轮第一次调用只做路由（工具调用或 `{"response_mode":"chat"}`），文字模式与语音模式相同。
 7. **Thinker 只输出中性内容**：Thinker 不知道人设存在，只产出 `summary` 和 `spoken_summary`，由 Talker 侧负责表达。替用户写的内容（邮件、消息）用用户本人的口吻。
 
 ### 异步任务
@@ -84,21 +92,23 @@
 
 ### 工具边界
 12. Talker 的工具集固定为热车控 + `delegate_vehicle_control` / `delegate_task` / `manage_task` + 地图工具（`tools_for`），不随对话增长。非热车控只能经由 Vehicle Planner。
+14. **地点参数必须有来源**：导航目的地和 `search_places.area` 必须能在用户原话、近期对话或已查到的地点名里原样找到（`destination_grounded`），否则退回同一个 Talker 重新决定。POI 导航只能指向之前轮次已经告诉过用户的搜索结果，同一轮刚搜到的结果不算用户的选择。
 13. 新增车控函数统一走 `catalog.register`，并同步更新 `EXPECTED_COUNTS` 断言。
 
 ## 5. Prompt 规范
 
-- prompt 位置：Talker 在 `session.py` 的 `CORE_PROMPT` 和 `messages_for`；人设在 `persona.style_prompt`；Thinker 在 `worker.py` 的 `SYSTEM_PROMPT` / `QUICK_PROMPT`；Planner 在 `vehicle_planner.PROMPT`。
-- **排列顺序：稳定的在前，动态的在后。** 固定规则 → 人设 → 历史 → 会话快照（车况、任务、`current_utc`）→ 本轮输入。动态内容不要插在历史前面，否则缓存命不中。
-- 修复错误优先补 **few-shot 示例**，其次是一句通用规则。规则必须能覆盖一类情况，不能只写给某一句话。
+- prompt 位置：全部文本在 `backend/prompts/*.txt`，Talker 的原生 tool_calls 示例在 `backend/prompts/talker_examples.json`；拼装在 `session.py` 的 `messages_for` / `launch_model`、`vehicle_planner.py` 的 `plan`、`worker.py` 的 `_messages`。
+- **排列顺序：稳定的在前，动态的在后。** 固定规则 → 人设（仅回答调用）/ 原生示例（仅带工具的调用）→ 历史 → 会话快照（车况、任务、`current_utc`）→ 本轮输入。动态内容不要插在历史前面，否则缓存命不中。
+- 修复错误优先补 **few-shot 示例**，其次是一句通用规则。规则必须能覆盖一类情况，不能只写给某一句话。影响工具选择的示例优先写成原生的 user / assistant tool_calls / tool 消息：实测比写在 prompt 正文里的箭头示例明显更稳。
+- 给模型的结构化输出 schema 要保持简单。逐函数展开的大型 `anyOf` 曾让 Pro 模型把调用写成文本；精确的参数 schema 作为数据提供，由服务端校验。
 - 不要在每轮额外注入"再次确认原句"之类的补丁消息。需要模型逐项处理的，改用结构化输出（例如 planner 的 intent 账本）。
 - 时区和地点不得写死，从车辆或用户设置中读取。
 
 ## 6. 修复问题的工作流
 
-1. 先把失败场景写成评测用例（输入、车况、期望的工具调用或期望行为），放在 `evals/` 目录下。
+1. 先把失败场景写成评测用例（输入、车况、期望的工具调用或期望行为），放在 `evals/cases/*.json`。字段见 `evals/harness.py` 的 `grade`；只比对结构化结果，不读回复文本。用例里的句子不要直接抄进 prompt 示例，否则评测就测不出泛化。
 2. 只用 prompt、few-shot 或结构化字段来修复。不得匹配文本。
-3. 跑完整评测，在 PR 描述里写明修改前后的通过率，以及新增失败的用例。
+3. 跑完整评测：`.venv/bin/python -m evals.harness --repeat 3 --out data/evals/<名字>.json`（需要 `ARK_API_KEY`，地图用例还需要 `GOOGLE_MAPS_API_KEY`）。模型有采样波动，单次结果不能说明问题，至少重复 3 次。在 PR 描述里写明修改前后的通过率，以及新增失败的用例。
 4. 用 trace 抽查至少一条相关轨迹：模型输入、工具调用、回执、最终话术是否一致。
 
 **完成标准**：评测无新增失败，或者新增的失败已在 PR 中说明理由；没有新增正则；第 4 节的不变量都保持成立。

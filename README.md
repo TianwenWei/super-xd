@@ -71,7 +71,10 @@ cd frontend && npm run dev -- --host 127.0.0.1
 ```bash
 .venv/bin/python -m evals.harness                          # 全部用例，需要 ARK_API_KEY；会产生模型费用
 .venv/bin/python -m evals.harness --tag hold --out data/evals/hold.json
+.venv/bin/python -m evals.harness --repeat 3 --out data/evals/run.json   # 模型有采样波动，比较改动前后至少重复 3 次
 ```
+
+2026-10-15 的结果（42 组用例×人设，各跑 3 次）：重构前 78/126，当前 125/126。差距主要来自旧代码把人设放进了决定工具调用的那次请求（违反不变量 6）。唯一残余失败是“先别开氛围灯”偶尔多发一条关闭指令（车况不变）。
 
 带 `personas` 字段的用例会在每个人设下各跑一遍，并检查工具调用序列完全一致（不变量 6）。带 `maps` 标签的用例还需要 `GOOGLE_MAPS_API_KEY`。修 bug 时先在这里加失败用例，再按 AGENTS.md §6 修改。
 
