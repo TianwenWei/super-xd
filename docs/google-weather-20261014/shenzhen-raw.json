@@ -1,7 +1,0 @@
-{
-  "error": {
-    "code": 404,
-    "message": "Information is not supported for this location. Please try a different location.",
-    "status": "NOT_FOUND"
-  }
-}
