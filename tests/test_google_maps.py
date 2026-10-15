@@ -228,3 +228,16 @@ async def test_search_area_must_come_from_user_words(actor_factory):
     assert actor.current.tool_results['guess']['code'] == 'area_not_from_user'
     assert not maps.started.is_set() and len(ark.requests) == 2
     assert done['text'] == '你现在在哪个城市或者哪条路附近？'
+
+
+async def test_search_area_is_part_of_the_query_sent_to_places(actor_factory):
+    actor, q, _, maps = await actor_factory([
+        {'tool_calls': [call('search_places', {'query': '机场', 'area': '上海人民广场'})]}, {'content': '找到了。'}])
+    seen = []
+    async def search(**args):
+        seen.append(args)
+        return {'ok': True, 'kind': 'places', 'places': [POI], 'provider': 'Google Maps'}
+    maps.search_places = search
+    await actor.post({'type': 'input', 'text': '我在上海人民广场，找机场'})
+    await wait_for(q, 'stream.done')
+    assert seen == [{'query': '上海人民广场 机场'}]

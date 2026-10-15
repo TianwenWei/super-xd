@@ -972,6 +972,10 @@ class SessionActor:
                             turn.needs_model = True
                             self.tool_result(turn, call, dict(AREA_NOT_GROUNDED))
                             continue
+                        # Places text search has no GPS bias; the area must be in the query
+                        # or results fall back to the server's IP location.
+                        if ''.join(area.split()) not in ''.join(arguments['query'].split()):
+                            arguments['query'] = f"{area} {arguments['query']}"
                     if name in READ_TOOLS:
                         turn.has_reads = turn.needs_model = True
                         turn.route = 'lookup'
