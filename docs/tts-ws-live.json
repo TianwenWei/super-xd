@@ -1,0 +1,330 @@
+{
+  "provider": "volcengine-speech-tts",
+  "endpoint": "wss://openspeech.bytedance.com/api/v3/tts/bidirection",
+  "speaker": "zh_female_xiaohe_uranus_bigtts",
+  "resource": "seed-tts-2.0",
+  "source": "config_file",
+  "real_api": true,
+  "metric_scope": "Speech adapter -> server PCM; excludes LLM/browser/playback",
+  "audio_format": "pcm_s16le",
+  "sample_rate": 24000,
+  "channels": 1,
+  "official_protocol": "https://docs.volcengine.com/docs/DoubaoVoice/WebSocketBidirectionalStreaming-V3?lang=zh",
+  "prewarm": {
+    "ok": true,
+    "reused": false,
+    "pool_ready": 1,
+    "connect_ms": 832.2239170083776,
+    "connection_ready_ms": 1059.6253339899704
+  },
+  "samples": [
+    {
+      "index": 1,
+      "started_at": "2026-10-11T15:32:45.590964+00:00",
+      "ok": true,
+      "first_audio": {
+        "elapsed_ms": 672.5259580416605,
+        "input_still_open": true,
+        "type": "audio",
+        "sample_rate": 24000,
+        "channels": 1,
+        "format": "pcm_s16le",
+        "session_id": "f6eb6ada-e905-4b53-92aa-cd98d82d0d3c",
+        "first_packet_ms": 672.429250087589,
+        "first_text_to_audio_ms": 442.3626670613885,
+        "nonzero": true,
+        "first_nonzero_packet_ms": 672.4341670051217
+      },
+      "first_nonzero_audio_ms": 672.5438330322504,
+      "chunks": 11,
+      "audio_bytes": 182278,
+      "pcm_duration_seconds": 3.797458333333333,
+      "total_ms": 1307.0293749915436,
+      "events": [
+        {
+          "type": "event",
+          "event": "connection.started",
+          "event_code": 50,
+          "session_id": "f6eb6ada-e905-4b53-92aa-cd98d82d0d3c",
+          "metrics": {
+            "first_packet_ms": null,
+            "first_text_ms": null,
+            "first_text_to_audio_ms": null,
+            "first_nonzero_packet_ms": null,
+            "audio_bytes": 0,
+            "audio_chunks": 0,
+            "text_chars": 0,
+            "reused": true,
+            "connect_ms": 0,
+            "prewarm_connect_ms": 832.2239170083776,
+            "prewarm_connection_ready_ms": 1059.6253339899704,
+            "connection_ready_ms": 0.014458084478974342,
+            "elapsed_ms": 0.01725007314234972
+          },
+          "data": {}
+        },
+        {
+          "type": "event",
+          "event": "session.started",
+          "event_code": 150,
+          "session_id": "f6eb6ada-e905-4b53-92aa-cd98d82d0d3c",
+          "metrics": {
+            "first_packet_ms": null,
+            "first_text_ms": null,
+            "first_text_to_audio_ms": null,
+            "first_nonzero_packet_ms": null,
+            "audio_bytes": 0,
+            "audio_chunks": 0,
+            "text_chars": 0,
+            "reused": true,
+            "connect_ms": 0,
+            "prewarm_connect_ms": 832.2239170083776,
+            "prewarm_connection_ready_ms": 1059.6253339899704,
+            "connection_ready_ms": 0.014458084478974342,
+            "session_ready_ms": 229.87391706556082,
+            "elapsed_ms": 229.90333300549537
+          },
+          "data": {}
+        },
+        {
+          "type": "event",
+          "event": "sentence.started",
+          "event_code": 350,
+          "session_id": "f6eb6ada-e905-4b53-92aa-cd98d82d0d3c",
+          "metrics": {
+            "first_packet_ms": null,
+            "first_text_ms": 230.06658302620053,
+            "first_text_to_audio_ms": null,
+            "first_nonzero_packet_ms": null,
+            "audio_bytes": 0,
+            "audio_chunks": 0,
+            "text_chars": 12,
+            "reused": true,
+            "connect_ms": 0,
+            "prewarm_connect_ms": 832.2239170083776,
+            "prewarm_connection_ready_ms": 1059.6253339899704,
+            "connection_ready_ms": 0.014458084478974342,
+            "session_ready_ms": 229.87391706556082,
+            "elapsed_ms": 472.6160420104861
+          },
+          "data": {
+            "phonemes": [],
+            "text": "",
+            "words": []
+          }
+        },
+        {
+          "type": "event",
+          "event": "sentence.finished",
+          "event_code": 351,
+          "session_id": "f6eb6ada-e905-4b53-92aa-cd98d82d0d3c",
+          "metrics": {
+            "first_packet_ms": 672.429250087589,
+            "first_text_ms": 230.06658302620053,
+            "first_text_to_audio_ms": 442.3626670613885,
+            "first_nonzero_packet_ms": 672.4341670051217,
+            "audio_bytes": 182278,
+            "audio_chunks": 11,
+            "text_chars": 20,
+            "reused": true,
+            "connect_ms": 0,
+            "prewarm_connect_ms": 832.2239170083776,
+            "prewarm_connection_ready_ms": 1059.6253339899704,
+            "connection_ready_ms": 0.014458084478974342,
+            "session_ready_ms": 229.87391706556082,
+            "input_finished_ms": 672.753749997355,
+            "elapsed_ms": 1301.0407080873847
+          },
+          "data": {
+            "phonemes": [],
+            "text": "晚上好，今天想聊些什么？我们可以慢慢聊。",
+            "words": []
+          }
+        },
+        {
+          "type": "event",
+          "event": "session.finished",
+          "event_code": 152,
+          "session_id": "f6eb6ada-e905-4b53-92aa-cd98d82d0d3c",
+          "metrics": {
+            "first_packet_ms": 672.429250087589,
+            "first_text_ms": 230.06658302620053,
+            "first_text_to_audio_ms": 442.3626670613885,
+            "first_nonzero_packet_ms": 672.4341670051217,
+            "audio_bytes": 182278,
+            "audio_chunks": 11,
+            "text_chars": 20,
+            "reused": true,
+            "connect_ms": 0,
+            "prewarm_connect_ms": 832.2239170083776,
+            "prewarm_connection_ready_ms": 1059.6253339899704,
+            "connection_ready_ms": 0.014458084478974342,
+            "session_ready_ms": 229.87391706556082,
+            "input_finished_ms": 672.753749997355,
+            "total_ms": 1306.8647080799565,
+            "elapsed_ms": 1306.870875065215
+          },
+          "data": {
+            "usage": {
+              "text_words": 20
+            }
+          }
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "started_at": "2026-10-11T15:32:46.898082+00:00",
+      "ok": true,
+      "first_audio": {
+        "elapsed_ms": 710.4141250019893,
+        "input_still_open": true,
+        "type": "audio",
+        "sample_rate": 24000,
+        "channels": 1,
+        "format": "pcm_s16le",
+        "session_id": "60cdfc92-3ec3-4ace-94b2-d9d0442e9f73",
+        "first_packet_ms": 710.2888749213889,
+        "first_text_to_audio_ms": 483.45808300655335,
+        "nonzero": true,
+        "first_nonzero_packet_ms": 710.2936669252813
+      },
+      "first_nonzero_audio_ms": 710.4315420147032,
+      "chunks": 11,
+      "audio_bytes": 181272,
+      "pcm_duration_seconds": 3.7765,
+      "total_ms": 1435.2783750509843,
+      "events": [
+        {
+          "type": "event",
+          "event": "connection.started",
+          "event_code": 50,
+          "session_id": "60cdfc92-3ec3-4ace-94b2-d9d0442e9f73",
+          "metrics": {
+            "first_packet_ms": null,
+            "first_text_ms": null,
+            "first_text_to_audio_ms": null,
+            "first_nonzero_packet_ms": null,
+            "audio_bytes": 0,
+            "audio_chunks": 0,
+            "text_chars": 0,
+            "reused": true,
+            "connect_ms": 0,
+            "prewarm_connect_ms": 832.2239170083776,
+            "prewarm_connection_ready_ms": 1059.6253339899704,
+            "connection_ready_ms": 0.008624978363513947,
+            "elapsed_ms": 0.009916955605149269
+          },
+          "data": {}
+        },
+        {
+          "type": "event",
+          "event": "session.started",
+          "event_code": 150,
+          "session_id": "60cdfc92-3ec3-4ace-94b2-d9d0442e9f73",
+          "metrics": {
+            "first_packet_ms": null,
+            "first_text_ms": null,
+            "first_text_to_audio_ms": null,
+            "first_nonzero_packet_ms": null,
+            "audio_bytes": 0,
+            "audio_chunks": 0,
+            "text_chars": 0,
+            "reused": true,
+            "connect_ms": 0,
+            "prewarm_connect_ms": 832.2239170083776,
+            "prewarm_connection_ready_ms": 1059.6253339899704,
+            "connection_ready_ms": 0.008624978363513947,
+            "session_ready_ms": 226.70858295168728,
+            "elapsed_ms": 226.7185419332236
+          },
+          "data": {}
+        },
+        {
+          "type": "event",
+          "event": "sentence.started",
+          "event_code": 350,
+          "session_id": "60cdfc92-3ec3-4ace-94b2-d9d0442e9f73",
+          "metrics": {
+            "first_packet_ms": null,
+            "first_text_ms": 226.83079191483557,
+            "first_text_to_audio_ms": null,
+            "first_nonzero_packet_ms": null,
+            "audio_bytes": 0,
+            "audio_chunks": 0,
+            "text_chars": 12,
+            "reused": true,
+            "connect_ms": 0,
+            "prewarm_connect_ms": 832.2239170083776,
+            "prewarm_connection_ready_ms": 1059.6253339899704,
+            "connection_ready_ms": 0.008624978363513947,
+            "session_ready_ms": 226.70858295168728,
+            "elapsed_ms": 468.24404189828783
+          },
+          "data": {
+            "phonemes": [],
+            "text": "",
+            "words": []
+          }
+        },
+        {
+          "type": "event",
+          "event": "sentence.finished",
+          "event_code": 351,
+          "session_id": "60cdfc92-3ec3-4ace-94b2-d9d0442e9f73",
+          "metrics": {
+            "first_packet_ms": 710.2888749213889,
+            "first_text_ms": 226.83079191483557,
+            "first_text_to_audio_ms": 483.45808300655335,
+            "first_nonzero_packet_ms": 710.2936669252813,
+            "audio_bytes": 181272,
+            "audio_chunks": 11,
+            "text_chars": 20,
+            "reused": true,
+            "connect_ms": 0,
+            "prewarm_connect_ms": 832.2239170083776,
+            "prewarm_connection_ready_ms": 1059.6253339899704,
+            "connection_ready_ms": 0.008624978363513947,
+            "session_ready_ms": 226.70858295168728,
+            "input_finished_ms": 710.5902920011431,
+            "elapsed_ms": 1434.9653749959543
+          },
+          "data": {
+            "phonemes": [],
+            "text": "晚上好，今天想聊些什么？我们可以慢慢聊。",
+            "words": []
+          }
+        },
+        {
+          "type": "event",
+          "event": "session.finished",
+          "event_code": 152,
+          "session_id": "60cdfc92-3ec3-4ace-94b2-d9d0442e9f73",
+          "metrics": {
+            "first_packet_ms": 710.2888749213889,
+            "first_text_ms": 226.83079191483557,
+            "first_text_to_audio_ms": 483.45808300655335,
+            "first_nonzero_packet_ms": 710.2936669252813,
+            "audio_bytes": 181272,
+            "audio_chunks": 11,
+            "text_chars": 20,
+            "reused": true,
+            "connect_ms": 0,
+            "prewarm_connect_ms": 832.2239170083776,
+            "prewarm_connection_ready_ms": 1059.6253339899704,
+            "connection_ready_ms": 0.008624978363513947,
+            "session_ready_ms": 226.70858295168728,
+            "input_finished_ms": 710.5902920011431,
+            "total_ms": 1435.078041977249,
+            "elapsed_ms": 1435.0814169738442
+          },
+          "data": {
+            "usage": {
+              "text_words": 20
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

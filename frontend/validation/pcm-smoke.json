@@ -1,0 +1,628 @@
+{
+  "schema": "super-xd-audio-measurements-v1",
+  "time_domain": "same-page performance.now milliseconds",
+  "render_semantics": "AudioWorklet first real PCM sample consumed; main-thread notification observation includes message delay, not acoustic speaker onset",
+  "records": [
+    {
+      "client_request_id": "a7ffbee9-f2f1-448b-b8cb-323f12c82fd9",
+      "query": "你好，准备出发啦。",
+      "turn_id": "3a2c97c6dfc9",
+      "submit_perf_ms": 6545.899999976158,
+      "submit_epoch_ms": 1791732720149.5999,
+      "pcm_bytes": 317074,
+      "pcm_packets": 18,
+      "pcm_samples": 158537,
+      "status": "ended",
+      "vehicle_receipts": [],
+      "task_ids": [],
+      "background_tasks": [],
+      "playback_id": "b32145baf78540c99449297a618f6e8f",
+      "audio_started_perf_ms": 6564.5,
+      "context_state": "running",
+      "context_sample_rate": 44100,
+      "input_sample_rate": 24000,
+      "diagnostics": {
+        "type": "event",
+        "event": "session.finished",
+        "event_code": 152,
+        "session_id": "664f3396-5e7a-4106-9cc8-58c5c59cb0ef",
+        "metrics": {
+          "first_packet_ms": 1827.4402499664575,
+          "first_text_ms": 1333.0677499761805,
+          "first_text_to_audio_ms": 494.372499990277,
+          "first_nonzero_packet_ms": 1827.443499932997,
+          "audio_bytes": 317074,
+          "audio_chunks": 18,
+          "text_chars": 40,
+          "reused": true,
+          "connect_ms": 0,
+          "prewarm_connect_ms": 779.8745420295745,
+          "prewarm_connection_ready_ms": 1012.9092499846593,
+          "connection_ready_ms": 0.011499971151351929,
+          "session_ready_ms": 232.07670892588794,
+          "input_finished_ms": 1333.2138339756057,
+          "total_ms": 3095.777208916843,
+          "elapsed_ms": 3095.7788749365136
+        },
+        "data": {
+          "usage": {
+            "text_words": 40
+          }
+        },
+        "server_first_text_ms": 1335.0329579552636,
+        "server_first_audio_ms": 1829.563583014533,
+        "server_first_nonzero_audio_ms": 1829.563583014533,
+        "audio_chunks": 18,
+        "audio_bytes": 317074,
+        "speech_elapsed_ms": 3097.9320000624284
+      },
+      "first_pcm_perf_ms": 8379.399999976158,
+      "first_nonzero_pcm_perf_ms": 8379.399999976158,
+      "first_play_scheduled_perf_ms": 8380.399999976158,
+      "first_render_observed_perf_ms": 8392.899999976158,
+      "render_context_time": 7.7148299319727895,
+      "render_current_frame": 340224,
+      "first_nonzero_render_observed_perf_ms": 8400.199999928474,
+      "nonzero_render_context_time": 7.7161224489795925,
+      "nonzero_render_current_frame": 340281,
+      "audio_ended_perf_ms": 9673.299999952316,
+      "drained_perf_ms": 14982.599999904633,
+      "rendered_output_samples": 291312,
+      "finished_perf_ms": 14982.799999952316
+    },
+    {
+      "client_request_id": "5fb52e01-6727-4dab-bdeb-e580186003bb",
+      "query": "用一句话形容秋天。",
+      "turn_id": "d7c95dc4cf32",
+      "submit_perf_ms": 48278.5,
+      "submit_epoch_ms": 1791732761882.2,
+      "pcm_bytes": 259332,
+      "pcm_packets": 14,
+      "pcm_samples": 129666,
+      "status": "ended",
+      "vehicle_receipts": [],
+      "task_ids": [],
+      "background_tasks": [],
+      "playback_id": "6f33b5cac36748309c543b3f88454d13",
+      "audio_started_perf_ms": 48323.5,
+      "context_state": "running",
+      "context_sample_rate": 44100,
+      "input_sample_rate": 24000,
+      "diagnostics": {
+        "type": "event",
+        "event": "session.finished",
+        "event_code": 152,
+        "session_id": "d857a3e4-67d4-4eab-a59c-eae0fbea6606",
+        "metrics": {
+          "first_packet_ms": 2253.6335840122774,
+          "first_text_ms": 1732.565458980389,
+          "first_text_to_audio_ms": 521.0681250318885,
+          "first_nonzero_packet_ms": 2253.6405419232324,
+          "audio_bytes": 259332,
+          "audio_chunks": 14,
+          "text_chars": 23,
+          "reused": true,
+          "connect_ms": 0,
+          "prewarm_connect_ms": 779.8745420295745,
+          "prewarm_connection_ready_ms": 1012.9092499846593,
+          "connection_ready_ms": 0.011041993275284767,
+          "session_ready_ms": 232.63887490611523,
+          "input_finished_ms": 1732.7149169286713,
+          "total_ms": 2959.1206669574603,
+          "elapsed_ms": 2959.1240419540554
+        },
+        "data": {
+          "usage": {
+            "text_words": 23
+          }
+        },
+        "server_first_text_ms": 1734.8938749637455,
+        "server_first_audio_ms": 2256.303207948804,
+        "server_first_nonzero_audio_ms": 2256.303207948804,
+        "audio_chunks": 14,
+        "audio_bytes": 259332,
+        "speech_elapsed_ms": 2961.7700829403475
+      },
+      "first_pcm_perf_ms": 50537.799999952316,
+      "first_nonzero_pcm_perf_ms": 50537.799999952316,
+      "first_play_scheduled_perf_ms": 50537.799999952316,
+      "first_render_observed_perf_ms": 50551.59999990463,
+      "render_context_time": 49.87646258503401,
+      "render_current_frame": 2199552,
+      "first_nonzero_render_observed_perf_ms": 50560.09999990463,
+      "nonzero_render_context_time": 49.877755102040815,
+      "nonzero_render_current_frame": 2199609,
+      "audio_ended_perf_ms": 51295,
+      "drained_perf_ms": 55980,
+      "rendered_output_samples": 238262,
+      "finished_perf_ms": 55980.09999990463
+    },
+    {
+      "client_request_id": "e320bba3-3c4b-4b27-a387-86596e57d6ee",
+      "query": "把左前车窗打开到一半。",
+      "turn_id": "2f6fc874d8f1",
+      "submit_perf_ms": 65879,
+      "submit_epoch_ms": 1791732779482.7,
+      "pcm_bytes": 162736,
+      "pcm_packets": 10,
+      "pcm_samples": 81368,
+      "status": "ended",
+      "vehicle_receipts": [
+        {
+          "turn_id": "2f6fc874d8f1",
+          "command_id": "eb57bf7f2c65",
+          "result": {
+            "ok": true,
+            "name": "set_window_position",
+            "arguments": {
+              "window": "driver",
+              "position": 50
+            },
+            "value": 50,
+            "state": {
+              "_meta": {
+                "simulated": true,
+                "speed_kph": 0,
+                "charging": false
+              },
+              "climate": {
+                "power": false,
+                "temperatures": {
+                  "driver": 22,
+                  "front_passenger": 22,
+                  "rear": 22
+                },
+                "fan_speed": 3,
+                "airflow_mode": "face",
+                "recirculation": "auto",
+                "auto": true,
+                "front_defrost": false,
+                "rear_defrost": false,
+                "air_purifier": false,
+                "fragrance": 0,
+                "humidity_target": 50,
+                "temperature_unit": "celsius",
+                "sync_zones": false,
+                "rear_power": false,
+                "air_quality": {
+                  "pm25_ug_m3": 12,
+                  "co2_ppm": 650,
+                  "simulated": true
+                }
+              },
+              "seats": {
+                "positions": {
+                  "driver": {
+                    "heating": 0,
+                    "ventilation": 0,
+                    "massage": "off",
+                    "fore_aft": 50,
+                    "height": 50,
+                    "backrest": 105,
+                    "lumbar": 50,
+                    "cushion_length": 50,
+                    "side_support": 0,
+                    "headrest": 50,
+                    "occupied": true
+                  },
+                  "front_passenger": {
+                    "heating": 0,
+                    "ventilation": 0,
+                    "massage": "off",
+                    "fore_aft": 50,
+                    "height": 50,
+                    "backrest": 105,
+                    "lumbar": 50,
+                    "cushion_length": 50,
+                    "side_support": 0,
+                    "headrest": 50,
+                    "occupied": false
+                  },
+                  "rear_left": {
+                    "heating": 0,
+                    "ventilation": 0,
+                    "massage": "off",
+                    "fore_aft": 50,
+                    "height": 50,
+                    "backrest": 105,
+                    "lumbar": 50,
+                    "cushion_length": 50,
+                    "side_support": 0,
+                    "headrest": 50,
+                    "occupied": false
+                  },
+                  "rear_right": {
+                    "heating": 0,
+                    "ventilation": 0,
+                    "massage": "off",
+                    "fore_aft": 50,
+                    "height": 50,
+                    "backrest": 105,
+                    "lumbar": 50,
+                    "cushion_length": 50,
+                    "side_support": 0,
+                    "headrest": 50,
+                    "occupied": false
+                  }
+                },
+                "memories": {
+                  "driver": {
+                    "1": {
+                      "heating": 0,
+                      "ventilation": 0,
+                      "massage": "off",
+                      "fore_aft": 50,
+                      "height": 50,
+                      "backrest": 105,
+                      "lumbar": 50,
+                      "cushion_length": 50,
+                      "side_support": 0,
+                      "headrest": 50,
+                      "occupied": true
+                    },
+                    "2": {
+                      "heating": 0,
+                      "ventilation": 0,
+                      "massage": "off",
+                      "fore_aft": 50,
+                      "height": 50,
+                      "backrest": 105,
+                      "lumbar": 50,
+                      "cushion_length": 50,
+                      "side_support": 0,
+                      "headrest": 50,
+                      "occupied": true
+                    },
+                    "3": {
+                      "heating": 0,
+                      "ventilation": 0,
+                      "massage": "off",
+                      "fore_aft": 50,
+                      "height": 50,
+                      "backrest": 105,
+                      "lumbar": 50,
+                      "cushion_length": 50,
+                      "side_support": 0,
+                      "headrest": 50,
+                      "occupied": true
+                    }
+                  },
+                  "front_passenger": {
+                    "1": {
+                      "heating": 0,
+                      "ventilation": 0,
+                      "massage": "off",
+                      "fore_aft": 50,
+                      "height": 50,
+                      "backrest": 105,
+                      "lumbar": 50,
+                      "cushion_length": 50,
+                      "side_support": 0,
+                      "headrest": 50,
+                      "occupied": false
+                    },
+                    "2": {
+                      "heating": 0,
+                      "ventilation": 0,
+                      "massage": "off",
+                      "fore_aft": 50,
+                      "height": 50,
+                      "backrest": 105,
+                      "lumbar": 50,
+                      "cushion_length": 50,
+                      "side_support": 0,
+                      "headrest": 50,
+                      "occupied": false
+                    },
+                    "3": {
+                      "heating": 0,
+                      "ventilation": 0,
+                      "massage": "off",
+                      "fore_aft": 50,
+                      "height": 50,
+                      "backrest": 105,
+                      "lumbar": 50,
+                      "cushion_length": 50,
+                      "side_support": 0,
+                      "headrest": 50,
+                      "occupied": false
+                    }
+                  },
+                  "rear_left": {
+                    "1": {
+                      "heating": 0,
+                      "ventilation": 0,
+                      "massage": "off",
+                      "fore_aft": 50,
+                      "height": 50,
+                      "backrest": 105,
+                      "lumbar": 50,
+                      "cushion_length": 50,
+                      "side_support": 0,
+                      "headrest": 50,
+                      "occupied": false
+                    },
+                    "2": {
+                      "heating": 0,
+                      "ventilation": 0,
+                      "massage": "off",
+                      "fore_aft": 50,
+                      "height": 50,
+                      "backrest": 105,
+                      "lumbar": 50,
+                      "cushion_length": 50,
+                      "side_support": 0,
+                      "headrest": 50,
+                      "occupied": false
+                    },
+                    "3": {
+                      "heating": 0,
+                      "ventilation": 0,
+                      "massage": "off",
+                      "fore_aft": 50,
+                      "height": 50,
+                      "backrest": 105,
+                      "lumbar": 50,
+                      "cushion_length": 50,
+                      "side_support": 0,
+                      "headrest": 50,
+                      "occupied": false
+                    }
+                  },
+                  "rear_right": {
+                    "1": {
+                      "heating": 0,
+                      "ventilation": 0,
+                      "massage": "off",
+                      "fore_aft": 50,
+                      "height": 50,
+                      "backrest": 105,
+                      "lumbar": 50,
+                      "cushion_length": 50,
+                      "side_support": 0,
+                      "headrest": 50,
+                      "occupied": false
+                    },
+                    "2": {
+                      "heating": 0,
+                      "ventilation": 0,
+                      "massage": "off",
+                      "fore_aft": 50,
+                      "height": 50,
+                      "backrest": 105,
+                      "lumbar": 50,
+                      "cushion_length": 50,
+                      "side_support": 0,
+                      "headrest": 50,
+                      "occupied": false
+                    },
+                    "3": {
+                      "heating": 0,
+                      "ventilation": 0,
+                      "massage": "off",
+                      "fore_aft": 50,
+                      "height": 50,
+                      "backrest": 105,
+                      "lumbar": 50,
+                      "cushion_length": 50,
+                      "side_support": 0,
+                      "headrest": 50,
+                      "occupied": false
+                    }
+                  }
+                },
+                "steering_heating": false,
+                "steering_position": {
+                  "reach": 50,
+                  "height": 50
+                },
+                "easy_entry": false
+              },
+              "windows": {
+                "positions": {
+                  "driver": 50,
+                  "front_passenger": 0,
+                  "rear_left": 0,
+                  "rear_right": 0
+                },
+                "child_lock": false,
+                "anti_pinch": {
+                  "driver": true,
+                  "front_passenger": true,
+                  "rear_left": true,
+                  "rear_right": true
+                },
+                "sunroof": 0,
+                "sunshade": 0,
+                "rain_close": false
+              },
+              "mirrors": {
+                "positions": {
+                  "left": {
+                    "horizontal": 0,
+                    "vertical": 0
+                  },
+                  "right": {
+                    "horizontal": 0,
+                    "vertical": 0
+                  }
+                },
+                "folded": false,
+                "heating": false,
+                "reverse_tilt": false,
+                "memories": {
+                  "1": {
+                    "left": {
+                      "horizontal": 0,
+                      "vertical": 0
+                    },
+                    "right": {
+                      "horizontal": 0,
+                      "vertical": 0
+                    }
+                  },
+                  "2": {
+                    "left": {
+                      "horizontal": 0,
+                      "vertical": 0
+                    },
+                    "right": {
+                      "horizontal": 0,
+                      "vertical": 0
+                    }
+                  },
+                  "3": {
+                    "left": {
+                      "horizontal": 0,
+                      "vertical": 0
+                    },
+                    "right": {
+                      "horizontal": 0,
+                      "vertical": 0
+                    }
+                  }
+                }
+              },
+              "lights": {
+                "interior": {
+                  "front": false,
+                  "rear": false
+                },
+                "ambient": false,
+                "ambient_color": "warm",
+                "ambient_brightness": 40,
+                "headlight_mode": "auto",
+                "high_beam": false,
+                "front_fog": false,
+                "rear_fog": false,
+                "reading": {
+                  "driver": false,
+                  "front_passenger": false,
+                  "rear_left": false,
+                  "rear_right": false
+                },
+                "follow_me_home_seconds": 30,
+                "hazard": false
+              },
+              "locks": {
+                "doors": {
+                  "driver": true,
+                  "front_passenger": true,
+                  "rear_left": true,
+                  "rear_right": true
+                },
+                "child_lock": {
+                  "left": false,
+                  "right": false
+                },
+                "auto_lock": true,
+                "walk_away_lock": false,
+                "charge_port_locked": true
+              },
+              "tailgate": {
+                "open": false,
+                "position": 0,
+                "height": 100,
+                "moving": false,
+                "last_action": "idle"
+              },
+              "wipers": {
+                "mode": "off",
+                "interval_seconds": 5,
+                "rear": false,
+                "rain_sensitivity": 3,
+                "washer_fluid_pct": 100,
+                "wash_count": 0,
+                "last_wash": null
+              },
+              "media": {
+                "volume": 30,
+                "mute": false,
+                "playback": "paused",
+                "source": "bluetooth",
+                "title": "模拟曲目 1",
+                "track_index": 1,
+                "radio_frequency_mhz": 98.5,
+                "balance": 0,
+                "fader": 0,
+                "equalizer": "flat",
+                "simulated": true
+              },
+              "navigation": {
+                "destination": null,
+                "waypoints": [],
+                "active": false,
+                "preferences": {
+                  "avoid_tolls": false,
+                  "avoid_highways": false,
+                  "prefer_fastest": true
+                },
+                "home": null,
+                "work": null,
+                "simulated": true,
+                "notice": "仅保存模拟目的地、途经点与偏好；未计算真实路线"
+              }
+            }
+          },
+          "latency_ms": 1437.0152079500258,
+          "received_perf_ms": 67348.5
+        }
+      ],
+      "task_ids": [],
+      "background_tasks": [],
+      "playback_id": "18b2995869394574a2ad6478119b5431",
+      "audio_started_perf_ms": 65924.59999990463,
+      "context_state": "running",
+      "context_sample_rate": 44100,
+      "input_sample_rate": 24000,
+      "diagnostics": {
+        "type": "event",
+        "event": "session.finished",
+        "event_code": 152,
+        "session_id": "21d1840b-f605-4249-a685-219e4b8d9d37",
+        "metrics": {
+          "first_packet_ms": 1954.3842499842867,
+          "first_text_ms": 1436.9199590291828,
+          "first_text_to_audio_ms": 517.4642909551039,
+          "first_nonzero_packet_ms": 1954.3866669991985,
+          "audio_bytes": 162736,
+          "audio_chunks": 10,
+          "text_chars": 16,
+          "reused": true,
+          "connect_ms": 0,
+          "prewarm_connect_ms": 779.8745420295745,
+          "prewarm_connection_ready_ms": 1012.9092499846593,
+          "connection_ready_ms": 0.009750016033649445,
+          "session_ready_ms": 222.22620900720358,
+          "input_finished_ms": 1437.0777499862015,
+          "total_ms": 2289.73550000228,
+          "elapsed_ms": 2289.7365420358256
+        },
+        "data": {
+          "usage": {
+            "text_words": 16
+          }
+        },
+        "server_first_text_ms": 1437.5066659413278,
+        "server_first_audio_ms": 1955.803666030988,
+        "server_first_nonzero_audio_ms": 1955.803666030988,
+        "audio_chunks": 10,
+        "audio_bytes": 162736,
+        "speech_elapsed_ms": 2291.163375019096
+      },
+      "first_pcm_perf_ms": 67836.89999997616,
+      "first_nonzero_pcm_perf_ms": 67836.89999997616,
+      "first_play_scheduled_perf_ms": 67836.89999997616,
+      "first_render_observed_perf_ms": 67870.39999997616,
+      "render_context_time": 67.13469387755102,
+      "render_current_frame": 2960640,
+      "first_nonzero_render_observed_perf_ms": 67880.69999992847,
+      "nonzero_render_context_time": 67.13598639455782,
+      "nonzero_render_current_frame": 2960697,
+      "audio_ended_perf_ms": 68171.19999992847,
+      "drained_perf_ms": 71229.79999995232,
+      "rendered_output_samples": 149514,
+      "finished_perf_ms": 71229.79999995232
+    }
+  ]
+}

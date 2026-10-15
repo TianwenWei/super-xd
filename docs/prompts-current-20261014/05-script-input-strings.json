@@ -1,0 +1,1724 @@
+{
+  "note": "仓库脚本静态中文字符串/动态表达式的候选附录，包含评测user queries与日志标签；非生产系统提示，不包含任何历史报告内容。",
+  "files": [
+    {
+      "file": "scripts/audio_benchmark.py",
+      "strings": [
+        {
+          "line": 17,
+          "kind": "literal",
+          "value": "你好，准备出发啦。"
+        },
+        {
+          "line": 18,
+          "kind": "literal",
+          "value": "今天终于完成一件拖了很久的小事，陪我聊一句吧。"
+        },
+        {
+          "line": 19,
+          "kind": "literal",
+          "value": "把空调温度设为23度"
+        },
+        {
+          "line": 20,
+          "kind": "literal",
+          "value": "把左前车窗打开到50%"
+        },
+        {
+          "line": 21,
+          "kind": "literal",
+          "value": "把模拟导航目的地设为上海虹桥站"
+        },
+        {
+          "line": 22,
+          "kind": "literal",
+          "value": "请查询巴黎今天的天气，并核对真实来源。"
+        },
+        {
+          "line": 23,
+          "kind": "literal",
+          "value": "把音量设为35%"
+        },
+        {
+          "line": 26,
+          "kind": "literal",
+          "value": "用一句话形容秋天。"
+        },
+        {
+          "line": 164,
+          "kind": "literal",
+          "value": "上海虹桥站"
+        }
+      ]
+    },
+    {
+      "file": "scripts/benchmark.py",
+      "strings": [
+        {
+          "line": 16,
+          "kind": "literal",
+          "value": "晚上好，陪我聊两句。"
+        },
+        {
+          "line": 16,
+          "kind": "literal",
+          "value": "用一句话形容秋天。"
+        },
+        {
+          "line": 16,
+          "kind": "literal",
+          "value": "给我一句轻松的鼓励。"
+        },
+        {
+          "line": 16,
+          "kind": "literal",
+          "value": "你喜欢安静的雨天吗？"
+        },
+        {
+          "line": 16,
+          "kind": "literal",
+          "value": "讲一个简短的小笑话。"
+        },
+        {
+          "line": 16,
+          "kind": "literal",
+          "value": "如果周末可以完全放空，你会怎么安排？"
+        },
+        {
+          "line": 18,
+          "kind": "literal",
+          "value": "把空调温度设为23度"
+        },
+        {
+          "line": 19,
+          "kind": "literal",
+          "value": "关闭全部车窗"
+        },
+        {
+          "line": 20,
+          "kind": "literal",
+          "value": "把音量设为40"
+        },
+        {
+          "line": 21,
+          "kind": "literal",
+          "value": "把左前车窗打开到20%"
+        },
+        {
+          "line": 22,
+          "kind": "literal",
+          "value": "打开空调"
+        },
+        {
+          "line": 23,
+          "kind": "literal",
+          "value": "风量设为3档"
+        },
+        {
+          "line": 24,
+          "kind": "literal",
+          "value": "主驾座椅加热设为1档"
+        },
+        {
+          "line": 25,
+          "kind": "literal",
+          "value": "打开前排车内灯"
+        },
+        {
+          "line": 26,
+          "kind": "literal",
+          "value": "暂停音乐"
+        },
+        {
+          "line": 27,
+          "kind": "literal",
+          "value": "把模拟导航目的地设为上海虹桥站"
+        },
+        {
+          "line": 27,
+          "kind": "literal",
+          "value": "上海虹桥站"
+        },
+        {
+          "line": 96,
+          "kind": "literal",
+          "value": "请真实调研法国巴黎科学工业城与自然历史博物馆适合带孩子参观的差异。读取两家官方来源，核实开放日、交通和儿童活动；给出详细比较并说明查询时间。"
+        },
+        {
+          "line": 97,
+          "kind": "literal",
+          "value": "请真实调研Tavily Search和Extract API的区别、失败情况及来源追溯。读取至少三个官方页面，给出对实时车载助手的工程建议和查询时间。"
+        }
+      ]
+    },
+    {
+      "file": "scripts/diagnose_mini_decisions.py",
+      "strings": [
+        {
+          "line": 15,
+          "kind": "literal",
+          "value": "提交工具前只核对当前原句的两个集合：A是用户明确要求执行或设置的项目，H是要求暂缓、保持或不操作的项目。tool_calls必须且只能完整覆盖A，不能因参数是false就漏掉明确关闭动作，也不能为满足H额外生成false设置。关闭某功能是动作；先不要打开某功能是保持原状，不是要求关闭。历史操作不属于本轮A。不公开清单，直接调用所需工具。"
+        },
+        {
+          "line": 63,
+          "kind": "literal",
+          "value": "\n请完整覆盖每一个明确动作，包括明确关闭。不要、先不要、别动等保持项不生成设置调用，不以false替代保持。只处理这条原句。"
+        },
+        {
+          "line": 63,
+          "kind": "literal",
+          "value": "本轮原句再次确认："
+        },
+        {
+          "line": 65,
+          "kind": "literal",
+          "value": "本次回复先在content用一句简短文字列出‘执行：…；保持：…’，再在同一回复的tool_calls中完整列出全部执行项。明确关闭也是执行；先不要打开是保持，不生成关闭调用。不得把计划说成已完成，不执行历史动作。"
+        }
+      ]
+    },
+    {
+      "file": "scripts/evaluate_interactions.py",
+      "strings": [
+        {
+          "line": 82,
+          "kind": "literal",
+          "value": "研究巴黎科学工业城适合带孩子参观的活动、主馆和展览区开放时间，读取官网并保留来源及必要限制。"
+        },
+        {
+          "line": 83,
+          "kind": "literal",
+          "value": "研究巴黎国家自然历史博物馆适合带孩子参观的两个展馆、开放时间和预约条件，读取官网并保留来源及限制。"
+        },
+        {
+          "line": 84,
+          "kind": "literal",
+          "value": "巴黎"
+        },
+        {
+          "line": 90,
+          "kind": "literal",
+          "value": "把所有温区的空调温度设为23度。"
+        },
+        {
+          "line": 91,
+          "kind": "literal",
+          "value": "只把主驾温度设为21度，其他温区别动。"
+        },
+        {
+          "line": 92,
+          "kind": "literal",
+          "value": "把左前车窗打开到50%。"
+        },
+        {
+          "line": 93,
+          "kind": "literal",
+          "value": "把音量设为35。"
+        },
+        {
+          "line": 96,
+          "kind": "literal",
+          "value": "把主驾座椅按摩设成舒缓模式。"
+        },
+        {
+          "line": 97,
+          "kind": "literal",
+          "value": "关闭主驾座椅按摩。"
+        },
+        {
+          "line": 98,
+          "kind": "literal",
+          "value": "打开后视镜加热。"
+        },
+        {
+          "line": 102,
+          "kind": "literal",
+          "value": "打开空调，关闭全部车窗，把主驾座椅按摩设成舒缓模式。"
+        },
+        {
+          "line": 108,
+          "kind": "literal",
+          "value": "右前车窗开到20%，音量设25，关闭后视镜加热。"
+        },
+        {
+          "line": 113,
+          "kind": "literal",
+          "value": "关闭空调，并关闭主驾座椅按摩。"
+        },
+        {
+          "line": 119,
+          "kind": "literal",
+          "value": "左前车窗开到33%。"
+        },
+        {
+          "line": 120,
+          "kind": "literal",
+          "value": "现在左前车窗开到多少？"
+        },
+        {
+          "line": 121,
+          "kind": "literal",
+          "value": "只调主驾空调到24度。"
+        },
+        {
+          "line": 122,
+          "kind": "literal",
+          "value": "现在主驾空调是多少度？"
+        },
+        {
+          "line": 125,
+          "kind": "literal",
+          "value": "不要打开车窗，只把音量设成40。"
+        },
+        {
+          "line": 126,
+          "kind": "literal",
+          "value": "温度先别动，不要开加热，只开主驾座椅的舒缓按摩。"
+        },
+        {
+          "line": 127,
+          "kind": "literal",
+          "value": "不是座椅加热，是主驾座椅按摩，把按摩切成波浪模式。"
+        },
+        {
+          "line": 128,
+          "kind": "literal",
+          "value": "不是右前车窗，只把左前车窗开到25%。"
+        },
+        {
+          "line": 131,
+          "kind": "literal",
+          "value": "主驾车窗开到40%。"
+        },
+        {
+          "line": 132,
+          "kind": "literal",
+          "value": "把它关上。"
+        },
+        {
+          "line": 133,
+          "kind": "literal",
+          "value": "只调主驾温度到21度，其他温区别动。"
+        },
+        {
+          "line": 134,
+          "kind": "literal",
+          "value": "改成24度，其他温区别动。"
+        },
+        {
+          "line": 137,
+          "kind": "literal",
+          "value": "你好，我准备出发了。"
+        },
+        {
+          "line": 138,
+          "kind": "literal",
+          "value": "今天终于完成了一件拖了很久的小事，陪我聊一句吧。"
+        },
+        {
+          "line": 139,
+          "kind": "literal",
+          "value": "我有点热，但先别调整任何东西。"
+        },
+        {
+          "line": 140,
+          "kind": "literal",
+          "value": "“天气”这两个字怎么写？不要查天气。"
+        },
+        {
+          "line": 143,
+          "kind": "literal",
+          "value": "把音量设为999。"
+        },
+        {
+          "line": 144,
+          "kind": "literal",
+          "value": "把主驾车窗开到负10%。"
+        },
+        {
+          "line": 146,
+          "kind": "literal",
+          "value": "把所有温区空调设为100度。"
+        },
+        {
+          "line": 150,
+          "kind": "literal",
+          "value": "导航去最近的机场。"
+        },
+        {
+          "line": 151,
+          "kind": "literal",
+          "value": "先不查机场了，导航去上海虹桥站。"
+        },
+        {
+          "line": 152,
+          "kind": "literal",
+          "value": "上海虹桥站"
+        },
+        {
+          "line": 153,
+          "kind": "literal",
+          "value": "上海虹桥站"
+        },
+        {
+          "line": 155,
+          "kind": "literal",
+          "value": "把导航目的地改成上海站。"
+        },
+        {
+          "line": 156,
+          "kind": "literal",
+          "value": "上海站"
+        },
+        {
+          "line": 157,
+          "kind": "literal",
+          "value": "上海站"
+        },
+        {
+          "line": 161,
+          "kind": "literal",
+          "value": "科学工业城"
+        },
+        {
+          "line": 161,
+          "kind": "literal",
+          "value": "开放时间"
+        },
+        {
+          "line": 161,
+          "kind": "literal",
+          "value": "官网"
+        },
+        {
+          "line": 162,
+          "kind": "literal",
+          "value": "研究继续，先把左前车窗开到25%。"
+        },
+        {
+          "line": 163,
+          "kind": "literal",
+          "value": "现在车窗是开的还是关的？我问的是左前车窗。"
+        },
+        {
+          "line": 165,
+          "kind": "literal",
+          "value": "我刚做完一件小事，陪我聊一句，不用说研究进度。"
+        },
+        {
+          "line": 168,
+          "kind": "literal",
+          "value": "科学工业城"
+        },
+        {
+          "line": 168,
+          "kind": "literal",
+          "value": "官网"
+        },
+        {
+          "line": 168,
+          "kind": "literal",
+          "value": "开放时间"
+        },
+        {
+          "line": 169,
+          "kind": "literal",
+          "value": "自然历史博物馆"
+        },
+        {
+          "line": 169,
+          "kind": "literal",
+          "value": "官网"
+        },
+        {
+          "line": 169,
+          "kind": "literal",
+          "value": "预约"
+        },
+        {
+          "line": 170,
+          "kind": "literal",
+          "value": "分别告诉我科学工业城和自然历史博物馆两个研究的当前进度。"
+        },
+        {
+          "line": 172,
+          "kind": "literal",
+          "value": "只取消自然历史博物馆那个研究，科学工业城继续。"
+        },
+        {
+          "line": 174,
+          "kind": "literal",
+          "value": "科学工业城那个研究进度怎么样？"
+        },
+        {
+          "line": 178,
+          "kind": "literal",
+          "value": "查一下巴黎明天的温度，只要简短结论和可核实来源。"
+        },
+        {
+          "line": 178,
+          "kind": "literal",
+          "value": "巴黎"
+        },
+        {
+          "line": 178,
+          "kind": "literal",
+          "value": "明天"
+        },
+        {
+          "line": 178,
+          "kind": "literal",
+          "value": "温度"
+        },
+        {
+          "line": 181,
+          "kind": "literal",
+          "value": "刚才查到的巴黎明天温度是多少？请用已查到的结果回答，不要重新查。"
+        },
+        {
+          "line": 183,
+          "kind": "literal",
+          "value": "巴黎"
+        },
+        {
+          "line": 183,
+          "kind": "literal",
+          "value": "明天"
+        },
+        {
+          "line": 184,
+          "kind": "literal",
+          "value": "请查询科学工业城官网，核对主馆周一是否开放和展览区周日的开放时间，保留完整说明及官方来源。"
+        },
+        {
+          "line": 185,
+          "kind": "literal",
+          "value": "科学工业城"
+        },
+        {
+          "line": 185,
+          "kind": "literal",
+          "value": "周一"
+        },
+        {
+          "line": 185,
+          "kind": "literal",
+          "value": "周日"
+        },
+        {
+          "line": 185,
+          "kind": "literal",
+          "value": "官网"
+        },
+        {
+          "line": 186,
+          "kind": "literal",
+          "value": "研究继续，音量调到20。"
+        },
+        {
+          "line": 187,
+          "kind": "literal",
+          "value": "科学工业城那个研究的简短结论是什么？详细报告留在卡里。"
+        },
+        {
+          "line": 194,
+          "kind": "literal",
+          "value": "查询我指定城市明天的天气温度。我还没有提供城市，请先向我确认城市，不能猜测或从历史推断。"
+        },
+        {
+          "line": 196,
+          "kind": "literal",
+          "value": "后台那个天气任务还缺什么信息？"
+        },
+        {
+          "line": 199,
+          "kind": "literal",
+          "value": "那个天气任务查巴黎明天的温度，核实可信来源后简短回答。"
+        },
+        {
+          "line": 200,
+          "kind": "literal",
+          "value": "巴黎"
+        },
+        {
+          "line": 200,
+          "kind": "literal",
+          "value": "明天"
+        },
+        {
+          "line": 201,
+          "kind": "literal",
+          "value": "天气继续查，先把左前车窗打开一半。"
+        },
+        {
+          "line": 209,
+          "kind": "literal",
+          "value": "只打开前排车内灯。"
+        },
+        {
+          "line": 211,
+          "kind": "literal",
+          "value": "只把氛围灯颜色设为蓝色、亮度设60%，先不要打开氛围灯。"
+        },
+        {
+          "line": 215,
+          "kind": "literal",
+          "value": "关闭前排车内灯，并打开氛围灯。"
+        },
+        {
+          "line": 220,
+          "kind": "literal",
+          "value": "只解锁右前副驾车门。"
+        },
+        {
+          "line": 222,
+          "kind": "literal",
+          "value": "打开左后车门儿童安全锁，右侧别动。"
+        },
+        {
+          "line": 224,
+          "kind": "literal",
+          "value": "锁上右前副驾车门，并关闭左后儿童安全锁。"
+        },
+        {
+          "line": 229,
+          "kind": "literal",
+          "value": "把尾门下次开启高度设为70%。"
+        },
+        {
+          "line": 231,
+          "kind": "literal",
+          "value": "打开后备箱尾门。"
+        },
+        {
+          "line": 234,
+          "kind": "literal",
+          "value": "关闭后备箱尾门。"
+        },
+        {
+          "line": 239,
+          "kind": "literal",
+          "value": "把前雨刷设为低速。"
+        },
+        {
+          "line": 241,
+          "kind": "literal",
+          "value": "清洗一次前挡风玻璃，不要改变雨刷档位。"
+        },
+        {
+          "line": 244,
+          "kind": "literal",
+          "value": "关闭前雨刷。"
+        },
+        {
+          "line": 251,
+          "kind": "literal",
+          "value": "先把副驾车窗打开一半。"
+        },
+        {
+          "line": 252,
+          "kind": "literal",
+          "value": "副驾车窗别动，把其余三扇窗都关上。"
+        },
+        {
+          "line": 258,
+          "kind": "literal",
+          "value": "查询我指定城市明天的天气温度。我还没有提供城市，请先向我确认城市，不能猜测或从历史推断。"
+        },
+        {
+          "line": 260,
+          "kind": "literal",
+          "value": "巴黎"
+        },
+        {
+          "line": 260,
+          "kind": "literal",
+          "value": "巴黎"
+        },
+        {
+          "line": 263,
+          "kind": "literal",
+          "value": "把所有温区都调到23度。"
+        },
+        {
+          "line": 264,
+          "kind": "literal",
+          "value": "后排调低两度，前排保持不变。"
+        },
+        {
+          "line": 272,
+          "kind": "literal",
+          "value": "打开氛围灯，并启用左后门儿童安全锁。"
+        },
+        {
+          "line": 275,
+          "kind": "literal",
+          "value": "氛围灯保持现在的开关状态，只把颜色改成紫色、亮度调到45%，先别动开关。"
+        },
+        {
+          "line": 279,
+          "kind": "literal",
+          "value": "把左后儿童安全锁解除，右后儿童安全锁启用，其他别动。"
+        },
+        {
+          "line": 289,
+          "kind": "literal",
+          "value": "查一下法国巴黎明天的温度，只要简短结论和可核实来源。"
+        },
+        {
+          "line": 290,
+          "kind": "literal",
+          "value": "法国"
+        },
+        {
+          "line": 290,
+          "kind": "literal",
+          "value": "巴黎"
+        },
+        {
+          "line": 290,
+          "kind": "literal",
+          "value": "明天"
+        },
+        {
+          "line": 290,
+          "kind": "literal",
+          "value": "温度"
+        },
+        {
+          "line": 292,
+          "kind": "literal",
+          "value": "刚才查到的法国巴黎明天温度是多少？请用已有结果回答，不要重新查。"
+        },
+        {
+          "line": 294,
+          "kind": "literal",
+          "value": "巴黎"
+        },
+        {
+          "line": 294,
+          "kind": "literal",
+          "value": "明天"
+        },
+        {
+          "line": 295,
+          "kind": "literal",
+          "value": "查询法国气象局官网，核对法国巴黎明天的温度，只要简短结论和官方来源。"
+        },
+        {
+          "line": 296,
+          "kind": "literal",
+          "value": "法国"
+        },
+        {
+          "line": 296,
+          "kind": "literal",
+          "value": "气象局"
+        },
+        {
+          "line": 296,
+          "kind": "literal",
+          "value": "官网"
+        },
+        {
+          "line": 296,
+          "kind": "literal",
+          "value": "巴黎"
+        },
+        {
+          "line": 296,
+          "kind": "literal",
+          "value": "明天"
+        },
+        {
+          "line": 296,
+          "kind": "literal",
+          "value": "温度"
+        },
+        {
+          "line": 300,
+          "kind": "literal",
+          "value": "刚才法国气象局官网那个任务的结论是什么？用已有结果回答，详细来源留卡里，不要重新查。"
+        },
+        {
+          "line": 302,
+          "kind": "literal",
+          "value": "巴黎"
+        },
+        {
+          "line": 302,
+          "kind": "literal",
+          "value": "明天"
+        },
+        {
+          "line": 308,
+          "kind": "literal",
+          "value": "现在车窗是开的还是关的？"
+        },
+        {
+          "line": 309,
+          "kind": "literal",
+          "value": "导航去最近的机场。"
+        },
+        {
+          "line": 310,
+          "kind": "literal",
+          "value": "现在车窗是开的还是关的？"
+        },
+        {
+          "line": 311,
+          "kind": "literal",
+          "value": "关闭主驾座椅按摩。"
+        },
+        {
+          "line": 340,
+          "kind": "literal",
+          "value": "负"
+        },
+        {
+          "line": 340,
+          "kind": "literal",
+          "value": "负"
+        },
+        {
+          "line": 341,
+          "kind": "literal",
+          "value": "点"
+        },
+        {
+          "line": 341,
+          "kind": "literal",
+          "value": "两"
+        },
+        {
+          "line": 341,
+          "kind": "literal",
+          "value": "零一二三四五六七八九"
+        },
+        {
+          "line": 344,
+          "kind": "literal",
+          "value": "百"
+        },
+        {
+          "line": 345,
+          "kind": "literal",
+          "value": "百"
+        },
+        {
+          "line": 346,
+          "kind": "literal",
+          "value": "十"
+        },
+        {
+          "line": 347,
+          "kind": "literal",
+          "value": "十"
+        },
+        {
+          "line": 356,
+          "kind": "literal",
+          "value": "摄氏度"
+        },
+        {
+          "line": 356,
+          "kind": "literal",
+          "value": "度"
+        },
+        {
+          "line": 356,
+          "kind": "literal",
+          "value": "度"
+        },
+        {
+          "line": 356,
+          "kind": "literal",
+          "value": "度"
+        },
+        {
+          "line": 356,
+          "kind": "literal",
+          "value": "度"
+        },
+        {
+          "line": 356,
+          "kind": "literal",
+          "value": "一半"
+        },
+        {
+          "line": 357,
+          "kind": "literal",
+          "value": "[负零〇一二两三四五六七八九十百点]+"
+        },
+        {
+          "line": 363,
+          "kind": "literal",
+          "value": "主驾|左前"
+        },
+        {
+          "line": 363,
+          "kind": "literal",
+          "value": "副驾|右前"
+        },
+        {
+          "line": 363,
+          "kind": "literal",
+          "value": "左后"
+        },
+        {
+          "line": 363,
+          "kind": "literal",
+          "value": "右后"
+        },
+        {
+          "line": 364,
+          "kind": "literal",
+          "value": "(?:所有|全部|四个|4(?:个|扇))车窗|车窗(?:都|全)"
+        },
+        {
+          "line": 365,
+          "kind": "literal",
+          "value": "[？?]|不确定|不知道|无法确认|可能|应该"
+        },
+        {
+          "line": 367,
+          "kind": "f-string source",
+          "value": "rf'(?:现在是|当前是|现在|当前|是)?{claim[\"value\"]}度(?:了)?'"
+        },
+        {
+          "line": 367,
+          "kind": "literal",
+          "value": "(?:现在是|当前是|现在|当前|是)?"
+        },
+        {
+          "line": 367,
+          "kind": "literal",
+          "value": "度(?:了)?"
+        },
+        {
+          "line": 370,
+          "kind": "literal",
+          "value": "不确定|不知道|无法确认|是不是|是否|可能|应该|吗|呢"
+        },
+        {
+          "line": 371,
+          "kind": "literal",
+          "value": "副驾|右前|左后|右后"
+        },
+        {
+          "line": 373,
+          "kind": "f-string source",
+          "value": "rf'(?<!\\d){claim[\"value\"]}(?!\\d)\\s*度'"
+        },
+        {
+          "line": 373,
+          "kind": "literal",
+          "value": "(?!\\d)\\s*度"
+        },
+        {
+          "line": 373,
+          "kind": "literal",
+          "value": "不是|没有设|未设"
+        },
+        {
+          "line": 375,
+          "kind": "literal",
+          "value": "关闭|全关|关着|关好|关了|未打开|没有打开|开度(?:为|是)?\\s*0"
+        },
+        {
+          "line": 375,
+          "kind": "literal",
+          "value": "没有(?:全)?关|未(?:全)?关|不是(?:全)?关"
+        },
+        {
+          "line": 378,
+          "kind": "f-string source",
+          "value": "rf'(?:开|打开|开度|百分之|开了|开到).*?(?<!\\d){value}(?!\\d)'"
+        },
+        {
+          "line": 378,
+          "kind": "literal",
+          "value": "(?:开|打开|开度|百分之|开了|开到).*?(?<!\\d)"
+        },
+        {
+          "line": 378,
+          "kind": "literal",
+          "value": "没有开|未开|不是.*"
+        },
+        {
+          "line": 431,
+          "kind": "literal",
+          "value": "后视镜加热"
+        },
+        {
+          "line": 432,
+          "kind": "literal",
+          "value": "方向盘加热"
+        },
+        {
+          "line": 433,
+          "kind": "literal",
+          "value": "座椅加热"
+        },
+        {
+          "line": 434,
+          "kind": "literal",
+          "value": "座椅通风"
+        },
+        {
+          "line": 435,
+          "kind": "literal",
+          "value": "座椅按摩"
+        },
+        {
+          "line": 436,
+          "kind": "literal",
+          "value": "氛围灯"
+        },
+        {
+          "line": 437,
+          "kind": "literal",
+          "value": "车内灯"
+        },
+        {
+          "line": 442,
+          "kind": "literal",
+          "value": "\\s|的"
+        },
+        {
+          "line": 458,
+          "kind": "literal",
+          "value": "主驾|左前"
+        },
+        {
+          "line": 458,
+          "kind": "literal",
+          "value": "副驾|右前"
+        },
+        {
+          "line": 459,
+          "kind": "literal",
+          "value": "左后|后排左侧"
+        },
+        {
+          "line": 459,
+          "kind": "literal",
+          "value": "右后|后排右侧"
+        },
+        {
+          "line": 463,
+          "kind": "literal",
+          "value": "别动|不要动|保持(?:不变|原状|现状)|维持(?:不变|原状|现状)|保留"
+        },
+        {
+          "line": 468,
+          "kind": "literal",
+          "value": "出发城市或地址"
+        },
+        {
+          "line": 573,
+          "kind": "literal",
+          "value": "(?<![\\d.])(-?\\d+(?:\\.\\d+)?)\\s*度?\\s*(?:至|到|[~～–—-])\\s*(-?\\d+(?:\\.\\d+)?)\\s*度"
+        },
+        {
+          "line": 582,
+          "kind": "literal",
+          "value": "最低(?:气温|温度)?[^\\d负-]{0,8}(-?\\d+(?:\\.\\d+)?)\\s*度"
+        },
+        {
+          "line": 583,
+          "kind": "literal",
+          "value": "最高(?:气温|温度)?[^\\d负-]{0,8}(-?\\d+(?:\\.\\d+)?)\\s*度"
+        },
+        {
+          "line": 592,
+          "kind": "literal",
+          "value": "历史(?:天气|数据|记录|气温|温度)?"
+        },
+        {
+          "line": 593,
+          "kind": "literal",
+          "value": "平均(?:气温|温度|值)?|气候平均"
+        },
+        {
+          "line": 594,
+          "kind": "literal",
+          "value": "未(?:能)?核实|没有核实|无法(?:核实|确认)|不能(?:核实|确认)|尚未确认"
+        },
+        {
+          "line": 595,
+          "kind": "literal",
+          "value": "(?:来源|数据|温度|范围).{0,18}(?:不同|不一致|差异|冲突)"
+        },
+        {
+          "line": 599,
+          "kind": "literal",
+          "value": "(?:不是|并非|非|不属于)\\s*$"
+        },
+        {
+          "line": 606,
+          "kind": "literal",
+          "value": "官网|官方|法国气象局|Météo[- ]?France"
+        },
+        {
+          "line": 613,
+          "kind": "literal",
+          "value": "(?:(\\d{4})\\s*年)?(\\d{1,2})\\s*月\\s*(\\d{1,2})\\s*日?"
+        },
+        {
+          "line": 632,
+          "kind": "literal",
+          "value": "(?:查询|读取|获取|检索)(?:时间|日期|时刻)|(?:更新|发布)(?:于|时间|日期)"
+        },
+        {
+          "line": 633,
+          "kind": "literal",
+          "value": "\\s*(?:查询|读取|获取|检索)(?:的|所得|得到)"
+        },
+        {
+          "line": 637,
+          "kind": "literal",
+          "value": "明天"
+        },
+        {
+          "line": 662,
+          "kind": "literal",
+          "value": "城市|城镇"
+        },
+        {
+          "line": 662,
+          "kind": "literal",
+          "value": "[？?]|哪个|哪座|请(?:问|告知|提供|告诉)"
+        },
+        {
+          "line": 663,
+          "kind": "literal",
+          "value": "(?:哪(?:个|座)?|什么).{0,8}(?:城市|城镇)|(?:告知|提供|告诉|缺少|还缺|缺).{0,12}(?:城市|城镇)"
+        },
+        {
+          "line": 664,
+          "kind": "literal",
+          "value": "(?:不缺|无需|不用|已经确定).{0,6}(?:城市|城镇)"
+        },
+        {
+          "line": 683,
+          "kind": "literal",
+          "value": "来自|出自|预报|预测|提供"
+        },
+        {
+          "line": 684,
+          "kind": "literal",
+          "value": "官网|官方|法国气象局|Météo[- ]?France"
+        },
+        {
+          "line": 686,
+          "kind": "literal",
+          "value": "并非|不是|非官方|不属于"
+        },
+        {
+          "line": 690,
+          "kind": "literal",
+          "value": "(?<![\\d.])(-?\\d+(?:\\.\\d+)?)\\s*度"
+        },
+        {
+          "line": 696,
+          "kind": "literal",
+          "value": "明天"
+        },
+        {
+          "line": 696,
+          "kind": "literal",
+          "value": "今天|昨天|后天"
+        },
+        {
+          "line": 723,
+          "kind": "literal",
+          "value": "(?im)^(?:#{1,6}\\s*)?(?:(?:\\d+\\s*(?:week|day)s?\\s*)?(?:extended\\s+|daily\\s+|weather\\s+)*(?:forecast|天气预报|预报)\\b[^\\n]*|[^\\n|]*(?:past weather|weather history|climate.{0,12}averages|历史天气|平均气温)[^\\n|]*)$"
+        },
+        {
+          "line": 724,
+          "kind": "f-string source",
+          "value": "rf'(?<!\\d)(?:{target}|{month}\\s*月\\s*{day}\\s*日|{mon}\\s+{day}(?!\\d))'"
+        },
+        {
+          "line": 724,
+          "kind": "literal",
+          "value": "\\s*月\\s*"
+        },
+        {
+          "line": 724,
+          "kind": "literal",
+          "value": "\\s*日|"
+        },
+        {
+          "line": 725,
+          "kind": "literal",
+          "value": "(-?\\d+(?:\\.\\d+)?)\\s*(?:°([CF]))?\\s*(?:/|至|到|[–—~～])\\s*(-?\\d+(?:\\.\\d+)?)\\s*°([CF])"
+        },
+        {
+          "line": 742,
+          "kind": "literal",
+          "value": "past weather|weather history|averages|历史天气|平均气温"
+        },
+        {
+          "line": 761,
+          "kind": "literal",
+          "value": "约合|大约|大概|约\\s*\\d|about|approximately"
+        },
+        {
+          "line": 875,
+          "kind": "literal",
+          "value": "来自|出自|来源(?:于|为|是)|根据|预报|预测|提供"
+        },
+        {
+          "line": 876,
+          "kind": "literal",
+          "value": "官网|官方|法国气象局|Météo[- ]?France"
+        },
+        {
+          "line": 877,
+          "kind": "literal",
+          "value": "并非|不是|非官方|不属于"
+        },
+        {
+          "line": 879,
+          "kind": "literal",
+          "value": "(?<![\\d.])-?\\d+(?:\\.\\d+)?\\s*(?:度|°F|华氏)"
+        },
+        {
+          "line": 954,
+          "kind": "literal",
+          "value": "不能|无法|没法|范围|超出|只能|不支持|没有调整"
+        },
+        {
+          "line": 955,
+          "kind": "literal",
+          "value": "已(?:经)?(?:设|调|改|执行|完成)|(?:设|调|改).{0,12}了"
+        },
+        {
+          "line": 955,
+          "kind": "literal",
+          "value": "未|没有|没能|不能|无法"
+        },
+        {
+          "line": 1010,
+          "kind": "literal",
+          "value": "城市|地址|位置|哪里|哪儿"
+        },
+        {
+          "line": 1010,
+          "kind": "literal",
+          "value": "[？?]|请告诉|请提供"
+        },
+        {
+          "line": 1011,
+          "kind": "literal",
+          "value": "(?:允许|授权|开启|同意|打开|使用).{0,6}(?:定位|当前位置)"
+        },
+        {
+          "line": 1013,
+          "kind": "literal",
+          "value": "(?:已经|已|正在|马上|会).{0,8}加急"
+        },
+        {
+          "line": 1013,
+          "kind": "literal",
+          "value": "不能|无法|没有|不支持|不会"
+        }
+      ]
+    },
+    {
+      "file": "scripts/evaluate_maps_fc.py",
+      "strings": [
+        {
+          "line": 19,
+          "kind": "literal",
+          "value": "巴黎明天天气怎么样？"
+        },
+        {
+          "line": 20,
+          "kind": "literal",
+          "value": "深圳明天天气怎么样？"
+        },
+        {
+          "line": 21,
+          "kind": "literal",
+          "value": "帮我找巴黎卢浮宫附近的咖啡馆"
+        },
+        {
+          "line": 21,
+          "kind": "literal",
+          "value": "导航去刚才搜索结果的第一个"
+        },
+        {
+          "line": 22,
+          "kind": "literal",
+          "value": "帮我导航到巴黎卢浮宫"
+        },
+        {
+          "line": 23,
+          "kind": "literal",
+          "value": "巴黎今天天气怎么样？再把空调调到23度"
+        }
+      ]
+    },
+    {
+      "file": "scripts/evaluate_personas.py",
+      "strings": [
+        {
+          "line": 25,
+          "kind": "literal",
+          "value": "把空调温度设为23度"
+        },
+        {
+          "line": 26,
+          "kind": "literal",
+          "value": "把左前车窗打开到50%"
+        },
+        {
+          "line": 27,
+          "kind": "literal",
+          "value": "打开后视镜加热"
+        },
+        {
+          "line": 28,
+          "kind": "literal",
+          "value": "我今天终于把一件拖了很久的小事做完了。陪我聊一句吧。"
+        },
+        {
+          "line": 29,
+          "kind": "literal",
+          "value": "你好，我准备出发了"
+        },
+        {
+          "line": 30,
+          "kind": "literal",
+          "value": "你好，我准备出发了"
+        },
+        {
+          "line": 30,
+          "kind": "literal",
+          "value": "把空调温度设为23度"
+        }
+      ]
+    },
+    {
+      "file": "scripts/evaluate_progressive_control.py",
+      "strings": [
+        {
+          "line": 42,
+          "kind": "literal",
+          "value": "把所有温区的空调温度设为23度。"
+        },
+        {
+          "line": 44,
+          "kind": "literal",
+          "value": "只打开主驾座椅的舒缓按摩，不要开启加热。"
+        },
+        {
+          "line": 46,
+          "kind": "literal",
+          "value": "把副驾座椅通风设为2档。"
+        },
+        {
+          "line": 48,
+          "kind": "literal",
+          "value": "把主驾座椅高度设为60。"
+        },
+        {
+          "line": 50,
+          "kind": "literal",
+          "value": "主驾车窗打开一半。"
+        },
+        {
+          "line": 52,
+          "kind": "literal",
+          "value": "现在主驾车窗开到多少？"
+        },
+        {
+          "line": 52,
+          "kind": "literal",
+          "value": "一半|50|五十"
+        },
+        {
+          "line": 55,
+          "kind": "literal",
+          "value": "打开后视镜加热。"
+        },
+        {
+          "line": 56,
+          "kind": "literal",
+          "value": "后视镜加热现在开启了吗？"
+        },
+        {
+          "line": 56,
+          "kind": "literal",
+          "value": "开启|打开|开着|开了"
+        },
+        {
+          "line": 57,
+          "kind": "literal",
+          "value": "未开启|没(?:有)?开|关闭|关着"
+        },
+        {
+          "line": 58,
+          "kind": "literal",
+          "value": "折叠两侧后视镜。"
+        },
+        {
+          "line": 59,
+          "kind": "literal",
+          "value": "不是继续折叠，是把两侧后视镜展开。"
+        },
+        {
+          "line": 63,
+          "kind": "literal",
+          "value": "先把副驾车窗打开一半。"
+        },
+        {
+          "line": 65,
+          "kind": "literal",
+          "value": "空调温度设为23度，打开后视镜加热，副驾车窗别动。"
+        },
+        {
+          "line": 69,
+          "kind": "literal",
+          "value": "氛围灯开关别动，颜色改紫色、亮度设45%，并启用左后门儿童安全锁。"
+        },
+        {
+          "line": 74,
+          "kind": "literal",
+          "value": "打开氛围灯，解除左后门儿童安全锁，启用右后门儿童安全锁，颜色和亮度别动。"
+        },
+        {
+          "line": 79,
+          "kind": "literal",
+          "value": "副驾车窗别动，把其余三扇窗都关上。"
+        },
+        {
+          "line": 85,
+          "kind": "literal",
+          "value": "把前雨刷设为低速。"
+        },
+        {
+          "line": 86,
+          "kind": "literal",
+          "value": "改成自动模式，并把雨量灵敏度设为2档。"
+        },
+        {
+          "line": 91,
+          "kind": "literal",
+          "value": "把尾门下次开启高度设为70%。"
+        },
+        {
+          "line": 93,
+          "kind": "literal",
+          "value": "现在打开它。"
+        },
+        {
+          "line": 96,
+          "kind": "literal",
+          "value": "把它关上。"
+        },
+        {
+          "line": 101,
+          "kind": "literal",
+          "value": "启用后排车窗童锁。"
+        },
+        {
+          "line": 103,
+          "kind": "literal",
+          "value": "先解除后排车窗童锁，再把左后车窗开到30%，其他设置不变。"
+        },
+        {
+          "line": 107,
+          "kind": "literal",
+          "value": "把左后车窗关上。"
+        },
+        {
+          "line": 111,
+          "kind": "literal",
+          "value": "导航去最近的机场。"
+        },
+        {
+          "line": 111,
+          "kind": "literal",
+          "value": "哪里|城市|地址|位置|出发"
+        }
+      ]
+    },
+    {
+      "file": "scripts/evaluate_progressive_voice.py",
+      "strings": [
+        {
+          "line": 15,
+          "kind": "literal",
+          "value": "打开后视镜加热。"
+        }
+      ]
+    },
+    {
+      "file": "scripts/evaluate_voice_interactions.py",
+      "strings": [
+        {
+          "line": 38,
+          "kind": "literal",
+          "value": "把所有温区的空调温度设为二十三度。"
+        },
+        {
+          "line": 41,
+          "kind": "literal",
+          "value": "打开空调，关闭全部车窗，打开主驾座椅按摩。其他设置不要调整。"
+        },
+        {
+          "line": 45,
+          "kind": "literal",
+          "value": "现在全部车窗都是关着的吗？"
+        },
+        {
+          "line": 47,
+          "kind": "literal",
+          "value": "不是关闭座椅按摩，是打开主驾座椅按摩。"
+        },
+        {
+          "line": 50,
+          "kind": "literal",
+          "value": "今天终于把拖了很久的小事做完了，陪我轻松聊一句。"
+        },
+        {
+          "line": 52,
+          "kind": "literal",
+          "value": "帮我查一下明天巴黎的天气，读取法国气象局官网，简短告诉我温度。"
+        },
+        {
+          "line": 54,
+          "kind": "literal",
+          "value": "先不说天气了，现在车窗是开的还是关的？"
+        },
+        {
+          "line": 64,
+          "kind": "literal",
+          "value": "二十三"
+        },
+        {
+          "line": 80,
+          "kind": "literal",
+          "value": "(?:(?:四|4)(?:扇|个)?车窗|(?:全部|所有)(?:的)?车窗|(?:车窗|窗户)(?:全|都)|都|全部).{0,16}(?:关(?:闭|着|上|好)?|闭合)"
+        },
+        {
+          "line": 81,
+          "kind": "literal",
+          "value": "(?:没(?:有)?|未|不是|并非|不处于).{0,5}关|开着|仍.{0,3}开|处于.{0,4}打开|除.{0,12}外"
+        },
+        {
+          "line": 82,
+          "kind": "literal",
+          "value": "主驾|副驾|左前|右前|左后|右后"
+        },
+        {
+          "line": 83,
+          "kind": "literal",
+          "value": "(?:四|4)(?:扇|个)?车窗|(?:全部|所有)(?:的)?车窗|全部(?:都|已经|已)?关"
+        },
+        {
+          "line": 84,
+          "kind": "literal",
+          "value": "机场"
+        },
+        {
+          "line": 179,
+          "kind": "literal",
+          "value": "查"
+        },
+        {
+          "line": 179,
+          "kind": "literal",
+          "value": "核对"
+        },
+        {
+          "line": 179,
+          "kind": "literal",
+          "value": "天气"
+        },
+        {
+          "line": 179,
+          "kind": "literal",
+          "value": "温度"
+        },
+        {
+          "line": 227,
+          "kind": "literal",
+          "value": "未(?:能)?(?:核实|确认|明确|标明|标注)|没有(?:核实|明确)|无法(?:核实|确认|确定|判断)|不能(?:核实|确认)|尚未确认"
+        },
+        {
+          "line": 229,
+          "kind": "literal",
+          "value": "不是|并非"
+        },
+        {
+          "line": 272,
+          "kind": "literal",
+          "value": "巴黎"
+        },
+        {
+          "line": 288,
+          "kind": "literal",
+          "value": "巴黎"
+        },
+        {
+          "line": 297,
+          "kind": "literal",
+          "value": "官方|法国气象局"
+        },
+        {
+          "line": 298,
+          "kind": "literal",
+          "value": "并非|不是|非官方|不属于|未(?:用|使用)|没有使用"
+        },
+        {
+          "line": 309,
+          "kind": "literal",
+          "value": "-?\\d+(?:\\.\\d+)?\\s*度"
+        }
+      ]
+    },
+    {
+      "file": "scripts/probe_apis.py",
+      "strings": [
+        {
+          "line": 11,
+          "kind": "literal",
+          "value": "设置空调温度"
+        },
+        {
+          "line": 23,
+          "kind": "literal",
+          "value": "用一句话描述秋天的天空。"
+        },
+        {
+          "line": 32,
+          "kind": "literal",
+          "value": "必须调用probe_temperature工具，不要只用文字。"
+        },
+        {
+          "line": 32,
+          "kind": "literal",
+          "value": "把空调设为23度"
+        },
+        {
+          "line": 35,
+          "kind": "literal",
+          "value": "模型响应没有工具调用"
+        }
+      ]
+    },
+    {
+      "file": "scripts/probe_asr.py",
+      "strings": [
+        {
+          "line": 20,
+          "kind": "literal",
+          "value": "你好，请把空调温度设为二十三度。"
+        },
+        {
+          "line": 33,
+          "kind": "literal",
+          "value": "小何没有返回测试音频。"
+        },
+        {
+          "line": 70,
+          "kind": "literal",
+          "value": "二十三"
+        }
+      ]
+    },
+    {
+      "file": "scripts/probe_google_maps.py",
+      "strings": []
+    },
+    {
+      "file": "scripts/probe_navigation.py",
+      "strings": [
+        {
+          "line": 19,
+          "kind": "literal",
+          "value": "把模拟导航目的地设为上海虹桥站"
+        },
+        {
+          "line": 21,
+          "kind": "literal",
+          "value": "上海虹桥站"
+        }
+      ]
+    },
+    {
+      "file": "scripts/probe_tts.py",
+      "strings": [
+        {
+          "line": 14,
+          "kind": "literal",
+          "value": "晚上好，今天想聊些什么？"
+        },
+        {
+          "line": 14,
+          "kind": "literal",
+          "value": "主驾车窗开度已经设为百分之五十。"
+        },
+        {
+          "line": 14,
+          "kind": "literal",
+          "value": "后台还在继续查询，你可以先和我聊天，或者调整空调。"
+        }
+      ]
+    },
+    {
+      "file": "scripts/probe_tts_ws.py",
+      "strings": [
+        {
+          "line": 30,
+          "kind": "literal",
+          "value": "晚上好，今天想聊些什么？"
+        },
+        {
+          "line": 34,
+          "kind": "literal",
+          "value": "我们可以慢慢聊。"
+        }
+      ]
+    },
+    {
+      "file": "scripts/scenarios_live.py",
+      "strings": [
+        {
+          "line": 10,
+          "kind": "literal",
+          "value": "把左前车窗打开到40%"
+        },
+        {
+          "line": 11,
+          "kind": "literal",
+          "value": "我有点冷又听到风声，请结合当前车况提出舒适调整方案。不要联网，只提出模拟车控建议，不要直接执行。"
+        },
+        {
+          "line": 22,
+          "kind": "literal",
+          "value": "先关车窗，温度不要超过24度"
+        },
+        {
+          "line": 26,
+          "kind": "literal",
+          "value": "先关闭所有车窗，空调设为24度，风量2档，只给建议"
+        },
+        {
+          "line": 36,
+          "kind": "literal",
+          "value": "先关车窗，温度不要超过24度"
+        },
+        {
+          "line": 36,
+          "kind": "literal",
+          "value": "结果出炉啦！"
+        }
+      ]
+    }
+  ]
+}

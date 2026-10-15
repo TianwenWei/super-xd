@@ -1,0 +1,1718 @@
+{
+  "schema": "super-xd-frozen-interaction-final-plan-v1",
+  "oracle_version": "interaction-oracle-v5",
+  "frozen_at": "2026-10-13T06:00:55.541343+00:00",
+  "requests_sent": 0,
+  "original_groups": 17,
+  "original_turns": 61,
+  "heldout_groups": 4,
+  "heldout_turns": 8,
+  "final_groups": 21,
+  "final_turns": 69,
+  "heldout_semantic_sha256": "cbeccd04eb710740f2d17238223f822bb887f7f9fd1ed559f84c7ba0ddc6a584",
+  "harness_sha256": "835747c542d24ba9b25159722401b3d3655ff8d5722a2bbe7259dd6b1238c1d0",
+  "test_sha256": "495485758cb51292353ffd7a2af1f86d3a6e11548c383c3bd94b905e64ceada3",
+  "local_oracle_tests": "105 passed in 0.25s",
+  "scenarios": [
+    {
+      "id": "hot_precise",
+      "steps": [
+        {
+          "id": "all23",
+          "query": "把所有温区的空调温度设为23度。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_temperature",
+              "arguments": {
+                "zone": "all",
+                "temperature": 23
+              }
+            }
+          ],
+          "loads": [],
+          "target_state": {
+            "climate.temperatures.driver": 23,
+            "climate.temperatures.front_passenger": 23,
+            "climate.temperatures.rear": 23,
+            "climate.power": true
+          },
+          "allowed_changed_paths": [
+            "climate.temperatures.driver",
+            "climate.temperatures.front_passenger",
+            "climate.temperatures.rear",
+            "climate.power"
+          ]
+        },
+        {
+          "id": "driver21",
+          "query": "只把主驾温度设为21度，其他温区别动。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_temperature",
+              "arguments": {
+                "zone": "driver",
+                "temperature": 21
+              }
+            }
+          ],
+          "loads": [],
+          "target_state": {
+            "climate.temperatures.driver": 21,
+            "climate.power": true
+          },
+          "allowed_changed_paths": [
+            "climate.temperatures.driver",
+            "climate.power"
+          ]
+        },
+        {
+          "id": "driver50",
+          "query": "把左前车窗打开到50%。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_window_position",
+              "arguments": {
+                "window": "driver",
+                "position": 50
+              }
+            }
+          ],
+          "loads": [],
+          "target_state": {
+            "windows.positions.driver": 50
+          },
+          "allowed_changed_paths": [
+            "windows.positions.driver"
+          ]
+        },
+        {
+          "id": "volume35",
+          "query": "把音量设为35。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_volume",
+              "arguments": {
+                "volume": 35
+              }
+            }
+          ],
+          "loads": [],
+          "target_state": {
+            "media.volume": 35
+          },
+          "allowed_changed_paths": [
+            "media.volume"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "skill_massage",
+      "steps": [
+        {
+          "id": "relax",
+          "query": "把主驾座椅按摩设成舒缓模式。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_seat_massage",
+              "arguments": {
+                "seat": "driver",
+                "mode": "relax"
+              }
+            }
+          ],
+          "loads": [
+            "seats"
+          ],
+          "target_state": {
+            "seats.positions.driver.massage": "relax"
+          },
+          "allowed_changed_paths": [
+            "seats.positions.driver.massage"
+          ]
+        },
+        {
+          "id": "off",
+          "query": "关闭主驾座椅按摩。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_seat_massage",
+              "arguments": {
+                "seat": "driver",
+                "mode": "off"
+              }
+            }
+          ],
+          "loads": [
+            "seats"
+          ],
+          "target_state": {
+            "seats.positions.driver.massage": "off"
+          },
+          "allowed_changed_paths": [
+            "seats.positions.driver.massage"
+          ]
+        },
+        {
+          "id": "mirror_on",
+          "query": "打开后视镜加热。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_mirror_heating",
+              "arguments": {
+                "enabled": true
+              }
+            }
+          ],
+          "loads": [
+            "mirrors"
+          ],
+          "target_state": {
+            "mirrors.heating": true
+          },
+          "allowed_changed_paths": [
+            "mirrors.heating"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "compound_actions",
+      "steps": [
+        {
+          "id": "air_windows_massage",
+          "query": "打开空调，关闭全部车窗，把主驾座椅按摩设成舒缓模式。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_climate_power",
+              "arguments": {
+                "enabled": true
+              }
+            },
+            {
+              "name": "close_all_windows",
+              "arguments": {}
+            },
+            {
+              "name": "set_seat_massage",
+              "arguments": {
+                "seat": "driver",
+                "mode": "relax"
+              }
+            }
+          ],
+          "loads": [
+            "seats"
+          ],
+          "target_state": {
+            "climate.power": true,
+            "seats.positions.driver.massage": "relax",
+            "windows.positions.driver": 0,
+            "windows.positions.front_passenger": 0,
+            "windows.positions.rear_left": 0,
+            "windows.positions.rear_right": 0
+          },
+          "allowed_changed_paths": [
+            "climate.power",
+            "seats.positions.driver.massage",
+            "windows.positions.*"
+          ]
+        },
+        {
+          "id": "cross_skills",
+          "query": "右前车窗开到20%，音量设25，关闭后视镜加热。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_window_position",
+              "arguments": {
+                "window": "front_passenger",
+                "position": 20
+              }
+            },
+            {
+              "name": "set_volume",
+              "arguments": {
+                "volume": 25
+              }
+            },
+            {
+              "name": "set_mirror_heating",
+              "arguments": {
+                "enabled": false
+              }
+            }
+          ],
+          "loads": [
+            "mirrors"
+          ],
+          "target_state": {
+            "windows.positions.front_passenger": 20,
+            "media.volume": 25,
+            "mirrors.heating": false
+          },
+          "allowed_changed_paths": [
+            "windows.positions.front_passenger",
+            "media.volume",
+            "mirrors.heating"
+          ]
+        },
+        {
+          "id": "off_pair",
+          "query": "关闭空调，并关闭主驾座椅按摩。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_climate_power",
+              "arguments": {
+                "enabled": false
+              }
+            },
+            {
+              "name": "set_seat_massage",
+              "arguments": {
+                "seat": "driver",
+                "mode": "off"
+              }
+            }
+          ],
+          "loads": [
+            "seats"
+          ],
+          "target_state": {
+            "climate.power": false,
+            "seats.positions.driver.massage": "off"
+          },
+          "allowed_changed_paths": [
+            "climate.power",
+            "seats.positions.driver.massage"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "state_questions",
+      "steps": [
+        {
+          "id": "prime33",
+          "query": "左前车窗开到33%。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_window_position",
+              "arguments": {
+                "window": "driver",
+                "position": 33
+              }
+            }
+          ],
+          "loads": [],
+          "target_state": {
+            "windows.positions.driver": 33
+          },
+          "allowed_changed_paths": [
+            "windows.positions.driver"
+          ]
+        },
+        {
+          "id": "ask_window",
+          "query": "现在左前车窗开到多少？",
+          "kind": "state",
+          "actions": [],
+          "loads": [],
+          "target_state": {},
+          "allowed_changed_paths": [],
+          "claims": [
+            {
+              "kind": "window",
+              "seat": "driver",
+              "value": 33
+            }
+          ]
+        },
+        {
+          "id": "prime_driver24",
+          "query": "只调主驾空调到24度。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_temperature",
+              "arguments": {
+                "zone": "driver",
+                "temperature": 24
+              }
+            }
+          ],
+          "loads": [],
+          "target_state": {
+            "climate.temperatures.driver": 24,
+            "climate.power": true
+          },
+          "allowed_changed_paths": [
+            "climate.temperatures.driver",
+            "climate.power"
+          ]
+        },
+        {
+          "id": "ask_temp",
+          "query": "现在主驾空调是多少度？",
+          "kind": "state",
+          "actions": [],
+          "loads": [],
+          "target_state": {},
+          "allowed_changed_paths": [],
+          "claims": [
+            {
+              "kind": "temperature",
+              "seat": "driver",
+              "value": 24
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "negation_correction",
+      "steps": [
+        {
+          "id": "only_volume",
+          "query": "不要打开车窗，只把音量设成40。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_volume",
+              "arguments": {
+                "volume": 40
+              }
+            }
+          ],
+          "loads": [],
+          "target_state": {
+            "media.volume": 40
+          },
+          "allowed_changed_paths": [
+            "media.volume"
+          ]
+        },
+        {
+          "id": "not_heating",
+          "query": "温度先别动，不要开加热，只开主驾座椅的舒缓按摩。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_seat_massage",
+              "arguments": {
+                "seat": "driver",
+                "mode": "relax"
+              }
+            }
+          ],
+          "loads": [
+            "seats"
+          ],
+          "target_state": {
+            "seats.positions.driver.massage": "relax"
+          },
+          "allowed_changed_paths": [
+            "seats.positions.driver.massage"
+          ]
+        },
+        {
+          "id": "wave_correction",
+          "query": "不是座椅加热，是主驾座椅按摩，把按摩切成波浪模式。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_seat_massage",
+              "arguments": {
+                "seat": "driver",
+                "mode": "wave"
+              }
+            }
+          ],
+          "loads": [
+            "seats"
+          ],
+          "target_state": {
+            "seats.positions.driver.massage": "wave"
+          },
+          "allowed_changed_paths": [
+            "seats.positions.driver.massage"
+          ]
+        },
+        {
+          "id": "not_right",
+          "query": "不是右前车窗，只把左前车窗开到25%。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_window_position",
+              "arguments": {
+                "window": "driver",
+                "position": 25
+              }
+            }
+          ],
+          "loads": [],
+          "target_state": {
+            "windows.positions.driver": 25
+          },
+          "allowed_changed_paths": [
+            "windows.positions.driver"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "references",
+      "steps": [
+        {
+          "id": "prime40",
+          "query": "主驾车窗开到40%。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_window_position",
+              "arguments": {
+                "window": "driver",
+                "position": 40
+              }
+            }
+          ],
+          "loads": [],
+          "target_state": {
+            "windows.positions.driver": 40
+          },
+          "allowed_changed_paths": [
+            "windows.positions.driver"
+          ]
+        },
+        {
+          "id": "close_it",
+          "query": "把它关上。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_window_position",
+              "arguments": {
+                "window": "driver",
+                "position": 0
+              }
+            }
+          ],
+          "loads": [],
+          "target_state": {
+            "windows.positions.driver": 0
+          },
+          "allowed_changed_paths": [
+            "windows.positions.driver"
+          ]
+        },
+        {
+          "id": "prime21",
+          "query": "只调主驾温度到21度，其他温区别动。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_temperature",
+              "arguments": {
+                "zone": "driver",
+                "temperature": 21
+              }
+            }
+          ],
+          "loads": [],
+          "target_state": {
+            "climate.temperatures.driver": 21,
+            "climate.power": true
+          },
+          "allowed_changed_paths": [
+            "climate.temperatures.driver",
+            "climate.power"
+          ]
+        },
+        {
+          "id": "change_it",
+          "query": "改成24度，其他温区别动。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_temperature",
+              "arguments": {
+                "zone": "driver",
+                "temperature": 24
+              }
+            }
+          ],
+          "loads": [],
+          "target_state": {
+            "climate.temperatures.driver": 24,
+            "climate.power": true
+          },
+          "allowed_changed_paths": [
+            "climate.temperatures.driver",
+            "climate.power"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "chat_no_actions",
+      "steps": [
+        {
+          "id": "greeting",
+          "query": "你好，我准备出发了。",
+          "kind": "chat",
+          "actions": [],
+          "loads": [],
+          "target_state": {},
+          "allowed_changed_paths": []
+        },
+        {
+          "id": "emotion",
+          "query": "今天终于完成了一件拖了很久的小事，陪我聊一句吧。",
+          "kind": "chat",
+          "actions": [],
+          "loads": [],
+          "target_state": {},
+          "allowed_changed_paths": []
+        },
+        {
+          "id": "hot_not_authorization",
+          "query": "我有点热，但先别调整任何东西。",
+          "kind": "chat",
+          "actions": [],
+          "loads": [],
+          "target_state": {},
+          "allowed_changed_paths": []
+        },
+        {
+          "id": "word_not_weather",
+          "query": "“天气”这两个字怎么写？不要查天气。",
+          "kind": "chat",
+          "actions": [],
+          "loads": [],
+          "target_state": {},
+          "allowed_changed_paths": []
+        }
+      ]
+    },
+    {
+      "id": "parameter_rejection",
+      "steps": [
+        {
+          "id": "volume999",
+          "query": "把音量设为999。",
+          "kind": "reject",
+          "actions": [],
+          "loads": [],
+          "target_state": {},
+          "allowed_changed_paths": [],
+          "rejected_call": {
+            "name": "set_volume",
+            "arguments": {
+              "volume": 999
+            }
+          },
+          "bounds": [
+            0,
+            100
+          ]
+        },
+        {
+          "id": "window_negative",
+          "query": "把主驾车窗开到负10%。",
+          "kind": "reject",
+          "actions": [],
+          "loads": [],
+          "target_state": {},
+          "allowed_changed_paths": [],
+          "rejected_call": {
+            "name": "set_window_position",
+            "arguments": {
+              "window": "driver",
+              "position": -10
+            }
+          },
+          "bounds": [
+            0,
+            100
+          ]
+        },
+        {
+          "id": "temp100",
+          "query": "把所有温区空调设为100度。",
+          "kind": "reject",
+          "actions": [],
+          "loads": [],
+          "target_state": {},
+          "allowed_changed_paths": [],
+          "rejected_call": {
+            "name": "set_temperature",
+            "arguments": {
+              "zone": "all",
+              "temperature": 100
+            }
+          },
+          "bounds": [
+            16,
+            30
+          ]
+        }
+      ]
+    },
+    {
+      "id": "airport_clarification",
+      "steps": [
+        {
+          "id": "nearest_airport",
+          "query": "导航去最近的机场。",
+          "kind": "clarify_location",
+          "actions": [],
+          "loads": [],
+          "target_state": {},
+          "allowed_changed_paths": []
+        },
+        {
+          "id": "switch_literal",
+          "query": "先不查机场了，导航去上海虹桥站。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_navigation_destination",
+              "arguments": {
+                "destination": "上海虹桥站"
+              }
+            }
+          ],
+          "loads": [],
+          "target_state": {
+            "navigation.destination": "上海虹桥站",
+            "navigation.active": true
+          },
+          "allowed_changed_paths": [
+            "navigation.destination",
+            "navigation.active"
+          ]
+        },
+        {
+          "id": "new_literal",
+          "query": "把导航目的地改成上海站。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_navigation_destination",
+              "arguments": {
+                "destination": "上海站"
+              }
+            }
+          ],
+          "loads": [],
+          "target_state": {
+            "navigation.destination": "上海站",
+            "navigation.active": true
+          },
+          "allowed_changed_paths": [
+            "navigation.destination",
+            "navigation.active"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "background_topic_switch",
+      "web": true,
+      "steps": [
+        {
+          "id": "research",
+          "query": "研究巴黎科学工业城适合带孩子参观的活动、主馆和展览区开放时间，读取官网并保留来源及必要限制。",
+          "kind": "delegate",
+          "actions": [],
+          "loads": [],
+          "target_state": {},
+          "allowed_changed_paths": [],
+          "assign_task": "research",
+          "goal_facts": [
+            "科学工业城",
+            "开放时间",
+            "官网"
+          ],
+          "query_mode": "research"
+        },
+        {
+          "id": "control_during_task",
+          "query": "研究继续，先把左前车窗开到25%。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_window_position",
+              "arguments": {
+                "window": "driver",
+                "position": 25
+              }
+            }
+          ],
+          "loads": [],
+          "target_state": {
+            "windows.positions.driver": 25
+          },
+          "allowed_changed_paths": [
+            "windows.positions.driver"
+          ]
+        },
+        {
+          "id": "window_not_task",
+          "query": "现在车窗是开的还是关的？我问的是左前车窗。",
+          "kind": "state",
+          "actions": [],
+          "loads": [],
+          "target_state": {},
+          "allowed_changed_paths": [],
+          "claims": [
+            {
+              "kind": "window",
+              "seat": "driver",
+              "value": 25
+            }
+          ]
+        },
+        {
+          "id": "chat_during_task",
+          "query": "我刚做完一件小事，陪我聊一句，不用说研究进度。",
+          "kind": "chat",
+          "actions": [],
+          "loads": [],
+          "target_state": {},
+          "allowed_changed_paths": []
+        }
+      ]
+    },
+    {
+      "id": "multi_task_cancel",
+      "web": true,
+      "steps": [
+        {
+          "id": "science",
+          "query": "研究巴黎科学工业城适合带孩子参观的活动、主馆和展览区开放时间，读取官网并保留来源及必要限制。",
+          "kind": "delegate",
+          "actions": [],
+          "loads": [],
+          "target_state": {},
+          "allowed_changed_paths": [],
+          "assign_task": "science",
+          "goal_facts": [
+            "科学工业城",
+            "官网",
+            "开放时间"
+          ],
+          "query_mode": "research"
+        },
+        {
+          "id": "natural",
+          "query": "研究巴黎国家自然历史博物馆适合带孩子参观的两个展馆、开放时间和预约条件，读取官网并保留来源及限制。",
+          "kind": "delegate",
+          "actions": [],
+          "loads": [],
+          "target_state": {},
+          "allowed_changed_paths": [],
+          "assign_task": "natural",
+          "goal_facts": [
+            "自然历史博物馆",
+            "官网",
+            "预约"
+          ],
+          "query_mode": "research"
+        },
+        {
+          "id": "both_progress",
+          "query": "分别告诉我科学工业城和自然历史博物馆两个研究的当前进度。",
+          "kind": "task",
+          "actions": [],
+          "loads": [],
+          "target_state": {},
+          "allowed_changed_paths": [],
+          "task_operations": [
+            {
+              "action": "get",
+              "task_id": "$science"
+            },
+            {
+              "action": "get",
+              "task_id": "$natural"
+            }
+          ]
+        },
+        {
+          "id": "cancel_natural",
+          "query": "只取消自然历史博物馆那个研究，科学工业城继续。",
+          "kind": "task",
+          "actions": [],
+          "loads": [],
+          "target_state": {},
+          "allowed_changed_paths": [],
+          "task_operations": [
+            {
+              "action": "cancel",
+              "task_id": "$natural"
+            }
+          ],
+          "protect_tasks": [
+            "science"
+          ]
+        },
+        {
+          "id": "science_progress",
+          "query": "科学工业城那个研究进度怎么样？",
+          "kind": "task",
+          "actions": [],
+          "loads": [],
+          "target_state": {},
+          "allowed_changed_paths": [],
+          "task_operations": [
+            {
+              "action": "get",
+              "task_id": "$science"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "simple_and_complex_web",
+      "web": true,
+      "steps": [
+        {
+          "id": "weather",
+          "query": "查一下巴黎明天的温度，只要简短结论和可核实来源。",
+          "kind": "delegate",
+          "actions": [],
+          "loads": [],
+          "target_state": {},
+          "allowed_changed_paths": [],
+          "assign_task": "weather",
+          "goal_facts": [
+            "巴黎",
+            "明天",
+            "温度"
+          ],
+          "query_mode": "quick",
+          "wait_after": {
+            "alias": "weather",
+            "statuses": [
+              "completed"
+            ],
+            "require_web": true,
+            "evidence_contract": {
+              "kind": "dated_temperature_forecast",
+              "location_names": [
+                "Paris",
+                "巴黎"
+              ],
+              "country_code": "FR",
+              "timezone": "Europe/Paris",
+              "relative_days": 1
+            }
+          }
+        },
+        {
+          "id": "weather_recall",
+          "query": "刚才查到的巴黎明天温度是多少？请用已查到的结果回答，不要重新查。",
+          "kind": "task",
+          "actions": [],
+          "loads": [],
+          "target_state": {},
+          "allowed_changed_paths": [],
+          "task_operations": [
+            {
+              "action": "get",
+              "task_id": "$weather"
+            }
+          ],
+          "result_consistency": "weather",
+          "task_read_contract": {
+            "kind": "temperature_ranges",
+            "place": "巴黎",
+            "relative_date": "明天"
+          }
+        },
+        {
+          "id": "official_research",
+          "query": "请查询科学工业城官网，核对主馆周一是否开放和展览区周日的开放时间，保留完整说明及官方来源。",
+          "kind": "delegate",
+          "actions": [],
+          "loads": [],
+          "target_state": {},
+          "allowed_changed_paths": [],
+          "assign_task": "official",
+          "goal_facts": [
+            "科学工业城",
+            "周一",
+            "周日",
+            "官网"
+          ],
+          "query_mode": "research"
+        },
+        {
+          "id": "control_while_research",
+          "query": "研究继续，音量调到20。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_volume",
+              "arguments": {
+                "volume": 20
+              }
+            }
+          ],
+          "loads": [],
+          "target_state": {
+            "media.volume": 20
+          },
+          "allowed_changed_paths": [
+            "media.volume"
+          ]
+        },
+        {
+          "id": "final_recall",
+          "query": "科学工业城那个研究的简短结论是什么？详细报告留在卡里。",
+          "kind": "task",
+          "actions": [],
+          "loads": [],
+          "target_state": {},
+          "allowed_changed_paths": [],
+          "task_operations": [
+            {
+              "action": "get",
+              "task_id": "$official"
+            }
+          ],
+          "wait_before": {
+            "alias": "official",
+            "statuses": [
+              "completed"
+            ],
+            "require_web": true,
+            "required_source_domains": [
+              "cite-sciences.fr"
+            ]
+          },
+          "result_consistency": "official"
+        }
+      ]
+    },
+    {
+      "id": "worker_clarification",
+      "web": true,
+      "manual_task_setup": {
+        "alias": "ambiguous_weather",
+        "goal": "查询我指定城市明天的天气温度。我还没有提供城市，请先向我确认城市，不能猜测或从历史推断。"
+      },
+      "setup_wait": {
+        "alias": "ambiguous_weather",
+        "statuses": [
+          "waiting_clarification"
+        ]
+      },
+      "steps": [
+        {
+          "id": "ask_missing",
+          "query": "后台那个天气任务还缺什么信息？",
+          "kind": "task",
+          "actions": [],
+          "loads": [],
+          "target_state": {},
+          "allowed_changed_paths": [],
+          "task_operations": [
+            {
+              "action": "get",
+              "task_id": "$ambiguous_weather"
+            }
+          ],
+          "question_consistency": "ambiguous_weather",
+          "task_read_contract": {
+            "kind": "missing_slot",
+            "slot": "city"
+          }
+        },
+        {
+          "id": "reply_city",
+          "query": "那个天气任务查巴黎明天的温度，核实可信来源后简短回答。",
+          "kind": "task",
+          "actions": [],
+          "loads": [],
+          "target_state": {},
+          "allowed_changed_paths": [],
+          "task_operations": [
+            {
+              "action": "reply",
+              "task_id": "$ambiguous_weather",
+              "text_contains": [
+                "巴黎",
+                "明天"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "control_after_reply",
+          "query": "天气继续查，先把左前车窗打开一半。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_window_position",
+              "arguments": {
+                "window": "driver",
+                "position": 50
+              }
+            }
+          ],
+          "loads": [],
+          "target_state": {
+            "windows.positions.driver": 50
+          },
+          "allowed_changed_paths": [
+            "windows.positions.driver"
+          ],
+          "wait_after": {
+            "alias": "ambiguous_weather",
+            "statuses": [
+              "completed"
+            ],
+            "require_web": true,
+            "evidence_contract": {
+              "kind": "dated_temperature_forecast",
+              "location_names": [
+                "Paris",
+                "巴黎"
+              ],
+              "country_code": "FR",
+              "timezone": "Europe/Paris",
+              "relative_days": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "lights",
+      "steps": [
+        {
+          "id": "front_light",
+          "query": "只打开前排车内灯。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_interior_light",
+              "arguments": {
+                "zone": "front",
+                "enabled": true
+              }
+            }
+          ],
+          "loads": [],
+          "target_state": {
+            "lights.interior.front": true
+          },
+          "allowed_changed_paths": [
+            "lights.interior.front"
+          ]
+        },
+        {
+          "id": "ambient_color_brightness",
+          "query": "只把氛围灯颜色设为蓝色、亮度设60%，先不要打开氛围灯。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_ambient_color",
+              "arguments": {
+                "color": "blue"
+              }
+            },
+            {
+              "name": "set_ambient_brightness",
+              "arguments": {
+                "brightness": 60
+              }
+            }
+          ],
+          "loads": [
+            "lights"
+          ],
+          "target_state": {
+            "lights.ambient_color": "blue",
+            "lights.ambient_brightness": 60,
+            "lights.ambient": false
+          },
+          "allowed_changed_paths": [
+            "lights.ambient_color",
+            "lights.ambient_brightness"
+          ]
+        },
+        {
+          "id": "front_off_ambient_on",
+          "query": "关闭前排车内灯，并打开氛围灯。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_interior_light",
+              "arguments": {
+                "zone": "front",
+                "enabled": false
+              }
+            },
+            {
+              "name": "set_ambient_light",
+              "arguments": {
+                "enabled": true
+              }
+            }
+          ],
+          "loads": [
+            "lights"
+          ],
+          "target_state": {
+            "lights.interior.front": false,
+            "lights.ambient": true
+          },
+          "allowed_changed_paths": [
+            "lights.interior.front",
+            "lights.ambient"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "locks",
+      "steps": [
+        {
+          "id": "unlock_passenger",
+          "query": "只解锁右前副驾车门。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_door_lock",
+              "arguments": {
+                "door": "front_passenger",
+                "locked": false
+              }
+            }
+          ],
+          "loads": [
+            "locks"
+          ],
+          "target_state": {
+            "locks.doors.front_passenger": false
+          },
+          "allowed_changed_paths": [
+            "locks.doors.front_passenger"
+          ]
+        },
+        {
+          "id": "left_child_on",
+          "query": "打开左后车门儿童安全锁，右侧别动。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_child_lock",
+              "arguments": {
+                "side": "left",
+                "enabled": true
+              }
+            }
+          ],
+          "loads": [
+            "locks"
+          ],
+          "target_state": {
+            "locks.child_lock.left": true
+          },
+          "allowed_changed_paths": [
+            "locks.child_lock.left"
+          ]
+        },
+        {
+          "id": "lock_and_child_off",
+          "query": "锁上右前副驾车门，并关闭左后儿童安全锁。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_door_lock",
+              "arguments": {
+                "door": "front_passenger",
+                "locked": true
+              }
+            },
+            {
+              "name": "set_child_lock",
+              "arguments": {
+                "side": "left",
+                "enabled": false
+              }
+            }
+          ],
+          "loads": [
+            "locks"
+          ],
+          "target_state": {
+            "locks.doors.front_passenger": true,
+            "locks.child_lock.left": false
+          },
+          "allowed_changed_paths": [
+            "locks.doors.front_passenger",
+            "locks.child_lock.left"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "tailgate",
+      "steps": [
+        {
+          "id": "height70",
+          "query": "把尾门下次开启高度设为70%。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_tailgate_height",
+              "arguments": {
+                "height": 70
+              }
+            }
+          ],
+          "loads": [
+            "tailgate"
+          ],
+          "target_state": {
+            "tailgate.height": 70
+          },
+          "allowed_changed_paths": [
+            "tailgate.height"
+          ]
+        },
+        {
+          "id": "open",
+          "query": "打开后备箱尾门。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_tailgate_open",
+              "arguments": {
+                "open": true
+              }
+            }
+          ],
+          "loads": [
+            "tailgate"
+          ],
+          "target_state": {
+            "tailgate.open": true,
+            "tailgate.position": 70,
+            "tailgate.moving": false,
+            "tailgate.last_action": "opened"
+          },
+          "allowed_changed_paths": [
+            "tailgate.open",
+            "tailgate.position",
+            "tailgate.moving",
+            "tailgate.last_action"
+          ]
+        },
+        {
+          "id": "close",
+          "query": "关闭后备箱尾门。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_tailgate_open",
+              "arguments": {
+                "open": false
+              }
+            }
+          ],
+          "loads": [
+            "tailgate"
+          ],
+          "target_state": {
+            "tailgate.open": false,
+            "tailgate.position": 0,
+            "tailgate.moving": false,
+            "tailgate.last_action": "closed"
+          },
+          "allowed_changed_paths": [
+            "tailgate.open",
+            "tailgate.position",
+            "tailgate.moving",
+            "tailgate.last_action"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "wipers",
+      "steps": [
+        {
+          "id": "low",
+          "query": "把前雨刷设为低速。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_wiper_mode",
+              "arguments": {
+                "mode": "low"
+              }
+            }
+          ],
+          "loads": [
+            "wipers"
+          ],
+          "target_state": {
+            "wipers.mode": "low"
+          },
+          "allowed_changed_paths": [
+            "wipers.mode"
+          ]
+        },
+        {
+          "id": "wash_front",
+          "query": "清洗一次前挡风玻璃，不要改变雨刷档位。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "wash_windshield",
+              "arguments": {
+                "target": "front"
+              }
+            }
+          ],
+          "loads": [
+            "wipers"
+          ],
+          "target_state": {
+            "wipers.washer_fluid_pct": 99,
+            "wipers.wash_count": 1,
+            "wipers.last_wash": "front",
+            "wipers.mode": "low"
+          },
+          "allowed_changed_paths": [
+            "wipers.washer_fluid_pct",
+            "wipers.wash_count",
+            "wipers.last_wash"
+          ]
+        },
+        {
+          "id": "off",
+          "query": "关闭前雨刷。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_wiper_mode",
+              "arguments": {
+                "mode": "off"
+              }
+            }
+          ],
+          "loads": [
+            "wipers"
+          ],
+          "target_state": {
+            "wipers.mode": "off"
+          },
+          "allowed_changed_paths": [
+            "wipers.mode"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "heldout_remaining_windows",
+      "heldout": true,
+      "steps": [
+        {
+          "id": "passenger50",
+          "query": "先把副驾车窗打开一半。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_window_position",
+              "arguments": {
+                "window": "front_passenger",
+                "position": 50
+              }
+            }
+          ],
+          "loads": [],
+          "target_state": {
+            "windows.positions.front_passenger": 50
+          },
+          "allowed_changed_paths": [
+            "windows.positions.front_passenger"
+          ]
+        },
+        {
+          "id": "other_three_closed",
+          "query": "副驾车窗别动，把其余三扇窗都关上。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_window_position",
+              "arguments": {
+                "window": "driver",
+                "position": 0
+              }
+            },
+            {
+              "name": "set_window_position",
+              "arguments": {
+                "window": "rear_left",
+                "position": 0
+              }
+            },
+            {
+              "name": "set_window_position",
+              "arguments": {
+                "window": "rear_right",
+                "position": 0
+              }
+            }
+          ],
+          "loads": [],
+          "target_state": {
+            "windows.positions.driver": 0,
+            "windows.positions.rear_left": 0,
+            "windows.positions.rear_right": 0,
+            "windows.positions.front_passenger": 50
+          },
+          "allowed_changed_paths": [
+            "windows.positions.driver",
+            "windows.positions.rear_left",
+            "windows.positions.rear_right"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "heldout_bare_clarification",
+      "heldout": true,
+      "web": true,
+      "manual_task_setup": {
+        "alias": "heldout_weather",
+        "goal": "查询我指定城市明天的天气温度。我还没有提供城市，请先向我确认城市，不能猜测或从历史推断。"
+      },
+      "setup_wait": {
+        "alias": "heldout_weather",
+        "statuses": [
+          "waiting_clarification"
+        ]
+      },
+      "steps": [
+        {
+          "id": "bare_city",
+          "query": "巴黎",
+          "kind": "task",
+          "actions": [],
+          "loads": [],
+          "target_state": {},
+          "allowed_changed_paths": [],
+          "task_operations": [
+            {
+              "action": "reply",
+              "task_id": "$heldout_weather",
+              "text_contains": [
+                "巴黎"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "heldout_relative_temperature",
+      "heldout": true,
+      "steps": [
+        {
+          "id": "prime_all23",
+          "query": "把所有温区都调到23度。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_temperature",
+              "arguments": {
+                "zone": "all",
+                "temperature": 23
+              }
+            }
+          ],
+          "loads": [],
+          "target_state": {
+            "climate.temperatures.driver": 23,
+            "climate.temperatures.front_passenger": 23,
+            "climate.temperatures.rear": 23,
+            "climate.power": true
+          },
+          "allowed_changed_paths": [
+            "climate.temperatures.driver",
+            "climate.temperatures.front_passenger",
+            "climate.temperatures.rear",
+            "climate.power"
+          ]
+        },
+        {
+          "id": "rear_minus_two",
+          "query": "后排调低两度，前排保持不变。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_temperature",
+              "arguments": {
+                "zone": "rear",
+                "temperature": 21
+              }
+            }
+          ],
+          "loads": [],
+          "target_state": {
+            "climate.temperatures.driver": 23,
+            "climate.temperatures.front_passenger": 23,
+            "climate.temperatures.rear": 21,
+            "climate.power": true
+          },
+          "allowed_changed_paths": [
+            "climate.temperatures.rear"
+          ],
+          "required_before_state": {
+            "climate.temperatures.driver": 23,
+            "climate.temperatures.front_passenger": 23,
+            "climate.temperatures.rear": 23
+          },
+          "equivalent_action_sets": [
+            {
+              "actions": [
+                {
+                  "name": "adjust_temperature",
+                  "arguments": {
+                    "zone": "rear",
+                    "delta": -2
+                  }
+                }
+              ],
+              "loads": [
+                "climate"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "heldout_preserve_lights_and_reverse_locks",
+      "heldout": true,
+      "steps": [
+        {
+          "id": "prime_on",
+          "query": "打开氛围灯，并启用左后门儿童安全锁。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_ambient_light",
+              "arguments": {
+                "enabled": true
+              }
+            },
+            {
+              "name": "set_child_lock",
+              "arguments": {
+                "side": "left",
+                "enabled": true
+              }
+            }
+          ],
+          "loads": [
+            "lights",
+            "locks"
+          ],
+          "target_state": {
+            "lights.ambient": true,
+            "locks.child_lock.left": true
+          },
+          "allowed_changed_paths": [
+            "lights.ambient",
+            "locks.child_lock.left"
+          ]
+        },
+        {
+          "id": "attributes_only",
+          "query": "氛围灯保持现在的开关状态，只把颜色改成紫色、亮度调到45%，先别动开关。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_ambient_color",
+              "arguments": {
+                "color": "purple"
+              }
+            },
+            {
+              "name": "set_ambient_brightness",
+              "arguments": {
+                "brightness": 45
+              }
+            }
+          ],
+          "loads": [
+            "lights"
+          ],
+          "target_state": {
+            "lights.ambient": true,
+            "lights.ambient_color": "purple",
+            "lights.ambient_brightness": 45
+          },
+          "allowed_changed_paths": [
+            "lights.ambient_color",
+            "lights.ambient_brightness"
+          ]
+        },
+        {
+          "id": "reverse_and_other_side",
+          "query": "把左后儿童安全锁解除，右后儿童安全锁启用，其他别动。",
+          "kind": "control",
+          "actions": [
+            {
+              "name": "set_child_lock",
+              "arguments": {
+                "side": "left",
+                "enabled": false
+              }
+            },
+            {
+              "name": "set_child_lock",
+              "arguments": {
+                "side": "right",
+                "enabled": true
+              }
+            }
+          ],
+          "loads": [
+            "locks"
+          ],
+          "target_state": {
+            "locks.child_lock.left": false,
+            "locks.child_lock.right": true,
+            "lights.ambient": true
+          },
+          "allowed_changed_paths": [
+            "locks.child_lock.left",
+            "locks.child_lock.right"
+          ]
+        }
+      ]
+    }
+  ],
+  "protection_scope": "Only actual matching literal_keep_state with untouched authorized state, or exact no_task recovery in empty session; raw attempts retained; requested commands/receipts/state stay exact."
+}

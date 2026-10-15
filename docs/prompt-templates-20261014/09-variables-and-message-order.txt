@@ -1,0 +1,55 @@
+这些是模板的变量和消息排列说明，不是另一段模型指令。
+
+模板变量
+
+{{skill_index}}：Talker 使用的固定车控子系统索引，来自 catalog。
+{{skill_guide}}：Thinker 使用的固定技能索引，来自 catalog。
+{{persona_json}}：当前人设配置，仅影响表达。包含 id、name、tone、sentence_length、catchphrase_frequency、voice。
+{{task_read_rejections}}：本轮缺少任务读取证据的回答已被拒绝的次数。
+{{session_snapshot_json}}：车况、后台任务摘要、recent_places、current_utc、timezone、capabilities，及按条件附加的检查数据。
+
+以下动态数据按各自消息角色传入，不混进固定 system 指令：
+用户原句；有角色的历史消息；模型产生的 tool_calls；对应 tool_call_id 的真实工具回执。
+工具定义及参数 schema 通过独立的 tools 字段传入。
+
+Talker 普通模式，当前源码的排列
+
+system：01-talker.txt
+system：02-persona.txt
+历史取自最近四轮对话记录；本轮通常也在这四轮中。保留 user / assistant / tool 角色。
+system：当前会话快照（仅数据）：{{session_snapshot_json}}
+system：下面是本轮用户请求及其工具结果。优先完整处理本轮；前面的后台待办不要求在本轮继续回答。
+本轮 user 消息，以及已发生的 assistant / tool 消息。
+按条件附加 08 中的 Talker 消息。
+
+Talker 语音首轮路由
+
+满足语音路由条件时，在 01 后追加 06-speech-route.txt；原人设消息的位置换为另一条 06 和下面的固定示例。
+本次调用仍有工具，可能直接生成工具调用；若选择聊天，先只返回 response_mode=chat。
+user：你好，今天心情有点累。
+assistant：{"response_mode":"chat"}
+user：简单解释一下彩虹为什么有颜色。
+assistant：{"response_mode":"chat"}
+
+Talker 语音聊天生成
+
+路由到 chat 后，下一次模型调用将第一条 system 换成 07-speech-chat.txt，工具设为空；其余人设、历史、快照和条件消息继续保留。
+
+Vehicle Planner
+
+system：03-vehicle-planner.txt
+user：结构化输入数据（request_text、vehicle_snapshot、loaded_skills、available_action_names、history_reference_only、completed_operations、skills、capabilities、executed=false）。
+后续保留 assistant 工具调用、tool 结果；未提交计划时另加 08 中的 Planner 消息。
+
+Thinker
+
+system：research 用 04；quick 用 05（已包含研究主体和 quick 附加段，不能再把 04 重复加一次）。
+user：结构化任务数据（goal、constraints、revision、query_mode、current_utc；可选 context、user_replies）。
+后续保留 assistant 工具调用、tool 结果；未提交结果时另加 08 中的 Thinker 消息。
+从旧检查点恢复且有新条件时，另加 user 数据：revision、additional_conditions，以及原固定说明“在已有资料上继续；核对新条件是否需要补查，旧结果不自动证明新条件。”
+
+其他
+
+模型连接预热仅发送一条 user 文本：回复一个字：好
+ASR 和 TTS 当前没有单独的自然语言模型提示词。
+车控成功、拒绝、任务接手等确定性回执话术不是模型 system prompt；本目录不重复此前的回执模板导出。

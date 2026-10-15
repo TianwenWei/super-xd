@@ -1,0 +1,52 @@
+{
+  "session_id": "2531a34826a64b65",
+  "turn_id": "8948e723c2bf",
+  "query": "空调温度设为23度，打开后视镜加热，副驾车窗别动。",
+  "text": "空调调成二十三度了。\n后视镜加热开了。\n要求保持的设置未调整。",
+  "changed_paths": [
+    "climate.power",
+    "climate.temperatures.driver",
+    "climate.temperatures.front_passenger",
+    "climate.temperatures.rear",
+    "mirrors.heating"
+  ],
+  "assertion_failures": [],
+  "mini_calls": 2,
+  "pro_calls": 1,
+  "commands": [
+    {
+      "command_id": "e42f0360b0ca",
+      "name": "set_temperature",
+      "arguments": {
+        "zone": "all",
+        "temperature": 23
+      },
+      "action_id": "ac_temp_all_23",
+      "intent_id": "set_ac_temp_23"
+    },
+    {
+      "command_id": "96446992a523",
+      "name": "set_mirror_heating",
+      "arguments": {
+        "enabled": true
+      },
+      "action_id": "mirror_heating_on",
+      "intent_id": "turn_on_mirror_heating"
+    }
+  ],
+  "receipts": [
+    {
+      "command_id": "e42f0360b0ca",
+      "ok": true
+    },
+    {
+      "command_id": "96446992a523",
+      "ok": true
+    }
+  ],
+  "keep_check": {
+    "path": "windows.positions.front_passenger",
+    "before": 50,
+    "after": 50
+  }
+}

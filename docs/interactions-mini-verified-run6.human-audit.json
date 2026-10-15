@@ -1,0 +1,510 @@
+{
+  "schema": "super-xd-interaction-human-audit-v1",
+  "created_at": "2026-10-13T06:47:01.846161+00:00",
+  "source": "docs/interactions-mini-verified-run6.json",
+  "source_sha256": "de88dc89baefe312879a9a1aec2361c4ae6c1804556b45196293d2b0eac3286e",
+  "oracle_version": "interaction-oracle-v6",
+  "source_summary_unchanged": {
+    "planned_user_turns": 19,
+    "planned_group_runs": 6,
+    "attempted_user_turns": 19,
+    "scored_user_turns": 19,
+    "unscored_submitted_user_turns": 0,
+    "not_submitted_planned_turns": 0,
+    "passed_user_turns": 16,
+    "failed_user_turns": 3,
+    "guarded_model_attempts": 4,
+    "guarded_retry_attempts": 4,
+    "recovered_tool_attempts": 0,
+    "honest_partial_results_not_full_pass": 0,
+    "groups": 6,
+    "groups_with_setup_errors": 0,
+    "evaluation_finished": true,
+    "all_planned_turns_passed": false
+  },
+  "requests_sent_by_this_audit": 0,
+  "original_source_not_modified": true,
+  "classification": {
+    "direct_behavior_or_completion_failures": 2,
+    "upstream_result_missing_cascade_failures": 1,
+    "human_language_quality_flags_outside_frozen_machine_oracle": 1
+  },
+  "human_language_quality_flags": [
+    {
+      "scenario": "chat_no_actions",
+      "session_id": "e23b2f3174d64b86",
+      "turn_id": "bf5f2932703e",
+      "step": "word_not_weather",
+      "machine_pass": true,
+      "actual_text": "“天气”的写法是：“天”字先写横、撇、捺；“气”字先写撇、横、横、横折弯钩。",
+      "flag": "笔顺扩写仍存在；天字只列横、撇、捺，遗漏一横。工具/状态通过不代表语言事实通过。"
+    }
+  ],
+  "failures": [
+    {
+      "scenario": "heldout_preserve_lights_and_reverse_locks",
+      "step": "prime_on",
+      "session_id": "88cac55061b14210",
+      "turn_id": "189cdabd1de3",
+      "query": "打开氛围灯，并启用左后门儿童安全锁。",
+      "text": "氛围灯开了。",
+      "assertion_failures": [
+        {
+          "wrong_target_state": "locks.child_lock.left",
+          "expected": true,
+          "actual": false
+        },
+        {
+          "wrong_executed_commands": [
+            {
+              "name": "set_ambient_light",
+              "arguments": {
+                "enabled": true
+              }
+            }
+          ],
+          "expected": [
+            {
+              "name": "set_ambient_light",
+              "arguments": {
+                "enabled": true
+              }
+            },
+            {
+              "name": "set_child_lock",
+              "arguments": {
+                "side": "left",
+                "enabled": true
+              }
+            }
+          ]
+        },
+        "missing_or_wrong_actual_receipt",
+        {
+          "wrong_tool_set": [
+            {
+              "name": "load_skill",
+              "arguments": {
+                "skill_id": "lights"
+              }
+            },
+            {
+              "name": "set_ambient_light",
+              "arguments": {
+                "enabled": true
+              }
+            }
+          ],
+          "expected": [
+            {
+              "name": "set_ambient_light",
+              "arguments": {
+                "enabled": true
+              }
+            },
+            {
+              "name": "set_child_lock",
+              "arguments": {
+                "side": "left",
+                "enabled": true
+              }
+            },
+            {
+              "name": "load_skill",
+              "arguments": {
+                "skill_id": "lights"
+              }
+            },
+            {
+              "name": "load_skill",
+              "arguments": {
+                "skill_id": "locks"
+              }
+            }
+          ]
+        },
+        {
+          "load_skill_not_before_action": "locks"
+        }
+      ],
+      "actual_commands": [
+        {
+          "name": "set_ambient_light",
+          "arguments": {
+            "enabled": true
+          },
+          "command_id": "03ffa69caf89"
+        }
+      ],
+      "task_id": null,
+      "task_status": null,
+      "task_error": null
+    },
+    {
+      "scenario": "explicit_country_weather_v6",
+      "step": "official_weather",
+      "session_id": "5b6886e08c344be0",
+      "turn_id": "3694e4a26c8a",
+      "query": "查询法国气象局官网，核对法国巴黎明天的温度，只要简短结论和官方来源。",
+      "text": "我帮你查询法国气象局官网的巴黎明日温度，有结果告诉你。",
+      "assertion_failures": [
+        {
+          "wait_after_failed": [
+            "task_did_not_reach_expected_status"
+          ]
+        }
+      ],
+      "actual_commands": [],
+      "task_id": "aa0bcf012cdb",
+      "task_status": "failed",
+      "task_error": "任务达到推理步骤上限，已停止；没有宣称完成。"
+    },
+    {
+      "scenario": "explicit_country_weather_v6",
+      "step": "official_weather_recall",
+      "session_id": "5b6886e08c344be0",
+      "turn_id": "f79931f5e867",
+      "query": "刚才法国气象局官网那个任务的结论是什么？用已有结果回答，详细来源留卡里，不要重新查。",
+      "text": "任务未完成。任务达到推理步骤上限，已停止；没有宣称完成。",
+      "assertion_failures": [
+        "task_read_has_no_actual_field"
+      ],
+      "actual_commands": [],
+      "task_id": null,
+      "task_status": null,
+      "task_error": null
+    }
+  ],
+  "guarded_raw_attempts": [
+    {
+      "scenario": "compound_actions",
+      "step": "cross_skills",
+      "session_id": "edf26a67558647db",
+      "turn_id": "04e37c64e45a",
+      "raw_call": {
+        "name": "set_steering_heating",
+        "arguments": {
+          "enabled": false
+        },
+        "trace_id": 2520,
+        "call_id": "call_9ka7s336iayreuwmkps3l7nk"
+      },
+      "tool_error_trace_id": 2521,
+      "authorization_guard": {
+        "kind": "literal_target_mismatch",
+        "executed": false,
+        "retry_model": true,
+        "needs_clarification": false,
+        "selected_feature": "steering_heating",
+        "evidence": [
+          {
+            "start": 18,
+            "end": 23,
+            "text": "后视镜加热",
+            "meaning": "requested_feature",
+            "feature": "mirror_heating"
+          }
+        ],
+        "reason": "原句明确请求“后视镜加热”，本次写操作指向“方向盘加热”；部位或功能不一致，未执行。请重新核对原句中的目标。",
+        "spoken_reason": "部位或功能不一致，这个操作没有执行。"
+      },
+      "verified_followup_models": [
+        {
+          "started_trace_id": 2526,
+          "completed_trace_id": 2527,
+          "model_call_id": "818c96647d3f49728446bc7cef655ab7"
+        },
+        {
+          "started_trace_id": 2530,
+          "completed_trace_id": 2531,
+          "model_call_id": "a94e621cc11f486c93b9cc6548130e21"
+        }
+      ],
+      "actual_positive_commands": [
+        {
+          "name": "set_window_position",
+          "arguments": {
+            "window": "front_passenger",
+            "position": 20
+          },
+          "command_id": "2d301dd09687"
+        },
+        {
+          "name": "set_volume",
+          "arguments": {
+            "volume": 25
+          },
+          "command_id": "09af2864a6ac"
+        },
+        {
+          "name": "set_mirror_heating",
+          "arguments": {
+            "enabled": false
+          },
+          "command_id": "db54ff887ad0"
+        }
+      ],
+      "step_pass": true
+    },
+    {
+      "scenario": "airport_clarification",
+      "step": "nearest_airport",
+      "session_id": "f9c642dbe83d402c",
+      "turn_id": "61e753e4f71f",
+      "raw_call": {
+        "name": "delegate_task",
+        "arguments": {
+          "goal": "导航去最近的机场",
+          "spoken_goal": "导航去最近的机场",
+          "query_domain": "general",
+          "query_mode": "research"
+        },
+        "trace_id": 2552,
+        "call_id": "call_9ugs79iv94abym08vvvfn9f1"
+      },
+      "tool_error_trace_id": 2553,
+      "authorization_guard": {
+        "kind": "missing_required_origin",
+        "executed": false,
+        "retry_model": true,
+        "needs_clarification": false,
+        "required_condition": "出发城市或地址",
+        "evidence": [
+          {
+            "start": 0,
+            "end": 9,
+            "text": "导航去最近的机场。",
+            "meaning": "nearest_airport_requires_origin"
+          }
+        ],
+        "reason": "没有可用GPS或用户提供的出发城市/地址，最近机场任务尚不能登记或执行。请直接只问用户现在在哪个城市或地址，不承诺已接手导航。",
+        "spoken_reason": "你现在在哪个城市或地址？"
+      },
+      "verified_followup_models": [
+        {
+          "started_trace_id": 2554,
+          "completed_trace_id": 2555,
+          "model_call_id": "3f0627622f264884ac563d2ca6a2f777"
+        }
+      ],
+      "actual_positive_commands": [],
+      "step_pass": true
+    },
+    {
+      "scenario": "heldout_remaining_windows",
+      "step": "other_three_closed",
+      "session_id": "110b349868094df5",
+      "turn_id": "704dae98dde9",
+      "raw_call": {
+        "name": "close_all_windows",
+        "arguments": {},
+        "trace_id": 2601,
+        "call_id": "call_riy4pqykyxoh0f0buchs1ct5"
+      },
+      "tool_error_trace_id": 2602,
+      "authorization_guard": {
+        "kind": "literal_window_hold",
+        "executed": false,
+        "retry_model": true,
+        "needs_clarification": false,
+        "preserved_windows": [
+          "front_passenger"
+        ],
+        "affected_windows": [
+          "front_passenger"
+        ],
+        "current_positions": {
+          "front_passenger": 50
+        },
+        "unknown_windows": [],
+        "evidence": [
+          {
+            "start": 0,
+            "end": 6,
+            "text": "副驾车窗别动",
+            "meaning": "keep_current_window_position",
+            "window": "front_passenger"
+          }
+        ],
+        "reason": "原句要求保留的车窗在本次位置写入集合中；即使开度相同也未授权该写入，未执行。请重新核对保留约束。",
+        "spoken_reason": "这个操作会覆盖要求保持不动的车窗，没有执行。"
+      },
+      "verified_followup_models": [
+        {
+          "started_trace_id": 2603,
+          "completed_trace_id": 2615,
+          "model_call_id": "b2990094e3ec418d9781fa8c0d2e5c6d"
+        }
+      ],
+      "actual_positive_commands": [
+        {
+          "name": "set_window_position",
+          "arguments": {
+            "window": "driver",
+            "position": 0
+          },
+          "command_id": "71b846404625"
+        },
+        {
+          "name": "set_window_position",
+          "arguments": {
+            "window": "rear_left",
+            "position": 0
+          },
+          "command_id": "a0ba5c318df2"
+        },
+        {
+          "name": "set_window_position",
+          "arguments": {
+            "window": "rear_right",
+            "position": 0
+          },
+          "command_id": "96850d67797b"
+        }
+      ],
+      "step_pass": true
+    },
+    {
+      "scenario": "heldout_preserve_lights_and_reverse_locks",
+      "step": "prime_on",
+      "session_id": "88cac55061b14210",
+      "turn_id": "189cdabd1de3",
+      "raw_call": {
+        "name": "set_interior_light",
+        "arguments": {
+          "zone": "all",
+          "enabled": true
+        },
+        "trace_id": 2633,
+        "call_id": "call_pdo56yvoc8tkn87nb032fdmc"
+      },
+      "tool_error_trace_id": 2634,
+      "authorization_guard": {
+        "kind": "literal_target_mismatch",
+        "executed": false,
+        "retry_model": true,
+        "needs_clarification": false,
+        "selected_feature": "interior_light",
+        "evidence": [
+          {
+            "start": 2,
+            "end": 5,
+            "text": "氛围灯",
+            "meaning": "requested_feature",
+            "feature": "ambient_power"
+          }
+        ],
+        "reason": "原句明确请求“氛围灯电源”，本次写操作指向“车内照明灯”；部位或功能不一致，未执行。请重新核对原句中的目标。",
+        "spoken_reason": "部位或功能不一致，这个操作没有执行。"
+      },
+      "verified_followup_models": [
+        {
+          "started_trace_id": 2635,
+          "completed_trace_id": 2636,
+          "model_call_id": "0ab080c313ee412391bf56680bf2fa25"
+        },
+        {
+          "started_trace_id": 2639,
+          "completed_trace_id": 2642,
+          "model_call_id": "b3e2be341ae247a6a7805989dc6ee04b"
+        }
+      ],
+      "actual_positive_commands": [
+        {
+          "name": "set_ambient_light",
+          "arguments": {
+            "enabled": true
+          },
+          "command_id": "03ffa69caf89"
+        }
+      ],
+      "step_pass": false
+    }
+  ],
+  "weather_turn_evidence": [
+    {
+      "step": "france_paris_weather",
+      "turn_id": "2914cc350e8e",
+      "text": "我帮你查询巴黎明天的温度，有结果告诉你。",
+      "pass": true,
+      "task_id": "2e3d97982143",
+      "actual_web_fact_evidence": {
+        "successful_actual_tools": [
+          "finish_task",
+          "get_weather_forecast"
+        ],
+        "source_truth_scope": "Actual provenance and declared fact contracts; arbitrary webpage truth still needs human audit.",
+        "expected_forecast_date": "2026-10-14",
+        "actual_extracted_forecast_records": [],
+        "unused_successful_forecast_urls": [],
+        "observed_evidence_kind": "structured_forecast",
+        "report_date_roles": {
+          "summary": {
+            "forecast_dates": [
+              [
+                2026,
+                10,
+                14
+              ]
+            ],
+            "acquisition_or_update_dates": [
+              [
+                2026,
+                10,
+                13
+              ]
+            ],
+            "pass": true
+          },
+          "spoken_summary": {
+            "forecast_dates": [
+              [
+                2026,
+                10,
+                14
+              ]
+            ],
+            "acquisition_or_update_dates": [],
+            "pass": true
+          }
+        },
+        "assertion_failures": [],
+        "pass": true
+      }
+    },
+    {
+      "step": "france_paris_recall",
+      "turn_id": "c6355d8d1c60",
+      "text": "法国巴黎明天（2026年10月14日）的最低气温为11.2度，最高气温为19.3度，该数据来自Open-Meteo的天气预报。",
+      "pass": true,
+      "task_id": null,
+      "actual_web_fact_evidence": null
+    },
+    {
+      "step": "official_weather",
+      "turn_id": "3694e4a26c8a",
+      "text": "我帮你查询法国气象局官网的巴黎明日温度，有结果告诉你。",
+      "pass": false,
+      "task_id": "aa0bcf012cdb",
+      "actual_web_fact_evidence": null
+    },
+    {
+      "step": "official_weather_recall",
+      "turn_id": "f79931f5e867",
+      "text": "任务未完成。任务达到推理步骤上限，已停止；没有宣称完成。",
+      "pass": false,
+      "task_id": null,
+      "actual_web_fact_evidence": null
+    }
+  ],
+  "official_weather_outcome": "Actual official-domain Search/Extract happened, but two unsupported numeric finish attempts were rejected; the worker failed at its four-step limit. No completed honest partial result exists and no official temperature result is counted as full pass.",
+  "coverage_limits": [
+    "Bounded 19-turn repair validation only, not a replacement or re-run of the original 69.",
+    "No ASR/TTS/browser audio latency measured in this typed HTTP/WS run.",
+    "Four incorrect raw model calls were blocked; these remain quality defects even where the final committed commands are correct.",
+    "Machine scoring does not establish open-ended language quality."
+  ],
+  "trace_count": 262,
+  "ws_event_count": 301,
+  "trace_recording_errors": []
+}

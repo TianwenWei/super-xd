@@ -1,0 +1,31 @@
+{
+  "session_id": "9d14ff134a3f4bc6",
+  "page_id": "351dcfbc-19ae-4a57-8491-bc23c0329d76",
+  "build_stage": "voice-first-intermediate-before-no-mechanical-cut-correction",
+  "attempts": [
+    {
+      "client_request_id": "d0e0e7e7-33b1-45ac-86fb-74db0d044e5b",
+      "turn_id": "74a6609ccbfa",
+      "scenario_id": "greeting",
+      "persona": "warm",
+      "sample_phase": "first-query-after-restart",
+      "purpose": "voice_first_style_validation"
+    },
+    {
+      "client_request_id": "99e183b5-5406-49cb-8536-09c544dee999",
+      "turn_id": "902d10dcb419",
+      "scenario_id": "greeting",
+      "persona": "professional",
+      "sample_phase": "warm-progressive-history",
+      "purpose": "voice_first_style_validation"
+    },
+    {
+      "client_request_id": "9f527c03-66b5-4525-bc3a-24eb74378e6d",
+      "turn_id": "be1e22c354c5",
+      "scenario_id": "greeting",
+      "persona": "playful",
+      "sample_phase": "warm-progressive-history",
+      "purpose": "voice_first_style_validation"
+    }
+  ]
+}

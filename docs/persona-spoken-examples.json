@@ -1,0 +1,112 @@
+{
+  "scope": "Presentation examples only. Previous control text comes from actual persisted phase-one trace; new text is executed local verified-receipt rendering. No live model call or latency claim.",
+  "examples": [
+    {
+      "kind": "success",
+      "tool": "set_temperature",
+      "arguments": {
+        "zone": "all",
+        "temperature": 23
+      },
+      "verified_mock_receipt_ok": true,
+      "before": {
+        "source": "Actual phase-one browser turn.completed trace",
+        "session_id": "b45e4e2b88fe4763",
+        "turn_id": "0c2798e718b6",
+        "text": "帮你调好了，所有温区现在是23℃。"
+      },
+      "after": {
+        "source": "Current receipt_detail + actual local persona.render; not a model or browser latency sample",
+        "receipt_detail": "空调调到二十三度了。",
+        "texts": {
+          "professional": "空调调到二十三度了。",
+          "warm": "空调调成二十三度了。",
+          "playful": "空调调到二十三度啦。"
+        }
+      }
+    },
+    {
+      "kind": "success",
+      "tool": "set_window_position",
+      "arguments": {
+        "window": "driver",
+        "position": 50
+      },
+      "verified_mock_receipt_ok": true,
+      "before": {
+        "source": "Actual phase-one browser turn.completed trace",
+        "session_id": "b45e4e2b88fe4763",
+        "turn_id": "6bb170b839f1",
+        "text": "帮你调好了，主驾车窗开度50%。"
+      },
+      "after": {
+        "source": "Current receipt_detail + actual local persona.render; not a model or browser latency sample",
+        "receipt_detail": "主驾车窗打开一半了。",
+        "texts": {
+          "professional": "主驾车窗打开一半了。",
+          "warm": "主驾车窗开到一半了。",
+          "playful": "主驾车窗打开一半啦。"
+        }
+      }
+    },
+    {
+      "kind": "success",
+      "tool": "set_navigation_destination",
+      "arguments": {
+        "destination": "上海虹桥站"
+      },
+      "verified_mock_receipt_ok": true,
+      "before": {
+        "source": "Actual phase-one browser turn.completed trace",
+        "session_id": "b45e4e2b88fe4763",
+        "turn_id": "8f88b4fe0adf",
+        "text": "帮你调好了，模拟导航目的地已设为上海虹桥站。"
+      },
+      "after": {
+        "source": "Current receipt_detail + actual local persona.render; not a model or browser latency sample",
+        "receipt_detail": "模拟导航目的地已设为上海虹桥站。",
+        "texts": {
+          "professional": "模拟导航目的地已设为上海虹桥站。",
+          "warm": "模拟导航目的地已设为上海虹桥站了。",
+          "playful": "模拟导航目的地已设为上海虹桥站啦。"
+        }
+      }
+    },
+    {
+      "kind": "delegated",
+      "after": {
+        "source": "Current actual local persona.render; not a model or browser latency sample",
+        "detail": "查询巴黎今天的天气并核对来源",
+        "texts": {
+          "professional": "我来查询巴黎今天的天气并核对来源，有结果告诉你。",
+          "warm": "我帮你查询巴黎今天的天气并核对来源，有结果告诉你。",
+          "playful": "我去查询巴黎今天的天气并核对来源，有结果告诉你。"
+        }
+      }
+    },
+    {
+      "kind": "clarify",
+      "after": {
+        "source": "Current actual local persona.render; not a model or browser latency sample",
+        "detail": "你想查哪个城市？",
+        "texts": {
+          "professional": "你想查哪个城市？",
+          "warm": "你想查哪个城市呢？",
+          "playful": "你想查哪个城市呀？"
+        }
+      }
+    },
+    {
+      "kind": "result",
+      "after": {
+        "source": "Current actual local persona.render; not a model or browser latency sample",
+        "detail": "尚未读到官网，暂时不能确认开放时间。",
+        "texts": {
+          "professional": "尚未读到官网，暂时不能确认开放时间。",
+          "warm": "尚未读到官网，暂时不能确认开放时间。",
+          "playful": "尚未读到官网，暂时不能确认开放时间。"
+        }
+      }
+    }
+  ]
+}

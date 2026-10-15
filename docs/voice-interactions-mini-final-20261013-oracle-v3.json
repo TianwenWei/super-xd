@@ -1,0 +1,101 @@
+{
+  "kind": "offline_oracle_read_write_correction",
+  "source": "docs/voice-interactions-mini-final-20261013.json",
+  "source_sha256": "3601b86448797a366b49699b275205591630a0a0dbe9c58d0dcbac74cc792d46",
+  "oracle_version": "voice-interaction-v3-verified-window-reads",
+  "no_network_or_provider_calls": true,
+  "original_json_modified": false,
+  "attempts": [
+    {
+      "scenario_id": "single_control",
+      "turn_id": "58c54001cb42",
+      "original_validation_errors": [],
+      "new_validation_errors": [],
+      "verified_readonly_commands": []
+    },
+    {
+      "scenario_id": "compound_control",
+      "turn_id": "7d54e89d9c80",
+      "original_validation_errors": [
+        "driver_massage_not_enabled",
+        "unexpected_command_set"
+      ],
+      "new_validation_errors": [
+        "driver_massage_not_enabled",
+        "unexpected_command_set"
+      ],
+      "verified_readonly_commands": []
+    },
+    {
+      "scenario_id": "state_question",
+      "turn_id": "e686d5874ba4",
+      "original_validation_errors": [],
+      "new_validation_errors": [],
+      "verified_readonly_commands": []
+    },
+    {
+      "scenario_id": "negative_correction",
+      "turn_id": "60c6bec3e74f",
+      "original_validation_errors": [
+        "driver_massage_not_enabled",
+        "unexpected_command_set"
+      ],
+      "new_validation_errors": [
+        "driver_massage_not_enabled",
+        "unexpected_command_set"
+      ],
+      "verified_readonly_commands": []
+    },
+    {
+      "scenario_id": "chat",
+      "turn_id": "100d5434ae39",
+      "original_validation_errors": [],
+      "new_validation_errors": [],
+      "verified_readonly_commands": []
+    },
+    {
+      "scenario_id": "task_delegation",
+      "turn_id": "cf237d77bdb0",
+      "original_validation_errors": [],
+      "new_validation_errors": [],
+      "verified_readonly_commands": []
+    },
+    {
+      "scenario_id": "task_topic_switch",
+      "turn_id": "062a9b6fda3f",
+      "original_validation_errors": [
+        "unexpected_command_set"
+      ],
+      "new_validation_errors": [],
+      "verified_readonly_commands": [
+        {
+          "command_id": "27435cd67387",
+          "window": "driver",
+          "actual_position": 0
+        },
+        {
+          "command_id": "e36d753e3f3a",
+          "window": "front_passenger",
+          "actual_position": 0
+        },
+        {
+          "command_id": "64a915c06ec8",
+          "window": "rear_left",
+          "actual_position": 0
+        },
+        {
+          "command_id": "6145e4faeb43",
+          "window": "rear_right",
+          "actual_position": 0
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "original_query_passed": 4,
+    "corrected_query_passed": 5,
+    "total": 7,
+    "weather_background_still_failed": true,
+    "latency_samples_unchanged": true
+  }
+}

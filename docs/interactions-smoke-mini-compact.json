@@ -1,0 +1,158 @@
+{
+  "session_id": "7bcea45015ce41e6",
+  "model": "doubao-seed-2-0-mini-260428",
+  "records": [
+    {
+      "query": "帮我打开空调，关闭车窗，打开座椅按摩。",
+      "kind": "mixed",
+      "at": "2026-10-13T05:01:32.618014+00:00",
+      "success": true,
+      "first_effective_ms": 2553.7,
+      "receipt_ms": 2553.2,
+      "total_ms": 2557.8,
+      "calls": [
+        {
+          "name": "set_climate_power",
+          "arguments": {
+            "enabled": true
+          }
+        },
+        {
+          "name": "close_all_windows",
+          "arguments": {}
+        },
+        {
+          "name": "set_seat_massage",
+          "arguments": {
+            "seat": "driver",
+            "mode": "relax"
+          }
+        }
+      ],
+      "text": "空调开了，全部车窗关了，主驾座椅按摩设为放松模式了。",
+      "metrics": {
+        "first_effective_ms": 2552.3147500352934,
+        "total_ms": 2552.3557079723105,
+        "model_calls": 2,
+        "route": "tool",
+        "commands": [
+          {
+            "command_id": "85dc0d48d129",
+            "name": "set_climate_power",
+            "arguments": {
+              "enabled": true
+            },
+            "receipt_ms": 1606.669457978569,
+            "ok": true
+          },
+          {
+            "command_id": "94757e429bfa",
+            "name": "close_all_windows",
+            "arguments": {},
+            "receipt_ms": 1608.7680410128087,
+            "ok": true
+          },
+          {
+            "command_id": "fc7ee03b0005",
+            "name": "set_seat_massage",
+            "arguments": {
+              "seat": "driver",
+              "mode": "relax"
+            },
+            "receipt_ms": 2549.992165993899,
+            "ok": true
+          }
+        ],
+        "error": null
+      },
+      "background_active": [],
+      "hot_path_only": false,
+      "error": null
+    },
+    {
+      "query": "现在车窗是开的还是关的？",
+      "kind": "mixed",
+      "at": "2026-10-13T05:01:35.175930+00:00",
+      "success": true,
+      "first_effective_ms": 966.2,
+      "receipt_ms": null,
+      "total_ms": 994.4,
+      "calls": [],
+      "text": "目前四门车窗都是关闭的，开度百分比都是0%。",
+      "metrics": {
+        "first_effective_ms": 965.522792073898,
+        "total_ms": 988.2966249715537,
+        "model_calls": 1,
+        "route": "chat",
+        "commands": [],
+        "error": null
+      },
+      "background_active": [],
+      "hot_path_only": false,
+      "error": null
+    },
+    {
+      "query": "不是关闭按摩，是把主驾按摩切换成腰部模式。",
+      "kind": "mixed",
+      "at": "2026-10-13T05:01:36.170415+00:00",
+      "success": true,
+      "first_effective_ms": 1077.0,
+      "receipt_ms": 1076.7,
+      "total_ms": 1083.0,
+      "calls": [
+        {
+          "name": "set_seat_massage",
+          "arguments": {
+            "seat": "driver",
+            "mode": "lumbar"
+          }
+        }
+      ],
+      "text": "主驾座椅按摩设为腰部模式了。",
+      "metrics": {
+        "first_effective_ms": 1075.1908329548314,
+        "total_ms": 1075.2339159371331,
+        "model_calls": 1,
+        "route": "tool",
+        "commands": [
+          {
+            "command_id": "6f8dab714873",
+            "name": "set_seat_massage",
+            "arguments": {
+              "seat": "driver",
+              "mode": "lumbar"
+            },
+            "receipt_ms": 1074.317582999356,
+            "ok": true
+          }
+        ],
+        "error": null
+      },
+      "background_active": [],
+      "hot_path_only": false,
+      "error": null
+    },
+    {
+      "query": "导航去最近的机场。",
+      "kind": "mixed",
+      "at": "2026-10-13T05:01:37.253414+00:00",
+      "success": true,
+      "first_effective_ms": 744.5,
+      "receipt_ms": null,
+      "total_ms": 1211.9,
+      "calls": [],
+      "text": "你现在在哪个城市或地址呢？我需要知道出发地才能设置去最近机场的导航。",
+      "metrics": {
+        "first_effective_ms": 743.6320830602199,
+        "total_ms": 1203.5807910142466,
+        "model_calls": 1,
+        "route": "chat",
+        "commands": [],
+        "error": null
+      },
+      "background_active": [],
+      "hot_path_only": false,
+      "error": null
+    }
+  ]
+}

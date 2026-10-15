@@ -1,0 +1,307 @@
+{
+  "kind": "prompts_zip_before_initial_final_evaluation",
+  "same_30_inputs_and_expected_oracles": true,
+  "provider_cases_retried": 0,
+  "versions_replayed_once_each": true,
+  "tool_execution": false,
+  "replays": {
+    "before": {
+      "path": "docs/prompts-zip-before-replay-20261014.json",
+      "attempted": 30,
+      "automatic_passed": 23,
+      "manual_reviews_required": 13,
+      "errors": 0
+    },
+    "initial_zip": {
+      "path": "docs/prompts-zip-after-replay-20261014.json",
+      "attempted": 30,
+      "automatic_passed": 23,
+      "manual_reviews_required": 13,
+      "errors": 0
+    },
+    "final": {
+      "path": "docs/prompts-zip-final-replay-20261014.json",
+      "attempted": 30,
+      "automatic_passed": 23,
+      "manual_reviews_required": 13,
+      "errors": 0
+    }
+  },
+  "new_structural_failure_ids_vs_before": [],
+  "structural_fixes_vs_before": [],
+  "final_failure_ids": [
+    "ambiguous_seat",
+    "hold_other_windows",
+    "nearby_no_origin",
+    "pronoun_ambiguous",
+    "read_current_state",
+    "task_reply",
+    "weather_missing_location"
+  ],
+  "semantic_behavior_regressions": [
+    {
+      "id": "task_reply",
+      "before": "manage_task reply with extracted text巴黎; routing correct but strict original-text oracle failed",
+      "final": "get_weather巴黎today instead of replying to waiting hotel task",
+      "status": "unresolved"
+    },
+    {
+      "id": "read_current_state",
+      "before": "delegate_vehicle_control windows; already wrong for snapshot query",
+      "initial_zip": "correct direct snapshot answer35%",
+      "final": "set_window_position front_passenger35; read-only question now emits a write call",
+      "status": "unresolved; same failed ID does not mean same risk"
+    }
+  ],
+  "initial_regression_fixed": [
+    {
+      "id": "weather_official_source",
+      "initial_zip": "weather/research",
+      "final": "weather/quick"
+    }
+  ],
+  "semantic_reviews": [
+    {
+      "id": "ambiguous_seat",
+      "criterion": "须询问哪个座椅，不应猜测目标。",
+      "before_semantic_pass": false,
+      "final_semantic_pass": false
+    },
+    {
+      "id": "read_current_state",
+      "criterion": "准确回答35%，不得说一半，也不修改车辆。",
+      "before_semantic_pass": false,
+      "final_semantic_pass": false
+    },
+    {
+      "id": "pronoun_ambiguous",
+      "criterion": "指代不唯一，须澄清，不随意关掉其中一个。",
+      "before_semantic_pass": false,
+      "final_semantic_pass": false
+    },
+    {
+      "id": "new_research",
+      "criterion": "goal需保留三家、巴黎、带孩子、停车场、来源条件。",
+      "before_semantic_pass": true,
+      "final_semantic_pass": true
+    },
+    {
+      "id": "nearby_no_origin",
+      "criterion": "须询问所在城市或地址；不能假定GPS或搜索并启动导航。",
+      "before_semantic_pass": false,
+      "final_semantic_pass": false
+    },
+    {
+      "id": "poi_search",
+      "criterion": "query保留巴黎、卢浮宫附近、充电站，不能导航。",
+      "before_semantic_pass": true,
+      "final_semantic_pass": true
+    },
+    {
+      "id": "weather_explicit",
+      "criterion": "location应为法国巴黎，不能委托后台。",
+      "before_semantic_pass": true,
+      "final_semantic_pass": true
+    },
+    {
+      "id": "weather_missing_location",
+      "criterion": "须询问城市，不猜测用户位置。",
+      "before_semantic_pass": false,
+      "final_semantic_pass": false
+    },
+    {
+      "id": "weather_official_source",
+      "criterion": "goal须保留法国气象局官网、巴黎、明天与来源要求。",
+      "before_semantic_pass": true,
+      "final_semantic_pass": true
+    },
+    {
+      "id": "word_shape_scope",
+      "criterion": "准确解释晴的写法/构成且不调用天气工具；用户方案取消旧只能显示字形/不能笔顺的专用硬约束。",
+      "before_semantic_pass": true,
+      "final_semantic_pass": true
+    },
+    {
+      "id": "speech_answer_only",
+      "criterion": "无工具阶段自然解释，不输出路由JSON，不承诺执行。",
+      "before_semantic_pass": true,
+      "final_semantic_pass": true
+    },
+    {
+      "id": "thinker_quick_missing_city",
+      "criterion": "只问必要城市，不能猜地点。",
+      "before_semantic_pass": true,
+      "final_semantic_pass": true
+    },
+    {
+      "id": "thinker_research_lookup",
+      "criterion": "须真实查询官方信息，不能直接finish捏造。",
+      "before_semantic_pass": true,
+      "final_semantic_pass": true
+    },
+    {
+      "id": "task_reply",
+      "criterion": "等待补充的任务应reply到已有任务，不应发起独立天气查询。",
+      "before_semantic_pass": true,
+      "final_semantic_pass": false
+    }
+  ],
+  "tool_schema_difference_expected": "README explicitly requires tool-description metadata changes; Talker callable function names remain fixed21.",
+  "tool_schema_changes": [
+    {
+      "id": "temperature_one",
+      "before": "7f6a30494fbbb7ea9da4edb0dc602ae89872e64f4123a72c85b5763abad834bc",
+      "final": "c8af8876537fb38407a850ba6a39dbde22411615da25eaf1c044da324d0adb2d"
+    },
+    {
+      "id": "explicit_off",
+      "before": "7f6a30494fbbb7ea9da4edb0dc602ae89872e64f4123a72c85b5763abad834bc",
+      "final": "c8af8876537fb38407a850ba6a39dbde22411615da25eaf1c044da324d0adb2d"
+    },
+    {
+      "id": "two_independent_hot",
+      "before": "7f6a30494fbbb7ea9da4edb0dc602ae89872e64f4123a72c85b5763abad834bc",
+      "final": "c8af8876537fb38407a850ba6a39dbde22411615da25eaf1c044da324d0adb2d"
+    },
+    {
+      "id": "same_state_still_requested",
+      "before": "7f6a30494fbbb7ea9da4edb0dc602ae89872e64f4123a72c85b5763abad834bc",
+      "final": "c8af8876537fb38407a850ba6a39dbde22411615da25eaf1c044da324d0adb2d"
+    },
+    {
+      "id": "massage_is_not_heat",
+      "before": "7f6a30494fbbb7ea9da4edb0dc602ae89872e64f4123a72c85b5763abad834bc",
+      "final": "c8af8876537fb38407a850ba6a39dbde22411615da25eaf1c044da324d0adb2d"
+    },
+    {
+      "id": "cold_mirror",
+      "before": "7f6a30494fbbb7ea9da4edb0dc602ae89872e64f4123a72c85b5763abad834bc",
+      "final": "c8af8876537fb38407a850ba6a39dbde22411615da25eaf1c044da324d0adb2d"
+    },
+    {
+      "id": "mixed_delegate_whole",
+      "before": "7f6a30494fbbb7ea9da4edb0dc602ae89872e64f4123a72c85b5763abad834bc",
+      "final": "c8af8876537fb38407a850ba6a39dbde22411615da25eaf1c044da324d0adb2d"
+    },
+    {
+      "id": "dependency_authorized",
+      "before": "7f6a30494fbbb7ea9da4edb0dc602ae89872e64f4123a72c85b5763abad834bc",
+      "final": "c8af8876537fb38407a850ba6a39dbde22411615da25eaf1c044da324d0adb2d"
+    },
+    {
+      "id": "hold_other_windows",
+      "before": "7f6a30494fbbb7ea9da4edb0dc602ae89872e64f4123a72c85b5763abad834bc",
+      "final": "c8af8876537fb38407a850ba6a39dbde22411615da25eaf1c044da324d0adb2d"
+    },
+    {
+      "id": "ambiguous_seat",
+      "before": "7f6a30494fbbb7ea9da4edb0dc602ae89872e64f4123a72c85b5763abad834bc",
+      "final": "c8af8876537fb38407a850ba6a39dbde22411615da25eaf1c044da324d0adb2d"
+    },
+    {
+      "id": "read_current_state",
+      "before": "7f6a30494fbbb7ea9da4edb0dc602ae89872e64f4123a72c85b5763abad834bc",
+      "final": "c8af8876537fb38407a850ba6a39dbde22411615da25eaf1c044da324d0adb2d"
+    },
+    {
+      "id": "pronoun_tailgate",
+      "before": "7f6a30494fbbb7ea9da4edb0dc602ae89872e64f4123a72c85b5763abad834bc",
+      "final": "c8af8876537fb38407a850ba6a39dbde22411615da25eaf1c044da324d0adb2d"
+    },
+    {
+      "id": "pronoun_ambiguous",
+      "before": "7f6a30494fbbb7ea9da4edb0dc602ae89872e64f4123a72c85b5763abad834bc",
+      "final": "c8af8876537fb38407a850ba6a39dbde22411615da25eaf1c044da324d0adb2d"
+    },
+    {
+      "id": "task_reply",
+      "before": "7f6a30494fbbb7ea9da4edb0dc602ae89872e64f4123a72c85b5763abad834bc",
+      "final": "c8af8876537fb38407a850ba6a39dbde22411615da25eaf1c044da324d0adb2d"
+    },
+    {
+      "id": "task_get_multiple",
+      "before": "7f6a30494fbbb7ea9da4edb0dc602ae89872e64f4123a72c85b5763abad834bc",
+      "final": "c8af8876537fb38407a850ba6a39dbde22411615da25eaf1c044da324d0adb2d"
+    },
+    {
+      "id": "existing_result_read",
+      "before": "7f6a30494fbbb7ea9da4edb0dc602ae89872e64f4123a72c85b5763abad834bc",
+      "final": "c8af8876537fb38407a850ba6a39dbde22411615da25eaf1c044da324d0adb2d"
+    },
+    {
+      "id": "new_research",
+      "before": "7f6a30494fbbb7ea9da4edb0dc602ae89872e64f4123a72c85b5763abad834bc",
+      "final": "c8af8876537fb38407a850ba6a39dbde22411615da25eaf1c044da324d0adb2d"
+    },
+    {
+      "id": "nearby_no_origin",
+      "before": "7f6a30494fbbb7ea9da4edb0dc602ae89872e64f4123a72c85b5763abad834bc",
+      "final": "c8af8876537fb38407a850ba6a39dbde22411615da25eaf1c044da324d0adb2d"
+    },
+    {
+      "id": "poi_search",
+      "before": "7f6a30494fbbb7ea9da4edb0dc602ae89872e64f4123a72c85b5763abad834bc",
+      "final": "c8af8876537fb38407a850ba6a39dbde22411615da25eaf1c044da324d0adb2d"
+    },
+    {
+      "id": "poi_select_reference",
+      "before": "7f6a30494fbbb7ea9da4edb0dc602ae89872e64f4123a72c85b5763abad834bc",
+      "final": "c8af8876537fb38407a850ba6a39dbde22411615da25eaf1c044da324d0adb2d"
+    },
+    {
+      "id": "weather_explicit",
+      "before": "7f6a30494fbbb7ea9da4edb0dc602ae89872e64f4123a72c85b5763abad834bc",
+      "final": "c8af8876537fb38407a850ba6a39dbde22411615da25eaf1c044da324d0adb2d"
+    },
+    {
+      "id": "weather_missing_location",
+      "before": "7f6a30494fbbb7ea9da4edb0dc602ae89872e64f4123a72c85b5763abad834bc",
+      "final": "c8af8876537fb38407a850ba6a39dbde22411615da25eaf1c044da324d0adb2d"
+    },
+    {
+      "id": "weather_official_source",
+      "before": "7f6a30494fbbb7ea9da4edb0dc602ae89872e64f4123a72c85b5763abad834bc",
+      "final": "c8af8876537fb38407a850ba6a39dbde22411615da25eaf1c044da324d0adb2d"
+    },
+    {
+      "id": "word_shape_scope",
+      "before": "7f6a30494fbbb7ea9da4edb0dc602ae89872e64f4123a72c85b5763abad834bc",
+      "final": "c8af8876537fb38407a850ba6a39dbde22411615da25eaf1c044da324d0adb2d"
+    },
+    {
+      "id": "chat_route_protocol",
+      "before": "7f6a30494fbbb7ea9da4edb0dc602ae89872e64f4123a72c85b5763abad834bc",
+      "final": "c8af8876537fb38407a850ba6a39dbde22411615da25eaf1c044da324d0adb2d"
+    },
+    {
+      "id": "speech_hot_route",
+      "before": "7f6a30494fbbb7ea9da4edb0dc602ae89872e64f4123a72c85b5763abad834bc",
+      "final": "c8af8876537fb38407a850ba6a39dbde22411615da25eaf1c044da324d0adb2d"
+    }
+  ],
+  "input_audit": "docs/prompts-zip-final-input-audit-20261014.json",
+  "source_before_manifest": "data/prompts-zip-before-20261014/manifest.json",
+  "offline_tests": {
+    "before_passed": 1388,
+    "final_passed": 1357,
+    "removed_old_guard_cases": 33,
+    "removed_old_loader_heading_case": 1,
+    "new_contract_cases": 3,
+    "net_case_change": -31,
+    "before_log": "docs/prompts-zip-before-pytest-20261014.log",
+    "final_log": "docs/prompts-zip-final-pytest-20261014.log",
+    "first_after_log_preserved": "docs/prompts-zip-after-pytest-20261014.log",
+    "first_after_failure": "One obsolete Planner literal assertion; replaced with actual TXT wiring and reference-only history rule."
+  },
+  "frontend_tests": {
+    "passed": 40,
+    "failed": 0,
+    "log": "docs/prompts-zip-frontend-tests-20261014.log"
+  },
+  "frontend_build": {
+    "passed": true,
+    "log": "docs/prompts-zip-frontend-build-20261014.log"
+  },
+  "legacy_word_shape_only_constraint": "Preserved before-review artifact applies former product rules and reports22/30; it is not directly comparable to current acceptance criteria.",
+  "limits": "首步评测未执行工具，不替代完整模拟车控、ASR/TTS、真实浏览器麦克风/声学验证。"
+}

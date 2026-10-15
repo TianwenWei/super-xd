@@ -1,0 +1,38 @@
+{
+  "at": "2026-10-11T14:22:16.892318+00:00",
+  "provider": "volcengine-speech",
+  "voice": "zh_female_xiaohe_uranus_bigtts",
+  "resource": "seed-tts-2.0",
+  "configured": true,
+  "source": "config_file",
+  "samples": [
+    {
+      "text": "晚上好，今天想聊些什么？",
+      "ok": true,
+      "first_packet_ms": 1150.6,
+      "total_ms": 1335.6,
+      "audio_bytes": 19629,
+      "sha256": "27d1061c33c70a97e354309feeaa9a6d98b67896bc2e0a487a0d2fc422656635",
+      "file": "/Users/weitianwen/PycharmProjects/super-xd/data/xiaohe-demo-1.mp3"
+    },
+    {
+      "text": "主驾车窗开度已经设为百分之五十。",
+      "ok": true,
+      "first_packet_ms": 535.8,
+      "total_ms": 932.0,
+      "audio_bytes": 26157,
+      "sha256": "cf6a5eccfe63dd5ddafb56f8727683f732083d38a983160d2b180b471a1dd481",
+      "file": "/Users/weitianwen/PycharmProjects/super-xd/data/xiaohe-demo-2.mp3"
+    },
+    {
+      "text": "后台还在继续查询，你可以先和我聊天，或者调整空调。",
+      "ok": true,
+      "first_packet_ms": 550.0,
+      "total_ms": 1165.2,
+      "audio_bytes": 38829,
+      "sha256": "b5c41739e388c6f092b9ac084d1884bd7313aabd83cbd8f97a464a7985c0b202",
+      "file": "/Users/weitianwen/PycharmProjects/super-xd/data/xiaohe-demo-3.mp3"
+    }
+  ],
+  "additional_independent_probe": "tts-live.worker.json"
+}

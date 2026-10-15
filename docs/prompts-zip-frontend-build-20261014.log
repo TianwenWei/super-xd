@@ -1,0 +1,13 @@
+
+> super-xd-cockpit@0.1.0 build
+> tsc -b && vite build
+
+vite v7.3.7 building client environment for production...
+transforming...
+✓ 42 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.43 kB │ gzip:  0.33 kB
+dist/assets/index-B8nB9989.css   45.58 kB │ gzip: 10.38 kB
+dist/assets/index-nCi3TWLH.js   299.42 kB │ gzip: 94.49 kB
+✓ built in 464ms

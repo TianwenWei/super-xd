@@ -1,0 +1,20 @@
+{
+  "phase": "before",
+  "checks": {
+    "absolute_temperature_auto_power": true,
+    "relative_temperature_auto_power": false,
+    "seat_mapping_all_values": true,
+    "window_mapping_all_values": true,
+    "zone_mapping_all_values": true,
+    "navigation_literal_destination": true,
+    "poi_relevance_order": false,
+    "poi_multiple_selection": true,
+    "poi_session_id": true,
+    "weather_location_and_dates": true,
+    "weather_fallback_attribution": true,
+    "forecast_bounds_and_no_inference": true
+  },
+  "passed": 10,
+  "total": 12,
+  "external_model_calls": 0
+}

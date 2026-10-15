@@ -1,0 +1,338 @@
+{
+  "schema": "super-xd-existing-audio-clock-diagnosis-v1",
+  "scope": "Read-only extraction of existing final-deployment measurements and traces; no requests, new measurements, code changes, reclassification or overwriting old evidence.",
+  "sources": [
+    "docs/audio-voice-first-evidence.json",
+    "frontend/validation/pcm-voice-first.json",
+    "frontend/validation/pcm-voice-first-traces.json"
+  ],
+  "clock_rules": {
+    "server": "time.perf_counter relative to that Turn.started: server_* point fields may be differenced within the same turn. Model completion point includes the small launch/actor interval.",
+    "model_request": "Actual Ark client request-local perf_counter durations; not the same origin as Turn.started. Tool-only first_delta_ms=null means no content text, not no provider response; first_chunk_ms remains observed.",
+    "speech": "SpeechStream.events started perf_counter is a separate origin. session_ready_ms/first_text_ms/first_packet_ms share it. first_text_to_audio_ms is first packet minus first_text. adapter_* originate at VolcanoTTS.stream_synthesize entry. lease contains prewarm wait; never add both. prewarm_connect fields describe the recycled connection historical creation.",
+    "browser": "Only page performance.now fields are differenced. Query rows originate at form submit; proactive row originates at observed audio.started, and is not a query target observation. Worklet rendered fields are notification observations, not acoustic onset.",
+    "forbidden_comparisons": "Never subtract browser query duration from server turn duration to claim transport latency. Never add overlapping connection/session readiness to model time. Never treat historical audio.connection snapshots as a fresh per-turn handshake."
+  },
+  "rows": [
+    {
+      "turn_id": "faea73b18d4d",
+      "query": "把所有温区的空调温度设为23度。",
+      "proactive": false,
+      "server": {
+        "server_first_model_text_ms": null,
+        "server_model_completed_ms": 1421.3576669571921,
+        "server_first_text_ms": 1430.451333988458,
+        "server_first_audio_ms": 1831.6121670650318,
+        "server_first_nonzero_audio_ms": 1831.6121670650318
+      },
+      "server_derived_same_turn_origin": {
+        "queued_text_to_first_nonzero_pcm_ms": 401.1608330765739,
+        "model_done_to_queued_text_ms": 9.093667031265795,
+        "first_model_text_to_model_done_ms": null,
+        "model_done_point_share_of_server_first_nonzero_pcm_pct": 77.60145365461129,
+        "queued_text_to_pcm_share_of_server_first_nonzero_pcm_pct": 21.902062035293884
+      },
+      "speech": {
+        "reused": true,
+        "connect_ms": 0,
+        "prewarm_connect_ms": 584.009625017643,
+        "prewarm_connection_ready_ms": 811.1693339888006,
+        "lease_wait_ms": 586.4171660505235,
+        "prewarm_wait_ms": 586.3825000124052,
+        "connection_ready_ms": 0.014165998436510563,
+        "session_ready_ms": 160.34554096404463,
+        "first_text_ms": 844.8852499714121,
+        "first_packet_ms": 1242.9445829475299,
+        "first_nonzero_packet_ms": 1242.9486659821123,
+        "adapter_first_packet_ms": 1829.4022909831256,
+        "adapter_first_nonzero_packet_ms": 1829.4045829679817,
+        "first_text_to_audio_ms": 398.05933297611773,
+        "provider_session_elapsed_ms": 1534.178416011855,
+        "adapter_elapsed_ms": 2120.635958039202,
+        "derived_same_stream_origin": {
+          "connection_ready_to_session_ready_ms": 160.33137496560812,
+          "session_ready_to_text_send_ms": 684.5397090073675,
+          "text_send_to_first_nonzero_pcm_ms": 398.06341601070017
+        }
+      },
+      "browser_origin": "submit_perf_ms",
+      "browser": {
+        "first_pcm_perf_ms": 1836.9000000953674,
+        "first_nonzero_pcm_perf_ms": 1836.9000000953674,
+        "first_render_observed_perf_ms": 1867.5,
+        "first_nonzero_render_observed_perf_ms": 1890.2000000476837,
+        "first_nonzero_pcm_to_first_nonzero_render_observation_ms": 53.299999952316284
+      },
+      "model_request_scope": [
+        {
+          "trace_id": 612,
+          "call_id": "a850398417f0482b8f83bb3844aa0328",
+          "first_chunk_ms": 1183.39250003919,
+          "first_delta_ms": null,
+          "elapsed_ms": 1418.7971249921247,
+          "usage": null
+        }
+      ]
+    },
+    {
+      "turn_id": "8b8cb2c00d2a",
+      "query": "把音量设为999。",
+      "proactive": false,
+      "server": {
+        "server_first_model_text_ms": 1456.9300420116633,
+        "server_model_completed_ms": 1636.472166981548,
+        "server_first_text_ms": 1636.7159580113366,
+        "server_first_audio_ms": 2109.1595829930156,
+        "server_first_nonzero_audio_ms": 2109.1595829930156
+      },
+      "server_derived_same_turn_origin": {
+        "queued_text_to_first_nonzero_pcm_ms": 472.443624981679,
+        "model_done_to_queued_text_ms": 0.24379102978855371,
+        "first_model_text_to_model_done_ms": 179.54212496988475,
+        "model_done_point_share_of_server_first_nonzero_pcm_pct": 77.58882638265344,
+        "queued_text_to_pcm_share_of_server_first_nonzero_pcm_pct": 22.399614936260775
+      },
+      "speech": {
+        "reused": true,
+        "connect_ms": 0,
+        "prewarm_connect_ms": 584.009625017643,
+        "prewarm_connection_ready_ms": 811.1693339888006,
+        "lease_wait_ms": 0.11037499643862247,
+        "prewarm_wait_ms": 0,
+        "connection_ready_ms": 0.013625016435980797,
+        "session_ready_ms": 195.94787491951138,
+        "first_text_ms": 1634.0227909386158,
+        "first_packet_ms": 2106.3113330164924,
+        "first_nonzero_packet_ms": 2106.3137910095975,
+        "adapter_first_packet_ms": 2106.441666954197,
+        "adapter_first_nonzero_packet_ms": 2106.4430829137564,
+        "first_text_to_audio_ms": 472.2885420778766,
+        "provider_session_elapsed_ms": 2940.891125006601,
+        "adapter_elapsed_ms": 2941.0213750088587,
+        "derived_same_stream_origin": {
+          "connection_ready_to_session_ready_ms": 195.9342499030754,
+          "session_ready_to_text_send_ms": 1438.0749160191044,
+          "text_send_to_first_nonzero_pcm_ms": 472.2910000709817
+        }
+      },
+      "browser_origin": "submit_perf_ms",
+      "browser": {
+        "first_pcm_perf_ms": 2112.1999999284744,
+        "first_nonzero_pcm_perf_ms": 2112.1999999284744,
+        "first_render_observed_perf_ms": 2125.2999999523163,
+        "first_nonzero_render_observed_perf_ms": 2138.0,
+        "first_nonzero_pcm_to_first_nonzero_render_observation_ms": 25.800000071525574
+      },
+      "model_request_scope": [
+        {
+          "trace_id": 630,
+          "call_id": "d5e83b1700dc4be09e1bb93992ab0334",
+          "first_chunk_ms": 1453.8660410325974,
+          "first_delta_ms": 1453.8690829649568,
+          "elapsed_ms": 1633.3380830474198,
+          "usage": null
+        }
+      ]
+    },
+    {
+      "turn_id": "cb552a184301",
+      "query": "今天终于完成一件拖了很久的小事，陪我聊一句吧。",
+      "proactive": false,
+      "server": {
+        "server_first_model_text_ms": 3866.7346669826657,
+        "server_model_completed_ms": 4065.0005829520524,
+        "server_first_text_ms": 4065.204832935706,
+        "server_first_audio_ms": 4461.407166905701,
+        "server_first_nonzero_audio_ms": 4461.407166905701
+      },
+      "server_derived_same_turn_origin": {
+        "queued_text_to_first_nonzero_pcm_ms": 396.2023339699954,
+        "model_done_to_queued_text_ms": 0.20424998365342617,
+        "first_model_text_to_model_done_ms": 198.2659159693867,
+        "model_done_point_share_of_server_first_nonzero_pcm_pct": 91.11476336672081,
+        "queued_text_to_pcm_share_of_server_first_nonzero_pcm_pct": 8.880658481677866
+      },
+      "speech": {
+        "reused": true,
+        "connect_ms": 0,
+        "prewarm_connect_ms": 584.009625017643,
+        "prewarm_connection_ready_ms": 811.1693339888006,
+        "lease_wait_ms": 0.02729194238781929,
+        "prewarm_wait_ms": 0,
+        "connection_ready_ms": 0.006707967258989811,
+        "session_ready_ms": 171.07991594821215,
+        "first_text_ms": 4064.267290988937,
+        "first_packet_ms": 4460.27708298061,
+        "first_nonzero_packet_ms": 4460.281500010751,
+        "adapter_first_packet_ms": 4460.312583949417,
+        "adapter_first_nonzero_packet_ms": 4460.316083976068,
+        "first_text_to_audio_ms": 396.0097919916734,
+        "provider_session_elapsed_ms": 5240.21904100664,
+        "adapter_elapsed_ms": 5240.254667005502,
+        "derived_same_stream_origin": {
+          "connection_ready_to_session_ready_ms": 171.07320798095316,
+          "session_ready_to_text_send_ms": 3893.187375040725,
+          "text_send_to_first_nonzero_pcm_ms": 396.01420902181417
+        }
+      },
+      "browser_origin": "submit_perf_ms",
+      "browser": {
+        "first_pcm_perf_ms": 4464.099999904633,
+        "first_nonzero_pcm_perf_ms": 4464.099999904633,
+        "first_render_observed_perf_ms": 4478.799999952316,
+        "first_nonzero_render_observed_perf_ms": 4494.5,
+        "first_nonzero_pcm_to_first_nonzero_render_observation_ms": 30.40000009536743
+      },
+      "model_request_scope": [
+        {
+          "trace_id": 644,
+          "call_id": "748ac70952c8457d9df4f71a2daa0da0",
+          "first_chunk_ms": 3865.400500013493,
+          "first_delta_ms": 3865.406833938323,
+          "elapsed_ms": 4063.639709027484,
+          "usage": null
+        }
+      ]
+    },
+    {
+      "turn_id": "a3e60f612840",
+      "query": "请查询科学工业城官网，核对主馆周一是否开放和周日的开放时间，保留完整说明及官方来源。",
+      "proactive": false,
+      "server": {
+        "server_first_model_text_ms": null,
+        "server_model_completed_ms": 3087.3646669788286,
+        "server_first_text_ms": 3094.2116249352694,
+        "server_first_audio_ms": 3451.9210839644074,
+        "server_first_nonzero_audio_ms": 3451.9210839644074
+      },
+      "server_derived_same_turn_origin": {
+        "queued_text_to_first_nonzero_pcm_ms": 357.7094590291381,
+        "model_done_to_queued_text_ms": 6.846957956440747,
+        "first_model_text_to_model_done_ms": null,
+        "model_done_point_share_of_server_first_nonzero_pcm_pct": 89.4390280624,
+        "queued_text_to_pcm_share_of_server_first_nonzero_pcm_pct": 10.362619837714297
+      },
+      "speech": {
+        "reused": true,
+        "connect_ms": 0,
+        "prewarm_connect_ms": 584.009625017643,
+        "prewarm_connection_ready_ms": 811.1693339888006,
+        "lease_wait_ms": 0.04583294503390789,
+        "prewarm_wait_ms": 0,
+        "connection_ready_ms": 0.0077500008046627045,
+        "session_ready_ms": 231.37866705656052,
+        "first_text_ms": 3094.251584028825,
+        "first_packet_ms": 3449.2586670676246,
+        "first_nonzero_packet_ms": 3449.2629590677097,
+        "adapter_first_packet_ms": 3449.314249912277,
+        "adapter_first_nonzero_packet_ms": 3449.3171249050647,
+        "first_text_to_audio_ms": 355.00708303879946,
+        "provider_session_elapsed_ms": 4656.566167017445,
+        "adapter_elapsed_ms": 4656.620957888663,
+        "derived_same_stream_origin": {
+          "connection_ready_to_session_ready_ms": 231.37091705575585,
+          "session_ready_to_text_send_ms": 2862.8729169722646,
+          "text_send_to_first_nonzero_pcm_ms": 355.0113750388846
+        }
+      },
+      "browser_origin": "submit_perf_ms",
+      "browser": {
+        "first_pcm_perf_ms": 3454.100000023842,
+        "first_nonzero_pcm_perf_ms": 3454.100000023842,
+        "first_render_observed_perf_ms": 3459.1999999284744,
+        "first_nonzero_render_observed_perf_ms": 3468.399999976158,
+        "first_nonzero_pcm_to_first_nonzero_render_observation_ms": 14.299999952316284
+      },
+      "model_request_scope": [
+        {
+          "trace_id": 659,
+          "call_id": "a3aa9ea1a9f14017813867ad2aad33bb",
+          "first_chunk_ms": 2019.6820829296485,
+          "first_delta_ms": null,
+          "elapsed_ms": 3083.9167499216273,
+          "usage": null
+        }
+      ]
+    },
+    {
+      "turn_id": "acfbf186e2ac",
+      "query": null,
+      "proactive": true,
+      "server": {
+        "server_first_model_text_ms": null,
+        "server_model_completed_ms": null,
+        "server_first_text_ms": 0.45887508895248175,
+        "server_first_audio_ms": 584.8313750466332,
+        "server_first_nonzero_audio_ms": 584.8313750466332
+      },
+      "server_derived_same_turn_origin": {
+        "queued_text_to_first_nonzero_pcm_ms": 584.3724999576807,
+        "model_done_to_queued_text_ms": null,
+        "first_model_text_to_model_done_ms": null,
+        "model_done_point_share_of_server_first_nonzero_pcm_pct": null,
+        "queued_text_to_pcm_share_of_server_first_nonzero_pcm_pct": 99.92153719712526
+      },
+      "speech": {
+        "reused": true,
+        "connect_ms": 0,
+        "prewarm_connect_ms": 584.009625017643,
+        "prewarm_connection_ready_ms": 811.1693339888006,
+        "lease_wait_ms": 0.18741702660918236,
+        "prewarm_wait_ms": 0,
+        "connection_ready_ms": 0.027082976885139942,
+        "session_ready_ms": 163.52499998174608,
+        "first_text_ms": 163.64329203497618,
+        "first_packet_ms": 583.1459580222145,
+        "first_nonzero_packet_ms": 583.1495829625055,
+        "adapter_first_packet_ms": 583.3589170360938,
+        "adapter_first_nonzero_packet_ms": 583.3615420851856,
+        "first_text_to_audio_ms": 419.5026659872383,
+        "provider_session_elapsed_ms": 1950.9710420388728,
+        "adapter_elapsed_ms": 1951.183500001207,
+        "derived_same_stream_origin": {
+          "connection_ready_to_session_ready_ms": 163.49791700486094,
+          "session_ready_to_text_send_ms": 0.11829205323010683,
+          "text_send_to_first_nonzero_pcm_ms": 419.50629092752934
+        }
+      },
+      "browser_origin": "audio_started_perf_ms (no query submit exists)",
+      "browser": {
+        "first_pcm_perf_ms": 584.3999999761581,
+        "first_nonzero_pcm_perf_ms": 584.3999999761581,
+        "first_render_observed_perf_ms": 610.8999999761581,
+        "first_nonzero_render_observed_perf_ms": 633.3999999761581,
+        "first_nonzero_pcm_to_first_nonzero_render_observation_ms": 49.0
+      },
+      "model_request_scope": []
+    }
+  ],
+  "background_thinker_calls_before_proactive_result": [
+    {
+      "trace_id": 674,
+      "model_call_index": 1,
+      "elapsed_ms": 7320.0588329928
+    },
+    {
+      "trace_id": 683,
+      "model_call_index": 2,
+      "elapsed_ms": 4682.211333070882
+    },
+    {
+      "trace_id": 690,
+      "model_call_index": 3,
+      "elapsed_ms": 3351.6854170011356
+    },
+    {
+      "trace_id": 698,
+      "model_call_index": 4,
+      "elapsed_ms": 4105.778833036311
+    },
+    {
+      "trace_id": 706,
+      "model_call_index": 5,
+      "elapsed_ms": 37703.05133308284
+    }
+  ],
+  "background_scope": "Five earlier Thinker model calls generated the full report and spoken summary. Proactive replay itself makes no new Talker/polishing model call; its subsecond audio start does not represent research completion latency.",
+  "historical_ark_transport_limit": "These old runs were captured before the planned HTTP EOF/drain correction and include_usage request option. An existing AsyncClient pool is configuration, not proof that DONE-terminated streaming responses reused a TCP connection; usage was actually null."
+}

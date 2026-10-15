@@ -1,0 +1,1 @@
+朗读路由协议：本轮若只需聊天、解释或询问澄清，content仅输出JSON {"response_mode":"chat"}，不提前生成答复；需要工具则正常生成tool_calls。不得在JSON中添加回答或工具参数。

@@ -1,0 +1,32 @@
+{
+  "created_at": "2026-10-14T04:52:00.768068+00:00",
+  "oracle_version": "progressive-vehicle-control-v1",
+  "planned_turns": 24,
+  "models": {
+    "talker": "doubao-seed-2-0-mini-260428",
+    "vehicle_planner": "doubao-seed-2-1-pro-260915",
+    "research": "doubao-seed-2-1-pro-260915"
+  },
+  "planning_thinking": false,
+  "planning_max_tokens": 2000,
+  "candidate_port": 8003,
+  "candidate_db": "data/acceptance-progressive-20261014.sqlite3",
+  "oracle_sha256": "1d980af3f0fe06a21b51a73ac6775ffa3565a241117b9f816adcfffbde8cb6cb",
+  "source_sha256": {
+    "backend/session.py": "3ec472136583e88fe5daed8d3637790a4fa46f84e4ef6e2d83420b8c36d5f99d",
+    "backend/vehicle_planner.py": "288f5d7379ff0f7a12acb046868c240d4e615ebd179101db8b5a2b7f0f8eb141",
+    "backend/catalog.py": "f1aa57eb74b0988ae6f07754b8e5dbf631ee3deea59fa66f7e15b4927c175ee3",
+    "backend/models.py": "52076b1265c18d8dcc7f8976ad927f6ce1ab3322daffb8b2937e7d9c7847f833",
+    "backend/settings.py": "4935b334b6500dbcc5a7eabbd1dcb4326896e76f26dcaf8e5dc567b22caa6bb6",
+    "backend/app.py": "6deabe67e982312a988a76082d7c29538c468b7b0369ec849547d539f55cc5ca",
+    "backend/db.py": "289607c9b0a349200d511c06e91d62764f24ca1b48ede01fdacfe5be9770713b",
+    "backend/google_maps.py": "a93951c71badf864f1f16057a5100b5e1bbec1153f3c4e41e5a0831328a8d588",
+    "backend/maps_tools.py": "da01abedc19b033816350fdf7053497782c2b92ce3cf3a71c77fc761e14041f9",
+    "backend/authorization.py": "42174a749ac7e3b889b240d95cfc71c8b4254f775d75c024563db56ceac215ab",
+    "backend/conditions.py": "c480a3abdac35549342794b38dd460cf818d7d556108714836576100f398c323",
+    "backend/model_context.py": "2756619cd2bdaec385ba39b74ca1107b415a125a77675ffab2706e6fe20bff8d",
+    "scripts/evaluate_progressive_control.py": "90505fc86fb57886f7ca9d8db5dcb4601ae45e056459585e68b92ab32bfd2c05"
+  },
+  "network_calls_before_manifest": 0,
+  "raw_results_preserved": true
+}

@@ -1,0 +1,26 @@
+{
+  "archive": "/Users/weitianwen/Downloads/prompts_rewrite.zip",
+  "archive_sha256": "58e40f9b49d27dc08b22e7e526ee8594ae1e33ad46ad9951a22c7b86f5b0fb02",
+  "input_files": {
+    "README.md": "73d7ebdeaf3e5daad252863cedb855ab7be9c26df47ed01810f0b37f4d239947",
+    "backend/prompts/speech_route.txt": "f2fce148ae1cfde36bb5d2a07d55790708095a2bad1743589b01414fe05fd491",
+    "backend/prompts/task_snapshot_notice.txt": "c1a92b4b38b68a5d87bb084a320e856700b09d2b9967b5817d6235727936433e",
+    "backend/prompts/thinker_retry.txt": "7f892909df363284064f5c9ddceb989c8e92d99a39d12404f0b9397610720c32",
+    "backend/prompts/talker.txt": "4d44ef66d0fd8ddd880d3b69450f8164e2ba645e21751bf6fc235b640c59beea",
+    "backend/prompts/history_attribution.txt": "74d868f66a2b59fd9a4426c925886071a340585844932d4148edfa22871ff0c3",
+    "backend/prompts/vehicle_planner.txt": "0417303d1042715086be1ff3421b9bcf08db9263978d1e3f673cbd61f122f58c",
+    "backend/prompts/speech_chat.txt": "5aea004d52da55c24d5ab242c181ff2ce2d8e466171897ab5cee98b49f514fe2",
+    "backend/prompts/current_turn.txt": "4132c530891993f74f66c8918cfbe16e6aec1abbef8c71d058c4b3f48c9f10de",
+    "backend/prompts/persona.txt": "3f3dc80f4e04e2eb6539ccdc445f96fb66e4dd59841b1310495a429672bf6414",
+    "backend/prompts/session_snapshot.txt": "b852f1297530f9baec1323702f73ec35628343071c4183f1b9dfba11bf382b96",
+    "backend/prompts/thinker_quick.txt": "ae8cc00d3938286eb0b45d00d3988649db9f12dce57d1da4b8cee5357f058363",
+    "backend/prompts/thinker_revision.txt": "f44b64de2c1bce59cfc78ddb25436784ba3d4223aaf41c52d8d1eebae99a3176",
+    "backend/prompts/prewarm.txt": "05e0edb263f87ca77d9c5b427994bfdc9c2d2d84df75a4b42d452ad9c251b465",
+    "backend/prompts/planner_retry.txt": "86c0ffb60a9d7d4f9ea9d097455335679e0eaabdcaa096618fc96abcbf406249",
+    "backend/prompts/thinker_research.txt": "a2444d6921192f87001c4837c7faa90d352505044c611f08a65c85d1c395018f"
+  },
+  "applied_template_count": 15,
+  "templates_byte_identical_to_archive": true,
+  "optional_speech_merge_applied": false,
+  "archive_readme": "data/prompts-rewrite-input-20261014/README.md"
+}

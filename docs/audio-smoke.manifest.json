@@ -1,0 +1,20 @@
+{
+  "source": "Manual scenario labels for first integrated browser smoke; actual timestamps unchanged",
+  "attempts": [
+    {
+      "client_request_id": "a7ffbee9-f2f1-448b-b8cb-323f12c82fd9",
+      "scenario_id": "greeting",
+      "sample_phase": "integration-smoke"
+    },
+    {
+      "client_request_id": "5fb52e01-6727-4dab-bdeb-e580186003bb",
+      "scenario_id": "chat",
+      "sample_phase": "integration-smoke"
+    },
+    {
+      "client_request_id": "e320bba3-3c4b-4b27-a387-86596e57d6ee",
+      "scenario_id": "window",
+      "sample_phase": "integration-smoke"
+    }
+  ]
+}

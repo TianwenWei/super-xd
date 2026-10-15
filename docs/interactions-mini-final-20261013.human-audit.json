@@ -1,0 +1,60 @@
+{
+  "schema": "super-xd-interaction-human-audit-v1",
+  "source": "docs/interactions-mini-final-20261013.json",
+  "source_sha256": "09a3321950c58eee9489d1412e044b3e1aea3752c59249ad2f854d178b498e53",
+  "automatic_summary": {
+    "planned_user_turns": 69,
+    "planned_group_runs": 21,
+    "attempted_user_turns": 69,
+    "scored_user_turns": 69,
+    "unscored_submitted_user_turns": 0,
+    "not_submitted_planned_turns": 0,
+    "passed_user_turns": 61,
+    "failed_user_turns": 8,
+    "guarded_model_attempts": 0,
+    "recovered_tool_attempts": 0,
+    "groups": 21,
+    "groups_with_setup_errors": 0,
+    "evaluation_finished": true,
+    "all_planned_turns_passed": false
+  },
+  "human_findings": [
+    {
+      "scenario_id": "chat_no_actions",
+      "step_id": "word_not_weather",
+      "session_id": "27f9489663bd4de5",
+      "turn_id": "c9134fc70b3f",
+      "trace_id": 1805,
+      "automatic_tool_state_pass": true,
+      "language_quality_pass": false,
+      "adjudicator": "Root independent human review relayed in this task",
+      "finding": "错误描述气字笔顺并扩展未要求步骤；零工具/零状态变化仅证明无错控，不证明语言内容正确。",
+      "actual_text": "“天气”这两个字的写法是：“天”字是横、横、撇、捺；“气”字是撇、横、横、横、弯钩。"
+    }
+  ],
+  "failure_classification": {
+    "direct_behavior_failures": [
+      "compound_actions/cross_skills",
+      "airport_clarification/nearest_airport",
+      "heldout_remaining_windows/other_three_closed",
+      "heldout_preserve_lights_and_reverse_locks/prime_on"
+    ],
+    "weather_location_clarification_requires_manual_policy_adjudication": [
+      "simple_and_complex_web/weather"
+    ],
+    "cascading_failures": [
+      "simple_and_complex_web/weather_recall",
+      "heldout_preserve_lights_and_reverse_locks/attributes_only",
+      "heldout_preserve_lights_and_reverse_locks/reverse_and_other_side"
+    ]
+  },
+  "original_61": {
+    "pass": 57,
+    "total": 61
+  },
+  "heldout_8": {
+    "pass": 4,
+    "total": 8
+  },
+  "scope": "No automatic score changed; subjective/factual language review is separate and not represented as a model grade."
+}

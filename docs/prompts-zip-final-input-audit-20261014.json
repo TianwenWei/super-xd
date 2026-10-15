@@ -1,0 +1,388 @@
+{
+  "kind": "zip_template_and_model_input_audit",
+  "provider_calls": 0,
+  "trace_source": "docs/prompts-zip-final-capture-20261014.json",
+  "scope": "审计真实重放所用完整模型请求；完整回执轨迹由root另审。",
+  "zip_integrity": [
+    {
+      "path": "backend/prompts/speech_route.txt",
+      "zip_sha256": "f2fce148ae1cfde36bb5d2a07d55790708095a2bad1743589b01414fe05fd491",
+      "runtime_sha256": "f2fce148ae1cfde36bb5d2a07d55790708095a2bad1743589b01414fe05fd491",
+      "exact_match": true,
+      "only_additions": true,
+      "reason": ""
+    },
+    {
+      "path": "backend/prompts/task_snapshot_notice.txt",
+      "zip_sha256": "c1a92b4b38b68a5d87bb084a320e856700b09d2b9967b5817d6235727936433e",
+      "runtime_sha256": "c1a92b4b38b68a5d87bb084a320e856700b09d2b9967b5817d6235727936433e",
+      "exact_match": true,
+      "only_additions": true,
+      "reason": ""
+    },
+    {
+      "path": "backend/prompts/thinker_retry.txt",
+      "zip_sha256": "7f892909df363284064f5c9ddceb989c8e92d99a39d12404f0b9397610720c32",
+      "runtime_sha256": "7f892909df363284064f5c9ddceb989c8e92d99a39d12404f0b9397610720c32",
+      "exact_match": true,
+      "only_additions": true,
+      "reason": ""
+    },
+    {
+      "path": "backend/prompts/talker.txt",
+      "zip_sha256": "4d44ef66d0fd8ddd880d3b69450f8164e2ba645e21751bf6fc235b640c59beea",
+      "runtime_sha256": "e999dc93ae96efedb22ed4ffc5464ddcbad569cc6e88861948406e1914d81c54",
+      "exact_match": false,
+      "only_additions": true,
+      "reason": "README验收2要求对新增失败补同类示例；Talker仅追加2个类别示例。"
+    },
+    {
+      "path": "backend/prompts/history_attribution.txt",
+      "zip_sha256": "74d868f66a2b59fd9a4426c925886071a340585844932d4148edfa22871ff0c3",
+      "runtime_sha256": "74d868f66a2b59fd9a4426c925886071a340585844932d4148edfa22871ff0c3",
+      "exact_match": true,
+      "only_additions": true,
+      "reason": ""
+    },
+    {
+      "path": "backend/prompts/vehicle_planner.txt",
+      "zip_sha256": "0417303d1042715086be1ff3421b9bcf08db9263978d1e3f673cbd61f122f58c",
+      "runtime_sha256": "0417303d1042715086be1ff3421b9bcf08db9263978d1e3f673cbd61f122f58c",
+      "exact_match": true,
+      "only_additions": true,
+      "reason": ""
+    },
+    {
+      "path": "backend/prompts/speech_chat.txt",
+      "zip_sha256": "5aea004d52da55c24d5ab242c181ff2ce2d8e466171897ab5cee98b49f514fe2",
+      "runtime_sha256": "5aea004d52da55c24d5ab242c181ff2ce2d8e466171897ab5cee98b49f514fe2",
+      "exact_match": true,
+      "only_additions": true,
+      "reason": ""
+    },
+    {
+      "path": "backend/prompts/current_turn.txt",
+      "zip_sha256": "4132c530891993f74f66c8918cfbe16e6aec1abbef8c71d058c4b3f48c9f10de",
+      "runtime_sha256": "4132c530891993f74f66c8918cfbe16e6aec1abbef8c71d058c4b3f48c9f10de",
+      "exact_match": true,
+      "only_additions": true,
+      "reason": ""
+    },
+    {
+      "path": "backend/prompts/persona.txt",
+      "zip_sha256": "3f3dc80f4e04e2eb6539ccdc445f96fb66e4dd59841b1310495a429672bf6414",
+      "runtime_sha256": "3f3dc80f4e04e2eb6539ccdc445f96fb66e4dd59841b1310495a429672bf6414",
+      "exact_match": true,
+      "only_additions": true,
+      "reason": ""
+    },
+    {
+      "path": "backend/prompts/session_snapshot.txt",
+      "zip_sha256": "b852f1297530f9baec1323702f73ec35628343071c4183f1b9dfba11bf382b96",
+      "runtime_sha256": "b852f1297530f9baec1323702f73ec35628343071c4183f1b9dfba11bf382b96",
+      "exact_match": true,
+      "only_additions": true,
+      "reason": ""
+    },
+    {
+      "path": "backend/prompts/thinker_quick.txt",
+      "zip_sha256": "ae8cc00d3938286eb0b45d00d3988649db9f12dce57d1da4b8cee5357f058363",
+      "runtime_sha256": "ae8cc00d3938286eb0b45d00d3988649db9f12dce57d1da4b8cee5357f058363",
+      "exact_match": true,
+      "only_additions": true,
+      "reason": ""
+    },
+    {
+      "path": "backend/prompts/thinker_revision.txt",
+      "zip_sha256": "f44b64de2c1bce59cfc78ddb25436784ba3d4223aaf41c52d8d1eebae99a3176",
+      "runtime_sha256": "f44b64de2c1bce59cfc78ddb25436784ba3d4223aaf41c52d8d1eebae99a3176",
+      "exact_match": true,
+      "only_additions": true,
+      "reason": ""
+    },
+    {
+      "path": "backend/prompts/prewarm.txt",
+      "zip_sha256": "05e0edb263f87ca77d9c5b427994bfdc9c2d2d84df75a4b42d452ad9c251b465",
+      "runtime_sha256": "05e0edb263f87ca77d9c5b427994bfdc9c2d2d84df75a4b42d452ad9c251b465",
+      "exact_match": true,
+      "only_additions": true,
+      "reason": ""
+    },
+    {
+      "path": "backend/prompts/planner_retry.txt",
+      "zip_sha256": "86c0ffb60a9d7d4f9ea9d097455335679e0eaabdcaa096618fc96abcbf406249",
+      "runtime_sha256": "86c0ffb60a9d7d4f9ea9d097455335679e0eaabdcaa096618fc96abcbf406249",
+      "exact_match": true,
+      "only_additions": true,
+      "reason": ""
+    },
+    {
+      "path": "backend/prompts/thinker_research.txt",
+      "zip_sha256": "a2444d6921192f87001c4837c7faa90d352505044c611f08a65c85d1c395018f",
+      "runtime_sha256": "a2444d6921192f87001c4837c7faa90d352505044c611f08a65c85d1c395018f",
+      "exact_match": true,
+      "only_additions": true,
+      "reason": ""
+    }
+  ],
+  "trace_assembly_audit": [
+    {
+      "id": "temperature_one",
+      "system_exact_file_render": true,
+      "system_sha256": "32566138b28d75fa63553c6e5ebf8d493aca36f02ad518bb40ef47a899acb547",
+      "stable_prefix_before_snapshot": true,
+      "snapshot_before_latest_input": true,
+      "removed_answer_constraints_absent": true,
+      "persona_omitted_for_speech_routing": false
+    },
+    {
+      "id": "explicit_off",
+      "system_exact_file_render": true,
+      "system_sha256": "32566138b28d75fa63553c6e5ebf8d493aca36f02ad518bb40ef47a899acb547",
+      "stable_prefix_before_snapshot": true,
+      "snapshot_before_latest_input": true,
+      "removed_answer_constraints_absent": true,
+      "persona_omitted_for_speech_routing": false
+    },
+    {
+      "id": "two_independent_hot",
+      "system_exact_file_render": true,
+      "system_sha256": "32566138b28d75fa63553c6e5ebf8d493aca36f02ad518bb40ef47a899acb547",
+      "stable_prefix_before_snapshot": true,
+      "snapshot_before_latest_input": true,
+      "removed_answer_constraints_absent": true,
+      "persona_omitted_for_speech_routing": false
+    },
+    {
+      "id": "same_state_still_requested",
+      "system_exact_file_render": true,
+      "system_sha256": "32566138b28d75fa63553c6e5ebf8d493aca36f02ad518bb40ef47a899acb547",
+      "stable_prefix_before_snapshot": true,
+      "snapshot_before_latest_input": true,
+      "removed_answer_constraints_absent": true,
+      "persona_omitted_for_speech_routing": false
+    },
+    {
+      "id": "massage_is_not_heat",
+      "system_exact_file_render": true,
+      "system_sha256": "32566138b28d75fa63553c6e5ebf8d493aca36f02ad518bb40ef47a899acb547",
+      "stable_prefix_before_snapshot": true,
+      "snapshot_before_latest_input": true,
+      "removed_answer_constraints_absent": true,
+      "persona_omitted_for_speech_routing": false
+    },
+    {
+      "id": "cold_mirror",
+      "system_exact_file_render": true,
+      "system_sha256": "32566138b28d75fa63553c6e5ebf8d493aca36f02ad518bb40ef47a899acb547",
+      "stable_prefix_before_snapshot": true,
+      "snapshot_before_latest_input": true,
+      "removed_answer_constraints_absent": true,
+      "persona_omitted_for_speech_routing": false
+    },
+    {
+      "id": "mixed_delegate_whole",
+      "system_exact_file_render": true,
+      "system_sha256": "32566138b28d75fa63553c6e5ebf8d493aca36f02ad518bb40ef47a899acb547",
+      "stable_prefix_before_snapshot": true,
+      "snapshot_before_latest_input": true,
+      "removed_answer_constraints_absent": true,
+      "persona_omitted_for_speech_routing": false
+    },
+    {
+      "id": "dependency_authorized",
+      "system_exact_file_render": true,
+      "system_sha256": "32566138b28d75fa63553c6e5ebf8d493aca36f02ad518bb40ef47a899acb547",
+      "stable_prefix_before_snapshot": true,
+      "snapshot_before_latest_input": true,
+      "removed_answer_constraints_absent": true,
+      "persona_omitted_for_speech_routing": false
+    },
+    {
+      "id": "hold_other_windows",
+      "system_exact_file_render": true,
+      "system_sha256": "32566138b28d75fa63553c6e5ebf8d493aca36f02ad518bb40ef47a899acb547",
+      "stable_prefix_before_snapshot": true,
+      "snapshot_before_latest_input": true,
+      "removed_answer_constraints_absent": true,
+      "persona_omitted_for_speech_routing": false
+    },
+    {
+      "id": "ambiguous_seat",
+      "system_exact_file_render": true,
+      "system_sha256": "32566138b28d75fa63553c6e5ebf8d493aca36f02ad518bb40ef47a899acb547",
+      "stable_prefix_before_snapshot": true,
+      "snapshot_before_latest_input": true,
+      "removed_answer_constraints_absent": true,
+      "persona_omitted_for_speech_routing": false
+    },
+    {
+      "id": "read_current_state",
+      "system_exact_file_render": true,
+      "system_sha256": "32566138b28d75fa63553c6e5ebf8d493aca36f02ad518bb40ef47a899acb547",
+      "stable_prefix_before_snapshot": true,
+      "snapshot_before_latest_input": true,
+      "removed_answer_constraints_absent": true,
+      "persona_omitted_for_speech_routing": false
+    },
+    {
+      "id": "pronoun_tailgate",
+      "system_exact_file_render": true,
+      "system_sha256": "32566138b28d75fa63553c6e5ebf8d493aca36f02ad518bb40ef47a899acb547",
+      "stable_prefix_before_snapshot": true,
+      "snapshot_before_latest_input": true,
+      "removed_answer_constraints_absent": true,
+      "persona_omitted_for_speech_routing": false
+    },
+    {
+      "id": "pronoun_ambiguous",
+      "system_exact_file_render": true,
+      "system_sha256": "32566138b28d75fa63553c6e5ebf8d493aca36f02ad518bb40ef47a899acb547",
+      "stable_prefix_before_snapshot": true,
+      "snapshot_before_latest_input": true,
+      "removed_answer_constraints_absent": true,
+      "persona_omitted_for_speech_routing": false
+    },
+    {
+      "id": "task_reply",
+      "system_exact_file_render": true,
+      "system_sha256": "32566138b28d75fa63553c6e5ebf8d493aca36f02ad518bb40ef47a899acb547",
+      "stable_prefix_before_snapshot": true,
+      "snapshot_before_latest_input": true,
+      "removed_answer_constraints_absent": true,
+      "persona_omitted_for_speech_routing": false
+    },
+    {
+      "id": "task_get_multiple",
+      "system_exact_file_render": true,
+      "system_sha256": "32566138b28d75fa63553c6e5ebf8d493aca36f02ad518bb40ef47a899acb547",
+      "stable_prefix_before_snapshot": true,
+      "snapshot_before_latest_input": true,
+      "removed_answer_constraints_absent": true,
+      "persona_omitted_for_speech_routing": false
+    },
+    {
+      "id": "existing_result_read",
+      "system_exact_file_render": true,
+      "system_sha256": "32566138b28d75fa63553c6e5ebf8d493aca36f02ad518bb40ef47a899acb547",
+      "stable_prefix_before_snapshot": true,
+      "snapshot_before_latest_input": true,
+      "removed_answer_constraints_absent": true,
+      "persona_omitted_for_speech_routing": false
+    },
+    {
+      "id": "new_research",
+      "system_exact_file_render": true,
+      "system_sha256": "32566138b28d75fa63553c6e5ebf8d493aca36f02ad518bb40ef47a899acb547",
+      "stable_prefix_before_snapshot": true,
+      "snapshot_before_latest_input": true,
+      "removed_answer_constraints_absent": true,
+      "persona_omitted_for_speech_routing": false
+    },
+    {
+      "id": "nearby_no_origin",
+      "system_exact_file_render": true,
+      "system_sha256": "32566138b28d75fa63553c6e5ebf8d493aca36f02ad518bb40ef47a899acb547",
+      "stable_prefix_before_snapshot": true,
+      "snapshot_before_latest_input": true,
+      "removed_answer_constraints_absent": true,
+      "persona_omitted_for_speech_routing": false
+    },
+    {
+      "id": "poi_search",
+      "system_exact_file_render": true,
+      "system_sha256": "32566138b28d75fa63553c6e5ebf8d493aca36f02ad518bb40ef47a899acb547",
+      "stable_prefix_before_snapshot": true,
+      "snapshot_before_latest_input": true,
+      "removed_answer_constraints_absent": true,
+      "persona_omitted_for_speech_routing": false
+    },
+    {
+      "id": "poi_select_reference",
+      "system_exact_file_render": true,
+      "system_sha256": "32566138b28d75fa63553c6e5ebf8d493aca36f02ad518bb40ef47a899acb547",
+      "stable_prefix_before_snapshot": true,
+      "snapshot_before_latest_input": true,
+      "removed_answer_constraints_absent": true,
+      "persona_omitted_for_speech_routing": false
+    },
+    {
+      "id": "weather_explicit",
+      "system_exact_file_render": true,
+      "system_sha256": "32566138b28d75fa63553c6e5ebf8d493aca36f02ad518bb40ef47a899acb547",
+      "stable_prefix_before_snapshot": true,
+      "snapshot_before_latest_input": true,
+      "removed_answer_constraints_absent": true,
+      "persona_omitted_for_speech_routing": false
+    },
+    {
+      "id": "weather_missing_location",
+      "system_exact_file_render": true,
+      "system_sha256": "32566138b28d75fa63553c6e5ebf8d493aca36f02ad518bb40ef47a899acb547",
+      "stable_prefix_before_snapshot": true,
+      "snapshot_before_latest_input": true,
+      "removed_answer_constraints_absent": true,
+      "persona_omitted_for_speech_routing": false
+    },
+    {
+      "id": "weather_official_source",
+      "system_exact_file_render": true,
+      "system_sha256": "32566138b28d75fa63553c6e5ebf8d493aca36f02ad518bb40ef47a899acb547",
+      "stable_prefix_before_snapshot": true,
+      "snapshot_before_latest_input": true,
+      "removed_answer_constraints_absent": true,
+      "persona_omitted_for_speech_routing": false
+    },
+    {
+      "id": "word_shape_scope",
+      "system_exact_file_render": true,
+      "system_sha256": "32566138b28d75fa63553c6e5ebf8d493aca36f02ad518bb40ef47a899acb547",
+      "stable_prefix_before_snapshot": true,
+      "snapshot_before_latest_input": true,
+      "removed_answer_constraints_absent": true,
+      "persona_omitted_for_speech_routing": false
+    },
+    {
+      "id": "chat_route_protocol",
+      "system_exact_file_render": true,
+      "system_sha256": "bbbccefd79069cf23bf5eca4377ced6cdf04e77a8216abfdade3a040bda6f173",
+      "stable_prefix_before_snapshot": true,
+      "snapshot_before_latest_input": true,
+      "removed_answer_constraints_absent": true,
+      "persona_omitted_for_speech_routing": true
+    },
+    {
+      "id": "speech_hot_route",
+      "system_exact_file_render": true,
+      "system_sha256": "bbbccefd79069cf23bf5eca4377ced6cdf04e77a8216abfdade3a040bda6f173",
+      "stable_prefix_before_snapshot": true,
+      "snapshot_before_latest_input": true,
+      "removed_answer_constraints_absent": true,
+      "persona_omitted_for_speech_routing": true
+    },
+    {
+      "id": "speech_answer_only",
+      "system_exact_file_render": true,
+      "system_sha256": "050c960f4359dba333127cbe684d4aa6645ee1cf5b76750c80f25dab3690e2a6",
+      "stable_prefix_before_snapshot": true,
+      "snapshot_before_latest_input": true,
+      "removed_answer_constraints_absent": true,
+      "persona_omitted_for_speech_routing": false
+    },
+    {
+      "id": "thinker_quick_missing_city",
+      "system_exact_file_render": true,
+      "system_sha256": "a73d7295cb4f9c4dab5a45b93f04aeed9cd60f90283c31f00a4e5a1c5572dee6"
+    },
+    {
+      "id": "thinker_quick_forecast",
+      "system_exact_file_render": true,
+      "system_sha256": "a73d7295cb4f9c4dab5a45b93f04aeed9cd60f90283c31f00a4e5a1c5572dee6"
+    },
+    {
+      "id": "thinker_research_lookup",
+      "system_exact_file_render": true,
+      "system_sha256": "384b02731f9b5417035597cbcff2596415514f06c2ca4601f4d1045a72542abc"
+    }
+  ]
+}

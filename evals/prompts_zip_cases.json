@@ -1,0 +1,549 @@
+{
+  "version": "prompts-zip-v1",
+  "fixed_current_utc": "2026-10-14T12:00:00+00:00",
+  "scope": "模型首步决策/路由/结构化参数；不执行工具，不覆盖车端回执或实际声学；free-text语义须人工复核。 本方案同一组30场景，包含取消字形/已有任务结果硬编码gate后的模型自决策。期望未放宽。",
+  "cases": [
+    {
+      "id": "temperature_one",
+      "role": "talker",
+      "text": "把主驾空调温度调到二十三度。",
+      "expected": {
+        "calls": [
+          {
+            "name": "set_temperature",
+            "arguments": {
+              "zone": "driver",
+              "temperature": 23
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "explicit_off",
+      "role": "talker",
+      "text": "关闭氛围灯。",
+      "expected": {
+        "calls": [
+          {
+            "name": "set_ambient_light",
+            "arguments": {
+              "enabled": false
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "two_independent_hot",
+      "role": "talker",
+      "text": "主驾空调调到23度，音量设为35。",
+      "expected": {
+        "calls": [
+          {
+            "name": "set_temperature",
+            "arguments": {
+              "zone": "driver",
+              "temperature": 23
+            }
+          },
+          {
+            "name": "set_volume",
+            "arguments": {
+              "volume": 35
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "same_state_still_requested",
+      "role": "talker",
+      "text": "把音量设为35。",
+      "expected": {
+        "calls": [
+          {
+            "name": "set_volume",
+            "arguments": {
+              "volume": 35
+            }
+          }
+        ]
+      },
+      "vehicle_overrides": {
+        "media.volume": 35
+      }
+    },
+    {
+      "id": "massage_is_not_heat",
+      "role": "talker",
+      "text": "只开主驾舒缓按摩，座椅加热保持原样。",
+      "expected": {
+        "calls": [
+          {
+            "name": "set_seat_massage",
+            "arguments": {
+              "seat": "driver",
+              "mode": "relax"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "cold_mirror",
+      "role": "talker",
+      "text": "开启后视镜加热。",
+      "expected": {
+        "calls": [
+          {
+            "name": "delegate_vehicle_control",
+            "arguments": {
+              "skill_ids": [
+                "mirrors"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "mixed_delegate_whole",
+      "role": "talker",
+      "text": "主驾空调设23度，并展开后视镜。",
+      "expected": {
+        "calls": [
+          {
+            "name": "delegate_vehicle_control",
+            "arguments": {
+              "skill_ids": [
+                "climate",
+                "mirrors"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "dependency_authorized",
+      "role": "talker",
+      "text": "先解除后排车窗童锁，再将左后车窗开到30%。",
+      "expected": {
+        "calls": [
+          {
+            "name": "delegate_vehicle_control",
+            "arguments": {
+              "skill_ids": [
+                "windows"
+              ]
+            }
+          }
+        ]
+      },
+      "vehicle_overrides": {
+        "windows.child_lock": true
+      }
+    },
+    {
+      "id": "hold_other_windows",
+      "role": "talker",
+      "text": "副驾车窗别动，其余三扇窗关上。",
+      "expected": {
+        "calls": [
+          {
+            "name": "set_window_position",
+            "arguments": {
+              "window": "driver",
+              "position": 0
+            }
+          },
+          {
+            "name": "set_window_position",
+            "arguments": {
+              "window": "rear_left",
+              "position": 0
+            }
+          },
+          {
+            "name": "set_window_position",
+            "arguments": {
+              "window": "rear_right",
+              "position": 0
+            }
+          }
+        ]
+      },
+      "vehicle_overrides": {
+        "windows.positions.front_passenger": 50
+      }
+    },
+    {
+      "id": "ambiguous_seat",
+      "role": "talker",
+      "text": "把座椅加热打开。",
+      "expected": {
+        "calls": []
+      },
+      "manual_review": "须询问哪个座椅，不应猜测目标。"
+    },
+    {
+      "id": "read_current_state",
+      "role": "talker",
+      "text": "现在副驾车窗开到多少？",
+      "expected": {
+        "calls": []
+      },
+      "vehicle_overrides": {
+        "windows.positions.front_passenger": 35
+      },
+      "manual_review": "准确回答35%，不得说一半，也不修改车辆。"
+    },
+    {
+      "id": "pronoun_tailgate",
+      "role": "talker",
+      "text": "把它关上。",
+      "expected": {
+        "calls": [
+          {
+            "name": "delegate_vehicle_control",
+            "arguments": {
+              "skill_ids": [
+                "tailgate"
+              ]
+            }
+          }
+        ]
+      },
+      "history": [
+        {
+          "user": "打开尾门。",
+          "assistant": "尾门已打开。"
+        }
+      ],
+      "vehicle_overrides": {
+        "tailgate.open": true
+      }
+    },
+    {
+      "id": "pronoun_ambiguous",
+      "role": "talker",
+      "text": "把它关掉。",
+      "expected": {
+        "calls": []
+      },
+      "history": [
+        {
+          "user": "空调和氛围灯都打开了。",
+          "assistant": "这两个功能都已开启。"
+        }
+      ],
+      "manual_review": "指代不唯一，须澄清，不随意关掉其中一个。"
+    },
+    {
+      "id": "task_reply",
+      "role": "talker",
+      "text": "查巴黎的。",
+      "expected": {
+        "calls": [
+          {
+            "name": "manage_task",
+            "arguments": {
+              "action": "reply",
+              "task_id": "task_hotel",
+              "text": "查巴黎的。"
+            }
+          }
+        ]
+      },
+      "tasks": [
+        {
+          "id": "task_hotel",
+          "goal": "比较周末住宿",
+          "status": "waiting_clarification",
+          "revision": 1,
+          "question": "你要查哪个城市？",
+          "constraints": []
+        }
+      ]
+    },
+    {
+      "id": "task_get_multiple",
+      "role": "talker",
+      "text": "住宿任务和博物馆任务现在什么进度？",
+      "expected": {
+        "calls": [
+          {
+            "name": "manage_task",
+            "arguments": {
+              "action": "get",
+              "task_ids": [
+                "task_hotel",
+                "task_museum"
+              ]
+            }
+          }
+        ]
+      },
+      "tasks": [
+        {
+          "id": "task_hotel",
+          "goal": "比较周末住宿",
+          "status": "waiting_clarification",
+          "revision": 1,
+          "question": "你要查哪个城市？",
+          "constraints": []
+        },
+        {
+          "id": "task_museum",
+          "goal": "查卢浮宫开放时间",
+          "status": "completed",
+          "revision": 1,
+          "summary": "馆方页面确认周二闭馆。",
+          "result": {
+            "summary": "馆方页面确认周二闭馆。",
+            "spoken_summary": "卢浮宫周二闭馆。"
+          },
+          "constraints": []
+        }
+      ]
+    },
+    {
+      "id": "existing_result_read",
+      "role": "talker",
+      "text": "根据已有结果回答刚才博物馆查询任务的结论。",
+      "expected": {
+        "calls": [
+          {
+            "name": "manage_task",
+            "arguments": {
+              "action": "get",
+              "task_id": "task_museum"
+            }
+          }
+        ]
+      },
+      "tasks": [
+        {
+          "id": "task_museum",
+          "goal": "查卢浮宫开放时间",
+          "status": "completed",
+          "revision": 1,
+          "summary": "馆方页面确认周二闭馆。",
+          "result": {
+            "summary": "馆方页面确认周二闭馆。",
+            "spoken_summary": "卢浮宫周二闭馆。"
+          },
+          "constraints": []
+        }
+      ]
+    },
+    {
+      "id": "new_research",
+      "role": "talker",
+      "text": "帮我比较巴黎三家适合带孩子入住的酒店，要有停车场，并保留来源。",
+      "expected": {
+        "calls": [
+          {
+            "name": "delegate_task",
+            "argument_subset": {
+              "query_domain": "general",
+              "query_mode": "research"
+            }
+          }
+        ]
+      },
+      "manual_review": "goal需保留三家、巴黎、带孩子、停车场、来源条件。"
+    },
+    {
+      "id": "nearby_no_origin",
+      "role": "talker",
+      "text": "导航到最近的机场。",
+      "expected": {
+        "calls": []
+      },
+      "manual_review": "须询问所在城市或地址；不能假定GPS或搜索并启动导航。"
+    },
+    {
+      "id": "poi_search",
+      "role": "talker",
+      "text": "查一下巴黎卢浮宫附近的充电站。",
+      "expected": {
+        "calls": [
+          {
+            "name": "search_places",
+            "argument_subset": {}
+          }
+        ]
+      },
+      "manual_review": "query保留巴黎、卢浮宫附近、充电站，不能导航。"
+    },
+    {
+      "id": "poi_select_reference",
+      "role": "talker",
+      "text": "导航去第二个。",
+      "expected": {
+        "calls": [
+          {
+            "name": "start_poi_navigation",
+            "arguments": {
+              "place_id": "place_second"
+            }
+          }
+        ]
+      },
+      "recent_places": [
+        {
+          "place_id": "place_first",
+          "name": "充电站甲",
+          "address": "巴黎甲路"
+        },
+        {
+          "place_id": "place_second",
+          "name": "充电站乙",
+          "address": "巴黎乙路"
+        }
+      ],
+      "history": [
+        {
+          "user": "查巴黎的充电站。",
+          "assistant": "有充电站甲和充电站乙两个候选。"
+        }
+      ]
+    },
+    {
+      "id": "weather_explicit",
+      "role": "talker",
+      "text": "巴黎明天天气怎么样？",
+      "expected": {
+        "calls": [
+          {
+            "name": "get_weather",
+            "argument_subset": {
+              "date": "tomorrow"
+            }
+          }
+        ]
+      },
+      "manual_review": "location应为法国巴黎，不能委托后台。"
+    },
+    {
+      "id": "weather_missing_location",
+      "role": "talker",
+      "text": "明天会下雨吗？",
+      "expected": {
+        "calls": []
+      },
+      "manual_review": "须询问城市，不猜测用户位置。"
+    },
+    {
+      "id": "weather_official_source",
+      "role": "talker",
+      "text": "请核验法国气象局官网上巴黎明天的预报，并说明来源。",
+      "expected": {
+        "calls": [
+          {
+            "name": "delegate_task",
+            "argument_subset": {
+              "query_domain": "weather",
+              "query_mode": "quick"
+            }
+          }
+        ]
+      },
+      "manual_review": "goal须保留法国气象局官网、巴黎、明天与来源要求。"
+    },
+    {
+      "id": "word_shape_scope",
+      "role": "talker",
+      "text": "“晴”怎么写？",
+      "expected": {
+        "calls": []
+      },
+      "manual_review": "直接显示“晴”，不展开未问的笔顺。"
+    },
+    {
+      "id": "chat_route_protocol",
+      "role": "talker",
+      "text": "今天有点累，陪我聊两句。",
+      "expected": {
+        "calls": []
+      },
+      "speech_mode": "route",
+      "response_json": {
+        "response_mode": "chat"
+      }
+    },
+    {
+      "id": "speech_hot_route",
+      "role": "talker",
+      "text": "把主驾车窗开到40%。",
+      "expected": {
+        "calls": [
+          {
+            "name": "set_window_position",
+            "arguments": {
+              "window": "driver",
+              "position": 40
+            }
+          }
+        ]
+      },
+      "speech_mode": "route"
+    },
+    {
+      "id": "speech_answer_only",
+      "role": "talker",
+      "text": "简单解释一下彩虹为什么有颜色。",
+      "expected": {
+        "calls": []
+      },
+      "speech_mode": "answer",
+      "manual_review": "无工具阶段自然解释，不输出路由JSON，不承诺执行。"
+    },
+    {
+      "id": "thinker_quick_missing_city",
+      "role": "thinker_quick",
+      "text": "查明天的最低和最高气温。",
+      "expected": {
+        "calls": [
+          {
+            "name": "ask_clarification",
+            "argument_subset": {}
+          }
+        ]
+      },
+      "manual_review": "只问必要城市，不能猜地点。"
+    },
+    {
+      "id": "thinker_quick_forecast",
+      "role": "thinker_quick",
+      "text": "查法国巴黎2026-10-15的最低和最高气温。",
+      "expected": {
+        "calls": [
+          {
+            "name": "get_weather_forecast",
+            "argument_subset": {
+              "city": "巴黎",
+              "date": "2026-10-15",
+              "country_code": "FR"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "thinker_research_lookup",
+      "role": "thinker_research",
+      "text": "比较巴黎卢浮宫与奥赛博物馆当前官网公布的开放时间和儿童票政策，保留实际来源。",
+      "expected": {
+        "allowed_names": [
+          "search_web"
+        ],
+        "min_calls": 1
+      },
+      "manual_review": "须真实查询官方信息，不能直接finish捏造。"
+    }
+  ],
+  "oracle_policy": "Unchanged expected calls/arguments from structured_prompt_cases.json; no response semantic classifier. Removed code gates are checked independently by unit contracts."
+}

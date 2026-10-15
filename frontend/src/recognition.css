@@ -1,0 +1,10 @@
+/* Voice input stays inside the composer and never monitors the microphone. */
+.voice-button{display:grid;place-items:center;flex-shrink:0;width:36px;height:36px;border:1px solid #d9e5e8;background:#f6fafb;border-radius:8px;color:#6b949f}
+.voice-button:hover{background:#eaf4f5}.voice-button.recording{color:#b36253;background:#fff2ee;border-color:#eaccc4}
+.voice-capture{padding:11px 13px;margin:0 0 10px;border:1px solid #d9e9eb;border-radius:9px;background:#f1f8f8;font-size:11px;color:#64858d}
+.voice-capture>div{display:flex;align-items:center;gap:7px}.voice-capture strong{font-size:11px;font-weight:500;line-height:1.6}
+.voice-capture button{margin-left:auto;padding:3px 7px;border:0;background:transparent;color:#75949c;font-size:11px}
+.voice-capture p{font-size:13px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0 0;max-height:86px;overflow:auto}
+.voice-capture small{display:block;margin-top:4px;font-size:10px;color:#91a5aa}
+.capture-dot{width:6px;height:6px;border-radius:50%;background:#8daeb5;flex-shrink:0}.capture-dot.recording{background:#c7806b;box-shadow:0 0 0 3px #f6e9e4}
+@media(max-width:640px){.voice-button{width:32px;height:34px}.voice-capture p{max-height:64px}}

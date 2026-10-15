@@ -1,0 +1,41 @@
+{
+  "session_id": "ac97225626c04bfe",
+  "page_id": "e122a61f-49a9-47ff-843e-5ef2b42c0698",
+  "build_stage": "voice-first-latest-conservative-complete-content",
+  "attempts": [
+    {
+      "client_request_id": "af7b88b3-1c00-46e2-947d-ae1490ad7ce4",
+      "turn_id": "faea73b18d4d",
+      "scenario_id": "temperature",
+      "persona": "warm",
+      "sample_phase": "first-query-after-restart",
+      "purpose": "voice_first_style_validation"
+    },
+    {
+      "client_request_id": "792740e2-e0a2-47a9-ae41-73f44a8f465f",
+      "turn_id": "8b8cb2c00d2a",
+      "scenario_id": "invalid_volume",
+      "persona": "warm",
+      "sample_phase": "warm-progressive-history",
+      "purpose": "voice_first_style_validation",
+      "observed_route": "model_refusal",
+      "note": "No validator-template claim; model_content refuses 999 outside schema 0..100, no commands, media volume remains30."
+    },
+    {
+      "client_request_id": "c7c6671b-7129-45aa-a642-95d6511ae2b2",
+      "turn_id": "cb552a184301",
+      "scenario_id": "chat",
+      "persona": "warm",
+      "sample_phase": "warm-progressive-history",
+      "purpose": "voice_first_style_validation"
+    },
+    {
+      "client_request_id": "339bde98-609e-425b-8526-fbd03f1e4143",
+      "turn_id": "a3e60f612840",
+      "scenario_id": "delegate",
+      "persona": "warm",
+      "sample_phase": "warm-progressive-history",
+      "purpose": "voice_first_style_validation"
+    }
+  ]
+}

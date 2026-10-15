@@ -1,0 +1,38 @@
+{
+  "created_at": "2026-10-14T05:22:26.512727+00:00",
+  "source_sha256": {
+    "backend/session.py": "6eabbe1ef07c440cafa0dd89d86d7e244d97f158ecc7205137fc2eae9205cc3b",
+    "backend/vehicle_planner.py": "94f4d0a0c0eacd5826a4749b89fa616006ed3d05833114352eaf4c85eb6e4e4d",
+    "backend/catalog.py": "f1aa57eb74b0988ae6f07754b8e5dbf631ee3deea59fa66f7e15b4927c175ee3",
+    "backend/models.py": "52076b1265c18d8dcc7f8976ad927f6ce1ab3322daffb8b2937e7d9c7847f833",
+    "backend/settings.py": "4935b334b6500dbcc5a7eabbd1dcb4326896e76f26dcaf8e5dc567b22caa6bb6",
+    "backend/app.py": "6deabe67e982312a988a76082d7c29538c468b7b0369ec849547d539f55cc5ca",
+    "backend/db.py": "289607c9b0a349200d511c06e91d62764f24ca1b48ede01fdacfe5be9770713b",
+    "backend/google_maps.py": "a93951c71badf864f1f16057a5100b5e1bbec1153f3c4e41e5a0831328a8d588",
+    "backend/maps_tools.py": "da01abedc19b033816350fdf7053497782c2b92ce3cf3a71c77fc761e14041f9",
+    "backend/authorization.py": "42174a749ac7e3b889b240d95cfc71c8b4254f775d75c024563db56ceac215ab",
+    "backend/conditions.py": "10a50ae48790ce8b564dec03304b04d87eec7b2891dbb87f2e00a72bee21c837",
+    "backend/model_context.py": "2756619cd2bdaec385ba39b74ca1107b415a125a77675ffab2706e6fe20bff8d",
+    "scripts/evaluate_progressive_control.py": "39037e5401ea6bf84d4fc5e7c43a1038f6f20daec02f2e9f0913db1000cd3f71",
+    "frontend/src/App.tsx": "5695d9a7cee5744ade836b43088075f6817e688636dc52ea1f499872fda99bc8",
+    "frontend/src/types.ts": "9e12d8c0ffbd47b59ebcc2c1a74ea2a788fd0bb390cf62934d1b316ce1ccbcc6",
+    "frontend/src/VehicleCalls.tsx": "5b713af3a34c9cff4881036f364568c3fde8bf2af37fb3d01e1fd3190381ddb5",
+    "frontend/src/vehicleCallViews.ts": "6b741bdef48b1552616449a7dbb199ea2eb09fa0ddc410a29fc27275ac1a9e6c",
+    "frontend/src/LookupResults.tsx": "19147fe6a17d07db28e7194357e3158f64e0ef4e7c704c583dcd438f3d35c88a",
+    "scripts/evaluate_progressive_voice.py": "074b787d44c98a29d0f7e0b858eea7417aef52859dcb1887477d2722b42408df"
+  },
+  "verified_backend_manifest": "docs/progressive-control-manifest-20261014-run3.json",
+  "pids": {
+    "api": 2598,
+    "worker": 2599
+  },
+  "candidate_stopped": true,
+  "production_database_preserved": "data/super_xd.sqlite3",
+  "production_browser_smoke": "docs/progressive-production-smoke-20261014.json",
+  "voice_report": "docs/progressive-voice-live-20261014.json",
+  "backend_tests": 1364,
+  "frontend_tests": 38,
+  "frontend_build": "passed",
+  "screenshot_sha256": "452e5c1e68a86a2eae86ea84fb822c07bb12fc2f8d4a5b491c3c354f4b6119b2",
+  "no_full_final_24_retest_claim": true
+}

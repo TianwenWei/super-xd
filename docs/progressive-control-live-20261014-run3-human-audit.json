@@ -1,0 +1,2651 @@
+{
+  "audit_version": "progressive-control-run3-human-v1",
+  "created_at": "2026-10-14T05:23:33.960336+00:00",
+  "role": "Post-run cross-audit of saved evidence; not an authorship/independent-review claim for planner or actor implementation.",
+  "source_report": {
+    "path": "docs/progressive-control-live-20261014-run3.json",
+    "sha256": "8d95fdec791c9d4a9128d8364cdf599823910c5b64106f0ae1c820c7a783b6dc",
+    "bytes": 40383433,
+    "harness_sha256": "39037e5401ea6bf84d4fc5e7c43a1038f6f20daec02f2e9f0913db1000cd3f71",
+    "created_at": "2026-10-14T05:12:13.281785+00:00",
+    "finished_at": "2026-10-14T05:14:12.700263+00:00",
+    "raw_summary": {
+      "planned": 8,
+      "attempted": 8,
+      "passed": 8,
+      "failed": 0,
+      "groups_with_errors": 0
+    },
+    "raw_report_modified": false
+  },
+  "initial_manifest": {
+    "path": "docs/progressive-control-manifest-20261014-run3.json",
+    "sha256": "d8ac0bb138a3ccf1429e115945ccfd7515fef354c46b8db0fff88c5dd91d82fc",
+    "record": {
+      "created_at": "2026-10-14T05:12:11.742477+00:00",
+      "oracle_version": "progressive-vehicle-control-v1",
+      "planned_turns": 8,
+      "models": {
+        "talker": "doubao-seed-2-0-mini-260428",
+        "vehicle_planner": "doubao-seed-2-1-pro-260915",
+        "research": "doubao-seed-2-1-pro-260915"
+      },
+      "planning_thinking": false,
+      "planning_max_tokens": 2000,
+      "candidate_port": 8003,
+      "candidate_db": "data/acceptance-progressive-20261014-run3.sqlite3",
+      "oracle_sha256": "1d980af3f0fe06a21b51a73ac6775ffa3565a241117b9f816adcfffbde8cb6cb",
+      "source_sha256": {
+        "backend/session.py": "6eabbe1ef07c440cafa0dd89d86d7e244d97f158ecc7205137fc2eae9205cc3b",
+        "backend/vehicle_planner.py": "94f4d0a0c0eacd5826a4749b89fa616006ed3d05833114352eaf4c85eb6e4e4d",
+        "backend/catalog.py": "f1aa57eb74b0988ae6f07754b8e5dbf631ee3deea59fa66f7e15b4927c175ee3",
+        "backend/models.py": "52076b1265c18d8dcc7f8976ad927f6ce1ab3322daffb8b2937e7d9c7847f833",
+        "backend/settings.py": "4935b334b6500dbcc5a7eabbd1dcb4326896e76f26dcaf8e5dc567b22caa6bb6",
+        "backend/app.py": "6deabe67e982312a988a76082d7c29538c468b7b0369ec849547d539f55cc5ca",
+        "backend/db.py": "289607c9b0a349200d511c06e91d62764f24ca1b48ede01fdacfe5be9770713b",
+        "backend/google_maps.py": "a93951c71badf864f1f16057a5100b5e1bbec1153f3c4e41e5a0831328a8d588",
+        "backend/maps_tools.py": "da01abedc19b033816350fdf7053497782c2b92ce3cf3a71c77fc761e14041f9",
+        "backend/authorization.py": "42174a749ac7e3b889b240d95cfc71c8b4254f775d75c024563db56ceac215ab",
+        "backend/conditions.py": "10a50ae48790ce8b564dec03304b04d87eec7b2891dbb87f2e00a72bee21c837",
+        "backend/model_context.py": "2756619cd2bdaec385ba39b74ca1107b415a125a77675ffab2706e6fe20bff8d",
+        "scripts/evaluate_progressive_control.py": "39037e5401ea6bf84d4fc5e7c43a1038f6f20daec02f2e9f0913db1000cd3f71"
+      },
+      "raw_results_preserved": true,
+      "parent_report": "docs/progressive-control-live-20261014-run2.json",
+      "previous_batch": {
+        "attempted": 24,
+        "passed": 22,
+        "failed": 2
+      },
+      "changes": [
+        "Action variants carry actual catalog descriptions, including automatic climate power effect",
+        "Mini prompted to delegate complete requests with authorized prerequisite changes and ordering; no keyword router/argument rewrite"
+      ],
+      "selected_scenarios": [
+        "mixed_and_holds",
+        "dependency_order"
+      ]
+    }
+  },
+  "source_integrity": {
+    "harness_matches_manifest": true,
+    "source_drift": [],
+    "checks": [
+      {
+        "path": "backend/session.py",
+        "expected_sha256": "6eabbe1ef07c440cafa0dd89d86d7e244d97f158ecc7205137fc2eae9205cc3b",
+        "actual_sha256": "6eabbe1ef07c440cafa0dd89d86d7e244d97f158ecc7205137fc2eae9205cc3b",
+        "matches": true
+      },
+      {
+        "path": "backend/vehicle_planner.py",
+        "expected_sha256": "94f4d0a0c0eacd5826a4749b89fa616006ed3d05833114352eaf4c85eb6e4e4d",
+        "actual_sha256": "94f4d0a0c0eacd5826a4749b89fa616006ed3d05833114352eaf4c85eb6e4e4d",
+        "matches": true
+      },
+      {
+        "path": "backend/catalog.py",
+        "expected_sha256": "f1aa57eb74b0988ae6f07754b8e5dbf631ee3deea59fa66f7e15b4927c175ee3",
+        "actual_sha256": "f1aa57eb74b0988ae6f07754b8e5dbf631ee3deea59fa66f7e15b4927c175ee3",
+        "matches": true
+      },
+      {
+        "path": "backend/models.py",
+        "expected_sha256": "52076b1265c18d8dcc7f8976ad927f6ce1ab3322daffb8b2937e7d9c7847f833",
+        "actual_sha256": "52076b1265c18d8dcc7f8976ad927f6ce1ab3322daffb8b2937e7d9c7847f833",
+        "matches": true
+      },
+      {
+        "path": "backend/settings.py",
+        "expected_sha256": "4935b334b6500dbcc5a7eabbd1dcb4326896e76f26dcaf8e5dc567b22caa6bb6",
+        "actual_sha256": "4935b334b6500dbcc5a7eabbd1dcb4326896e76f26dcaf8e5dc567b22caa6bb6",
+        "matches": true
+      },
+      {
+        "path": "backend/app.py",
+        "expected_sha256": "6deabe67e982312a988a76082d7c29538c468b7b0369ec849547d539f55cc5ca",
+        "actual_sha256": "6deabe67e982312a988a76082d7c29538c468b7b0369ec849547d539f55cc5ca",
+        "matches": true
+      },
+      {
+        "path": "backend/db.py",
+        "expected_sha256": "289607c9b0a349200d511c06e91d62764f24ca1b48ede01fdacfe5be9770713b",
+        "actual_sha256": "289607c9b0a349200d511c06e91d62764f24ca1b48ede01fdacfe5be9770713b",
+        "matches": true
+      },
+      {
+        "path": "backend/google_maps.py",
+        "expected_sha256": "a93951c71badf864f1f16057a5100b5e1bbec1153f3c4e41e5a0831328a8d588",
+        "actual_sha256": "a93951c71badf864f1f16057a5100b5e1bbec1153f3c4e41e5a0831328a8d588",
+        "matches": true
+      },
+      {
+        "path": "backend/maps_tools.py",
+        "expected_sha256": "da01abedc19b033816350fdf7053497782c2b92ce3cf3a71c77fc761e14041f9",
+        "actual_sha256": "da01abedc19b033816350fdf7053497782c2b92ce3cf3a71c77fc761e14041f9",
+        "matches": true
+      },
+      {
+        "path": "backend/authorization.py",
+        "expected_sha256": "42174a749ac7e3b889b240d95cfc71c8b4254f775d75c024563db56ceac215ab",
+        "actual_sha256": "42174a749ac7e3b889b240d95cfc71c8b4254f775d75c024563db56ceac215ab",
+        "matches": true
+      },
+      {
+        "path": "backend/conditions.py",
+        "expected_sha256": "10a50ae48790ce8b564dec03304b04d87eec7b2891dbb87f2e00a72bee21c837",
+        "actual_sha256": "10a50ae48790ce8b564dec03304b04d87eec7b2891dbb87f2e00a72bee21c837",
+        "matches": true
+      },
+      {
+        "path": "backend/model_context.py",
+        "expected_sha256": "2756619cd2bdaec385ba39b74ca1107b415a125a77675ffab2706e6fe20bff8d",
+        "actual_sha256": "2756619cd2bdaec385ba39b74ca1107b415a125a77675ffab2706e6fe20bff8d",
+        "matches": true
+      },
+      {
+        "path": "scripts/evaluate_progressive_control.py",
+        "expected_sha256": "39037e5401ea6bf84d4fc5e7c43a1038f6f20daec02f2e9f0913db1000cd3f71",
+        "actual_sha256": "39037e5401ea6bf84d4fc5e7c43a1038f6f20daec02f2e9f0913db1000cd3f71",
+        "matches": true
+      }
+    ]
+  },
+  "human_summary": {
+    "attempted": 8,
+    "raw_passed_unchanged": 8,
+    "raw_failed_unchanged": 0,
+    "human_final_semantics_and_state_passed": 8,
+    "coverage": "Only mixed_and_holds5 + dependency_order3; not a new24/24 result. Original24-row reports remain separate.",
+    "mini_queries": 8,
+    "mini_started": 9,
+    "mini_completed": 9,
+    "mini_first_group_rejected_queries": 1,
+    "mini_recovery_extra_calls": 1,
+    "mini_wrong_group_trace_ids": [
+      11,
+      13,
+      15,
+      17
+    ],
+    "pro_queries": 6,
+    "pro_started": 9,
+    "pro_completed": 9,
+    "pro_cancelled": 0,
+    "pro_first_action_sets_match_gold": 6,
+    "pro_first_submissions_accepted": 3,
+    "pro_first_submissions_rejected": 3,
+    "pro_retry_submissions": 3,
+    "pro_recovered_after_one_retry": 3,
+    "pro_rejection_reason": "unaccounted_request_text in three distinct first submissions",
+    "actual_commands": 16,
+    "actual_success_receipts": 16,
+    "all_commands_match_fixed_gold_and_receipts": true,
+    "all_actual_talker_completed_models_mini": true,
+    "all_actual_planner_completed_models_pro": true,
+    "all_8_task_snapshots_unchanged": true,
+    "all_explicit_keep_preconditions_and_outcomes_match": true,
+    "extra_vehicle_state_changes": 0,
+    "all_planned_actions_serial_after_prior_receipt": true,
+    "final_wording_passed": 8
+  },
+  "latency": {
+    "mini_hot": {
+      "first_effective_server_ms": {
+        "n": 2,
+        "min_ms": 1115.6682500150055,
+        "median_ms": 1370.3008749289438,
+        "max_ms": 1624.9334998428822
+      },
+      "full_turn_server_ms": {
+        "n": 2,
+        "min_ms": 1115.731833036989,
+        "median_ms": 1370.359999476932,
+        "max_ms": 1624.988165916875
+      },
+      "full_turn_client_ms": {
+        "n": 2,
+        "min_ms": 1117.424,
+        "median_ms": 1371.874,
+        "max_ms": 1626.324
+      }
+    },
+    "pro_planning": {
+      "first_effective_server_ms": {
+        "n": 6,
+        "min_ms": 8569.756540935487,
+        "median_ms": 19014.874312561005,
+        "max_ms": 26650.40925005451
+      },
+      "full_turn_server_ms": {
+        "n": 6,
+        "min_ms": 8569.782166043296,
+        "median_ms": 19014.906562515534,
+        "max_ms": 26650.441417004913
+      },
+      "full_turn_client_ms": {
+        "n": 6,
+        "min_ms": 8570.638,
+        "median_ms": 19015.787,
+        "max_ms": 26651.427
+      }
+    }
+  },
+  "dependency_detail": {
+    "row": "/groups/1/records/1",
+    "before_child_lock": true,
+    "after_child_lock": false,
+    "before_rear_left_window": 0,
+    "after_rear_left_window": 30,
+    "first_plan_trace_id": 169,
+    "first_rejected_trace_id": 172,
+    "revised_plan_trace_id": 174,
+    "accepted_trace_id": 180,
+    "unlock_receipt_trace_id": 183,
+    "open_dispatch_trace_id": 186,
+    "open_receipt_trace_id": 187,
+    "actual_receipt_precedes_dependent_dispatch": true,
+    "first_unlock_receipt_state_child_lock": false,
+    "all_other_vehicle_paths_unchanged": true,
+    "keep_binding_scope": {
+      "actual_bound_paths": 10,
+      "domain": "windows",
+      "all_vehicle_state_actual_hold_verified": true,
+      "all_other_domains_concurrent_protection_exercised": false,
+      "source_pointer": "/groups/1/records/1/traces/39/data/plan/intents/2/keep_paths"
+    }
+  },
+  "limitations": [
+    "This selected8-row bounded rerun follows prompt/schema-description changes; it is not a controlled causal ablation, not24/24, and does not replace run1/run2 failures.",
+    "Recovered final pass does not mean first model attempt success: one Mini layer-conflict and three Pro intent-text/keep accounting rejections are retained.",
+    "The three-window close query starts with those three windows already0; only idempotent closing is measured there. Dependency unlock/open and subsequent rear-window close do include actual state transitions.",
+    "The batch has no state-read, tailgate pronoun, missing-origin airport, unrelated task progression, or full100-tool coverage. Tasks happened to remain unchanged in all8; background task competition is not exercised.",
+    "All model IDs are from actual saved model.completed metadata; no inference from config alone.",
+    "No ASR, TTS, nonzero PCM, microphone, browser render, or acoustic timing in this text batch. Pro planning latency is8.57–26.65s client whole-turn and must not be presented as low audio latency.",
+    "Final wording audit checks these concrete receipts/objects/keeps. It is not a comprehensive language-quality or safety assessment.",
+    "The broad “其他设置不变” retry binds only10 windows.* keep_paths in its ledger; full before/after state comparison verifies actual unchanged non-target domains in this run, but does not prove complete semantic keep binding or concurrent protection of all other domains. The accepted plan explicitly records semantic_coverage_proven=false."
+  ],
+  "rows": [
+    {
+      "pointer": "/groups/0/records/0",
+      "group": "mixed_and_holds",
+      "step_id": "passenger50",
+      "query": "先把副驾车窗打开一半。",
+      "session_id": "529f6810bf544e29",
+      "turn_id": "6011e96fc880",
+      "raw_pass": true,
+      "human_semantics_and_state_pass": true,
+      "manual_notes": [
+        "单次Mini热调用设置副驾车窗50%，实际状态0→50；为后续别动约束建立有效非零前置状态。"
+      ],
+      "mini_responses": [
+        {
+          "trace_id": 3,
+          "pointer": "/groups/0/records/0/traces/2",
+          "kind": "model.completed",
+          "created_at": "2026-10-14T05:12:14.939833+00:00",
+          "call_id": "4a7da016d2e141069e67b3c0eb16fd51",
+          "calls": [
+            {
+              "id": "call_2o24yoqg7ym1h9yvip1b00sr",
+              "name": "set_window_position",
+              "arguments": {
+                "window": "front_passenger",
+                "position": 50
+              }
+            }
+          ],
+          "content": null,
+          "meta_pointer": "/groups/0/records/0/traces/2/data/meta"
+        }
+      ],
+      "pro_submitted_plans": [],
+      "tool_errors_and_recovery": [],
+      "plan_acceptance": [],
+      "plan_completion": [],
+      "actual_model_event_counts": {
+        "talker": {
+          "model.started": 1,
+          "model.completed": 1
+        }
+      },
+      "actual_completed_model_ids": {
+        "talker": [
+          "doubao-seed-2-0-mini-260428"
+        ]
+      },
+      "actual_commands_match_gold": true,
+      "actual_commands_and_receipts": [
+        {
+          "command_pointer": "/groups/0/records/0/commands/0",
+          "receipt_pointer": "/groups/0/records/0/receipts/0",
+          "command_id": "16c6fc088673",
+          "name": "set_window_position",
+          "arguments": {
+            "window": "front_passenger",
+            "position": 50
+          },
+          "source": null,
+          "parent_call_id": null,
+          "action_id": null,
+          "intent_id": null,
+          "valid_actual_success_receipt": true,
+          "receipt_latency_ms": 1622.3837498109788,
+          "dispatch_trace": {
+            "trace_id": 5,
+            "pointer": "/groups/0/records/0/traces/4",
+            "kind": "vehicle.dispatched",
+            "created_at": "2026-10-14T05:12:14.949095+00:00",
+            "call_id": "call_2o24yoqg7ym1h9yvip1b00sr"
+          },
+          "receipt_trace": {
+            "trace_id": 6,
+            "pointer": "/groups/0/records/0/traces/5",
+            "kind": "vehicle.receipt",
+            "created_at": "2026-10-14T05:12:14.951525+00:00",
+            "call_id": "call_2o24yoqg7ym1h9yvip1b00sr"
+          },
+          "receipt_not_stale": true
+        }
+      ],
+      "actual_targets": [
+        {
+          "path": "windows.positions.front_passenger",
+          "before": 0,
+          "actual_after": 50,
+          "expected": 50,
+          "matches": true
+        }
+      ],
+      "actual_keep_checks": [],
+      "computed_changed_paths": [
+        "windows.positions.front_passenger"
+      ],
+      "extra_changes_outside_fixed_gold": [],
+      "serial_execution_checks": [],
+      "tasks_before_after_identical": true,
+      "task_pointers": [
+        "/groups/0/records/0/before/tasks",
+        "/groups/0/records/0/after/tasks"
+      ],
+      "final_answer": "副驾车窗开到一半了。",
+      "final_wording_matches_actual_receipts_and_holds": true,
+      "final_wording_notes": "逐项对应目标对象、数值与否定保持；不声称额外动作或联网/路线结果。",
+      "latency": {
+        "first_effective_server_ms": 1624.9334998428822,
+        "full_turn_server_ms": 1624.988165916875,
+        "full_turn_client_ms": 1626.324,
+        "per_command_receipt_ms": [
+          1622.3837498109788
+        ]
+      },
+      "latency_route": "mini_hot",
+      "raw_assertion_failures": []
+    },
+    {
+      "pointer": "/groups/0/records/1",
+      "group": "mixed_and_holds",
+      "step_id": "mixed_temperature_mirror",
+      "query": "空调温度设为23度，打开后视镜加热，副驾车窗别动。",
+      "session_id": "529f6810bf544e29",
+      "turn_id": "4d7e67cdc87c",
+      "raw_pass": true,
+      "human_semantics_and_state_pass": true,
+      "manual_notes": [
+        "Mini首次同组set_temperature+delegate_vehicle_control被planned_vehicle_group_conflict整体拒绝，未提前部分执行。第二次Mini仅委托整句。",
+        "Pro首个计划即获接受；温控all23与后视镜加热true串行实际提交，副驾车窗始终50。",
+        "climate.power false→true是实际set_temperature工具声明的关联效果，最终口语未擅自声称空调电源保持。"
+      ],
+      "mini_responses": [
+        {
+          "trace_id": 11,
+          "pointer": "/groups/0/records/1/traces/10",
+          "kind": "model.completed",
+          "created_at": "2026-10-14T05:12:17.207926+00:00",
+          "call_id": "490884f3189f4f31935e06ce0b79ca35",
+          "calls": [
+            {
+              "id": "call_o5m4by4gv6dtzdu5bqyoa7lg",
+              "name": "set_temperature",
+              "arguments": {
+                "zone": "all",
+                "temperature": 23.0
+              }
+            },
+            {
+              "id": "call_u6s3xwe6wx61agubml6htta5",
+              "name": "delegate_vehicle_control",
+              "arguments": {
+                "skill_ids": [
+                  "climate",
+                  "mirrors"
+                ]
+              }
+            }
+          ],
+          "content": null,
+          "meta_pointer": "/groups/0/records/1/traces/10/data/meta"
+        },
+        {
+          "trace_id": 17,
+          "pointer": "/groups/0/records/1/traces/16",
+          "kind": "model.completed",
+          "created_at": "2026-10-14T05:12:18.809426+00:00",
+          "call_id": "d771f5b2c5ff44009f3e8cbdcd65bf38",
+          "calls": [
+            {
+              "id": "call_qq4ldco8dawoprxq1caud28a",
+              "name": "delegate_vehicle_control",
+              "arguments": {
+                "skill_ids": [
+                  "climate",
+                  "mirrors",
+                  "windows"
+                ]
+              }
+            }
+          ],
+          "content": null,
+          "meta_pointer": "/groups/0/records/1/traces/16/data/meta"
+        }
+      ],
+      "pro_submitted_plans": [
+        {
+          "trace_id": 24,
+          "pointer": "/groups/0/records/1/traces/23",
+          "kind": "model.completed",
+          "created_at": "2026-10-14T05:12:27.628044+00:00",
+          "call_id": "7d438814ea0242f687427c0795a03d26",
+          "tool_call_id": "call_vifc1p8p6tl9fmpcct1dn4il",
+          "status": "planned",
+          "intents": [
+            {
+              "id": "intent_climate_temp_23",
+              "source_text": "空调温度设为23度",
+              "status": "planned",
+              "action_ids": [
+                "action_set_temperature_23"
+              ],
+              "completed_operation_ids": [],
+              "keep_paths": [],
+              "question": "",
+              "reason": "未指定温区，按整车全部温区设置为23℃；该动作会自动开启空调。"
+            },
+            {
+              "id": "intent_mirror_heating_on",
+              "source_text": "打开后视镜加热",
+              "status": "planned",
+              "action_ids": [
+                "action_set_mirror_heating_on"
+              ],
+              "completed_operation_ids": [],
+              "keep_paths": [],
+              "question": "",
+              "reason": ""
+            },
+            {
+              "id": "intent_keep_front_passenger_window",
+              "source_text": "副驾车窗别动",
+              "status": "keep",
+              "action_ids": [],
+              "completed_operation_ids": [],
+              "keep_paths": [
+                "windows.positions.front_passenger"
+              ],
+              "question": "",
+              "reason": ""
+            }
+          ],
+          "actions": [
+            {
+              "id": "action_set_temperature_23",
+              "intent_id": "intent_climate_temp_23",
+              "name": "set_temperature",
+              "arguments": {
+                "zone": "all",
+                "temperature": 23
+              },
+              "depends_on": []
+            },
+            {
+              "id": "action_set_mirror_heating_on",
+              "intent_id": "intent_mirror_heating_on",
+              "name": "set_mirror_heating",
+              "arguments": {
+                "enabled": true
+              },
+              "depends_on": []
+            }
+          ],
+          "keep_paths": [
+            "windows.positions.front_passenger"
+          ],
+          "actions_match_fixed_gold": true,
+          "meta_pointer": "/groups/0/records/1/traces/23/data/meta"
+        }
+      ],
+      "tool_errors_and_recovery": [
+        {
+          "trace_id": 13,
+          "pointer": "/groups/0/records/1/traces/12",
+          "kind": "tool.error",
+          "created_at": "2026-10-14T05:12:17.208491+00:00",
+          "call_id": "call_o5m4by4gv6dtzdu5bqyoa7lg",
+          "name": "set_temperature",
+          "result": {
+            "ok": false,
+            "executed": false,
+            "retry_model": true,
+            "code": "planned_vehicle_group_conflict",
+            "reason": "整句车控只能由一层执行；委托车控不能与任何直接车控或另一委托混在同组。请只委托一次完整原句。"
+          }
+        },
+        {
+          "trace_id": 15,
+          "pointer": "/groups/0/records/1/traces/14",
+          "kind": "tool.error",
+          "created_at": "2026-10-14T05:12:17.208524+00:00",
+          "call_id": "call_u6s3xwe6wx61agubml6htta5",
+          "name": "delegate_vehicle_control",
+          "result": {
+            "ok": false,
+            "executed": false,
+            "retry_model": true,
+            "code": "planned_vehicle_group_conflict",
+            "reason": "整句车控只能由一层执行；委托车控不能与任何直接车控或另一委托混在同组。请只委托一次完整原句。"
+          }
+        }
+      ],
+      "plan_acceptance": [
+        {
+          "trace_id": 30,
+          "pointer": "/groups/0/records/1/traces/29",
+          "kind": "vehicle.plan.accepted",
+          "created_at": "2026-10-14T05:12:27.642249+00:00",
+          "call_id": "call_qq4ldco8dawoprxq1caud28a",
+          "plan_pointer": "/groups/0/records/1/traces/29/data/plan"
+        }
+      ],
+      "plan_completion": [
+        {
+          "trace_id": 39,
+          "pointer": "/groups/0/records/1/traces/38",
+          "kind": "vehicle.plan.completed",
+          "created_at": "2026-10-14T05:12:27.651292+00:00",
+          "call_id": "call_qq4ldco8dawoprxq1caud28a",
+          "status": "completed",
+          "ledger_pointer": "/groups/0/records/1/traces/38/data/ledger"
+        }
+      ],
+      "actual_model_event_counts": {
+        "talker": {
+          "model.started": 2,
+          "model.completed": 2
+        },
+        "vehicle_planner": {
+          "model.started": 1,
+          "model.completed": 1
+        }
+      },
+      "actual_completed_model_ids": {
+        "talker": [
+          "doubao-seed-2-0-mini-260428"
+        ],
+        "vehicle_planner": [
+          "doubao-seed-2-1-pro-260915"
+        ]
+      },
+      "actual_commands_match_gold": true,
+      "actual_commands_and_receipts": [
+        {
+          "command_pointer": "/groups/0/records/1/commands/0",
+          "receipt_pointer": "/groups/0/records/1/receipts/0",
+          "command_id": "b671cb91ddcb",
+          "name": "set_temperature",
+          "arguments": {
+            "zone": "all",
+            "temperature": 23
+          },
+          "source": "vehicle_plan",
+          "parent_call_id": "call_qq4ldco8dawoprxq1caud28a",
+          "action_id": "action_set_temperature_23",
+          "intent_id": "intent_climate_temp_23",
+          "valid_actual_success_receipt": true,
+          "receipt_latency_ms": 12612.31454089284,
+          "dispatch_trace": {
+            "trace_id": 32,
+            "pointer": "/groups/0/records/1/traces/31",
+            "kind": "vehicle.dispatched",
+            "created_at": "2026-10-14T05:12:27.644584+00:00",
+            "call_id": "call_qq4ldco8dawoprxq1caud28a:action_set_temperature_23"
+          },
+          "receipt_trace": {
+            "trace_id": 33,
+            "pointer": "/groups/0/records/1/traces/32",
+            "kind": "vehicle.receipt",
+            "created_at": "2026-10-14T05:12:27.647250+00:00",
+            "call_id": "call_qq4ldco8dawoprxq1caud28a:action_set_temperature_23"
+          },
+          "receipt_not_stale": true
+        },
+        {
+          "command_pointer": "/groups/0/records/1/commands/1",
+          "receipt_pointer": "/groups/0/records/1/receipts/1",
+          "command_id": "f21f4afb75ce",
+          "name": "set_mirror_heating",
+          "arguments": {
+            "enabled": true
+          },
+          "source": "vehicle_plan",
+          "parent_call_id": "call_qq4ldco8dawoprxq1caud28a",
+          "action_id": "action_set_mirror_heating_on",
+          "intent_id": "intent_mirror_heating_on",
+          "valid_actual_success_receipt": true,
+          "receipt_latency_ms": 12615.205208072439,
+          "dispatch_trace": {
+            "trace_id": 36,
+            "pointer": "/groups/0/records/1/traces/35",
+            "kind": "vehicle.dispatched",
+            "created_at": "2026-10-14T05:12:27.648491+00:00",
+            "call_id": "call_qq4ldco8dawoprxq1caud28a:action_set_mirror_heating_on"
+          },
+          "receipt_trace": {
+            "trace_id": 37,
+            "pointer": "/groups/0/records/1/traces/36",
+            "kind": "vehicle.receipt",
+            "created_at": "2026-10-14T05:12:27.650138+00:00",
+            "call_id": "call_qq4ldco8dawoprxq1caud28a:action_set_mirror_heating_on"
+          },
+          "receipt_not_stale": true
+        }
+      ],
+      "actual_targets": [
+        {
+          "path": "climate.power",
+          "before": false,
+          "actual_after": true,
+          "expected": true,
+          "matches": true
+        },
+        {
+          "path": "climate.temperatures.driver",
+          "before": 22,
+          "actual_after": 23,
+          "expected": 23,
+          "matches": true
+        },
+        {
+          "path": "climate.temperatures.front_passenger",
+          "before": 22,
+          "actual_after": 23,
+          "expected": 23,
+          "matches": true
+        },
+        {
+          "path": "climate.temperatures.rear",
+          "before": 22,
+          "actual_after": 23,
+          "expected": 23,
+          "matches": true
+        },
+        {
+          "path": "mirrors.heating",
+          "before": false,
+          "actual_after": true,
+          "expected": true,
+          "matches": true
+        }
+      ],
+      "actual_keep_checks": [
+        {
+          "path": "windows.positions.front_passenger",
+          "before": 50,
+          "after": 50,
+          "gold": 50,
+          "actually_preserved": true,
+          "precondition_matches_gold": true
+        }
+      ],
+      "computed_changed_paths": [
+        "climate.power",
+        "climate.temperatures.driver",
+        "climate.temperatures.front_passenger",
+        "climate.temperatures.rear",
+        "mirrors.heating"
+      ],
+      "extra_changes_outside_fixed_gold": [],
+      "serial_execution_checks": [
+        {
+          "previous_command_id": "b671cb91ddcb",
+          "next_command_id": "f21f4afb75ce",
+          "previous_receipt_trace_id": 33,
+          "next_dispatch_trace_id": 36,
+          "receipt_before_next_dispatch": true
+        }
+      ],
+      "tasks_before_after_identical": true,
+      "task_pointers": [
+        "/groups/0/records/1/before/tasks",
+        "/groups/0/records/1/after/tasks"
+      ],
+      "final_answer": "空调调成二十三度了。后视镜加热开了。要求保持的设置未调整。",
+      "final_wording_matches_actual_receipts_and_holds": true,
+      "final_wording_notes": "逐项对应目标对象、数值与否定保持；不声称额外动作或联网/路线结果。",
+      "latency": {
+        "first_effective_server_ms": 12617.088708095253,
+        "full_turn_server_ms": 12617.116207955405,
+        "full_turn_client_ms": 12618.099,
+        "per_command_receipt_ms": [
+          12612.31454089284,
+          12615.205208072439
+        ]
+      },
+      "latency_route": "pro_planning",
+      "raw_assertion_failures": []
+    },
+    {
+      "pointer": "/groups/0/records/2",
+      "group": "mixed_and_holds",
+      "step_id": "light_attributes_and_lock",
+      "query": "氛围灯开关别动，颜色改紫色、亮度设45%，并启用左后门儿童安全锁。",
+      "session_id": "529f6810bf544e29",
+      "turn_id": "52270842506f",
+      "raw_pass": true,
+      "human_semantics_and_state_pass": true,
+      "manual_notes": [
+        "Pro首稿动作/参数与keep路径正确，但意图原文未包含连接词“并”，拒绝unaccounted_request_text。第二稿补全原文账本，动作参数不变并执行。",
+        "氛围灯电源false不变；颜色warm→purple、亮度40→45、左后门儿童安全锁false→true，未用氛围灯开关替代颜色/亮度。"
+      ],
+      "mini_responses": [
+        {
+          "trace_id": 44,
+          "pointer": "/groups/0/records/2/traces/43",
+          "kind": "model.completed",
+          "created_at": "2026-10-14T05:12:30.317222+00:00",
+          "call_id": "8864d46473de4838aa5b84232df028b6",
+          "calls": [
+            {
+              "id": "call_th3ouxvouv53xu62dnnd3no1",
+              "name": "delegate_vehicle_control",
+              "arguments": {
+                "skill_ids": [
+                  "lights",
+                  "locks"
+                ]
+              }
+            }
+          ],
+          "content": null,
+          "meta_pointer": "/groups/0/records/2/traces/43/data/meta"
+        }
+      ],
+      "pro_submitted_plans": [
+        {
+          "trace_id": 50,
+          "pointer": "/groups/0/records/2/traces/49",
+          "kind": "model.completed",
+          "created_at": "2026-10-14T05:12:40.100981+00:00",
+          "call_id": "b203f51d5185474fb198803bd8a90c11",
+          "tool_call_id": "call_ooauw9lgovgrhb14jqwequek",
+          "status": "planned",
+          "intents": [
+            {
+              "id": "intent_keep_ambient_power",
+              "source_text": "氛围灯开关别动",
+              "status": "keep",
+              "action_ids": [],
+              "completed_operation_ids": [],
+              "keep_paths": [
+                "lights.ambient"
+              ],
+              "question": "",
+              "reason": ""
+            },
+            {
+              "id": "intent_ambient_color_purple",
+              "source_text": "颜色改紫色",
+              "status": "planned",
+              "action_ids": [
+                "action_set_ambient_color_purple"
+              ],
+              "completed_operation_ids": [],
+              "keep_paths": [],
+              "question": "",
+              "reason": ""
+            },
+            {
+              "id": "intent_ambient_brightness_45",
+              "source_text": "亮度设45%",
+              "status": "planned",
+              "action_ids": [
+                "action_set_ambient_brightness_45"
+              ],
+              "completed_operation_ids": [],
+              "keep_paths": [],
+              "question": "",
+              "reason": ""
+            },
+            {
+              "id": "intent_enable_rear_left_child_lock",
+              "source_text": "启用左后门儿童安全锁",
+              "status": "planned",
+              "action_ids": [
+                "action_enable_rear_left_child_lock"
+              ],
+              "completed_operation_ids": [],
+              "keep_paths": [],
+              "question": "",
+              "reason": ""
+            }
+          ],
+          "actions": [
+            {
+              "id": "action_set_ambient_color_purple",
+              "intent_id": "intent_ambient_color_purple",
+              "name": "set_ambient_color",
+              "arguments": {
+                "color": "purple"
+              },
+              "depends_on": []
+            },
+            {
+              "id": "action_set_ambient_brightness_45",
+              "intent_id": "intent_ambient_brightness_45",
+              "name": "set_ambient_brightness",
+              "arguments": {
+                "brightness": 45
+              },
+              "depends_on": []
+            },
+            {
+              "id": "action_enable_rear_left_child_lock",
+              "intent_id": "intent_enable_rear_left_child_lock",
+              "name": "set_child_lock",
+              "arguments": {
+                "side": "left",
+                "enabled": true
+              },
+              "depends_on": []
+            }
+          ],
+          "keep_paths": [
+            "lights.ambient"
+          ],
+          "actions_match_fixed_gold": true,
+          "meta_pointer": "/groups/0/records/2/traces/49/data/meta"
+        },
+        {
+          "trace_id": 55,
+          "pointer": "/groups/0/records/2/traces/54",
+          "kind": "model.completed",
+          "created_at": "2026-10-14T05:12:54.429755+00:00",
+          "call_id": "1c586e125602445aac1b6b27a1605491",
+          "tool_call_id": "call_efguw2lsegie8ztwfuirbn7s",
+          "status": "planned",
+          "intents": [
+            {
+              "id": "intent_keep_ambient_power",
+              "source_text": "氛围灯开关别动，",
+              "status": "keep",
+              "action_ids": [],
+              "completed_operation_ids": [],
+              "keep_paths": [
+                "lights.ambient"
+              ],
+              "question": "",
+              "reason": ""
+            },
+            {
+              "id": "intent_ambient_color_purple",
+              "source_text": "颜色改紫色、",
+              "status": "planned",
+              "action_ids": [
+                "action_set_ambient_color_purple"
+              ],
+              "completed_operation_ids": [],
+              "keep_paths": [],
+              "question": "",
+              "reason": ""
+            },
+            {
+              "id": "intent_ambient_brightness_45",
+              "source_text": "亮度设45%，",
+              "status": "planned",
+              "action_ids": [
+                "action_set_ambient_brightness_45"
+              ],
+              "completed_operation_ids": [],
+              "keep_paths": [],
+              "question": "",
+              "reason": ""
+            },
+            {
+              "id": "intent_enable_rear_left_child_lock",
+              "source_text": "并启用左后门儿童安全锁。",
+              "status": "planned",
+              "action_ids": [
+                "action_enable_rear_left_child_lock"
+              ],
+              "completed_operation_ids": [],
+              "keep_paths": [],
+              "question": "",
+              "reason": ""
+            }
+          ],
+          "actions": [
+            {
+              "id": "action_set_ambient_color_purple",
+              "intent_id": "intent_ambient_color_purple",
+              "name": "set_ambient_color",
+              "arguments": {
+                "color": "purple"
+              },
+              "depends_on": []
+            },
+            {
+              "id": "action_set_ambient_brightness_45",
+              "intent_id": "intent_ambient_brightness_45",
+              "name": "set_ambient_brightness",
+              "arguments": {
+                "brightness": 45
+              },
+              "depends_on": []
+            },
+            {
+              "id": "action_enable_rear_left_child_lock",
+              "intent_id": "intent_enable_rear_left_child_lock",
+              "name": "set_child_lock",
+              "arguments": {
+                "side": "left",
+                "enabled": true
+              },
+              "depends_on": []
+            }
+          ],
+          "keep_paths": [
+            "lights.ambient"
+          ],
+          "actions_match_fixed_gold": true,
+          "meta_pointer": "/groups/0/records/2/traces/54/data/meta"
+        }
+      ],
+      "tool_errors_and_recovery": [
+        {
+          "trace_id": 53,
+          "pointer": "/groups/0/records/2/traces/52",
+          "kind": "tool.error",
+          "created_at": "2026-10-14T05:12:40.113945+00:00",
+          "call_id": "call_ooauw9lgovgrhb14jqwequek",
+          "name": "submit_vehicle_plan",
+          "result": {
+            "ok": false,
+            "executed": false,
+            "error": "unaccounted_request_text",
+            "retry_model": true
+          }
+        }
+      ],
+      "plan_acceptance": [
+        {
+          "trace_id": 61,
+          "pointer": "/groups/0/records/2/traces/60",
+          "kind": "vehicle.plan.accepted",
+          "created_at": "2026-10-14T05:12:54.460337+00:00",
+          "call_id": "call_th3ouxvouv53xu62dnnd3no1",
+          "plan_pointer": "/groups/0/records/2/traces/60/data/plan"
+        }
+      ],
+      "plan_completion": [
+        {
+          "trace_id": 74,
+          "pointer": "/groups/0/records/2/traces/73",
+          "kind": "vehicle.plan.completed",
+          "created_at": "2026-10-14T05:12:54.474204+00:00",
+          "call_id": "call_th3ouxvouv53xu62dnnd3no1",
+          "status": "completed",
+          "ledger_pointer": "/groups/0/records/2/traces/73/data/ledger"
+        }
+      ],
+      "actual_model_event_counts": {
+        "talker": {
+          "model.started": 1,
+          "model.completed": 1
+        },
+        "vehicle_planner": {
+          "model.started": 2,
+          "model.completed": 2
+        }
+      },
+      "actual_completed_model_ids": {
+        "talker": [
+          "doubao-seed-2-0-mini-260428"
+        ],
+        "vehicle_planner": [
+          "doubao-seed-2-1-pro-260915"
+        ]
+      },
+      "actual_commands_match_gold": true,
+      "actual_commands_and_receipts": [
+        {
+          "command_pointer": "/groups/0/records/2/commands/0",
+          "receipt_pointer": "/groups/0/records/2/receipts/0",
+          "command_id": "524a7eb4e6e3",
+          "name": "set_ambient_color",
+          "arguments": {
+            "color": "purple"
+          },
+          "source": "vehicle_plan",
+          "parent_call_id": "call_th3ouxvouv53xu62dnnd3no1",
+          "action_id": "action_set_ambient_color_purple",
+          "intent_id": "intent_ambient_color_purple",
+          "valid_actual_success_receipt": true,
+          "receipt_latency_ms": 26640.81120910123,
+          "dispatch_trace": {
+            "trace_id": 63,
+            "pointer": "/groups/0/records/2/traces/62",
+            "kind": "vehicle.dispatched",
+            "created_at": "2026-10-14T05:12:54.463420+00:00",
+            "call_id": "call_th3ouxvouv53xu62dnnd3no1:action_set_ambient_color_purple"
+          },
+          "receipt_trace": {
+            "trace_id": 64,
+            "pointer": "/groups/0/records/2/traces/63",
+            "kind": "vehicle.receipt",
+            "created_at": "2026-10-14T05:12:54.465689+00:00",
+            "call_id": "call_th3ouxvouv53xu62dnnd3no1:action_set_ambient_color_purple"
+          },
+          "receipt_not_stale": true
+        },
+        {
+          "command_pointer": "/groups/0/records/2/commands/1",
+          "receipt_pointer": "/groups/0/records/2/receipts/1",
+          "command_id": "8491c735e24b",
+          "name": "set_ambient_brightness",
+          "arguments": {
+            "brightness": 45
+          },
+          "source": "vehicle_plan",
+          "parent_call_id": "call_th3ouxvouv53xu62dnnd3no1",
+          "action_id": "action_set_ambient_brightness_45",
+          "intent_id": "intent_ambient_brightness_45",
+          "valid_actual_success_receipt": true,
+          "receipt_latency_ms": 26644.056209130213,
+          "dispatch_trace": {
+            "trace_id": 67,
+            "pointer": "/groups/0/records/2/traces/66",
+            "kind": "vehicle.dispatched",
+            "created_at": "2026-10-14T05:12:54.467071+00:00",
+            "call_id": "call_th3ouxvouv53xu62dnnd3no1:action_set_ambient_brightness_45"
+          },
+          "receipt_trace": {
+            "trace_id": 68,
+            "pointer": "/groups/0/records/2/traces/67",
+            "kind": "vehicle.receipt",
+            "created_at": "2026-10-14T05:12:54.468932+00:00",
+            "call_id": "call_th3ouxvouv53xu62dnnd3no1:action_set_ambient_brightness_45"
+          },
+          "receipt_not_stale": true
+        },
+        {
+          "command_pointer": "/groups/0/records/2/commands/2",
+          "receipt_pointer": "/groups/0/records/2/receipts/2",
+          "command_id": "739b64be7fbb",
+          "name": "set_child_lock",
+          "arguments": {
+            "side": "left",
+            "enabled": true
+          },
+          "source": "vehicle_plan",
+          "parent_call_id": "call_th3ouxvouv53xu62dnnd3no1",
+          "action_id": "action_enable_rear_left_child_lock",
+          "intent_id": "intent_enable_rear_left_child_lock",
+          "valid_actual_success_receipt": true,
+          "receipt_latency_ms": 26647.521958919242,
+          "dispatch_trace": {
+            "trace_id": 71,
+            "pointer": "/groups/0/records/2/traces/70",
+            "kind": "vehicle.dispatched",
+            "created_at": "2026-10-14T05:12:54.470401+00:00",
+            "call_id": "call_th3ouxvouv53xu62dnnd3no1:action_enable_rear_left_child_lock"
+          },
+          "receipt_trace": {
+            "trace_id": 72,
+            "pointer": "/groups/0/records/2/traces/71",
+            "kind": "vehicle.receipt",
+            "created_at": "2026-10-14T05:12:54.472399+00:00",
+            "call_id": "call_th3ouxvouv53xu62dnnd3no1:action_enable_rear_left_child_lock"
+          },
+          "receipt_not_stale": true
+        }
+      ],
+      "actual_targets": [
+        {
+          "path": "lights.ambient_color",
+          "before": "warm",
+          "actual_after": "purple",
+          "expected": "purple",
+          "matches": true
+        },
+        {
+          "path": "lights.ambient_brightness",
+          "before": 40,
+          "actual_after": 45,
+          "expected": 45,
+          "matches": true
+        },
+        {
+          "path": "locks.child_lock.left",
+          "before": false,
+          "actual_after": true,
+          "expected": true,
+          "matches": true
+        }
+      ],
+      "actual_keep_checks": [
+        {
+          "path": "lights.ambient",
+          "before": false,
+          "after": false,
+          "gold": false,
+          "actually_preserved": true,
+          "precondition_matches_gold": true
+        }
+      ],
+      "computed_changed_paths": [
+        "lights.ambient_brightness",
+        "lights.ambient_color",
+        "locks.child_lock.left"
+      ],
+      "extra_changes_outside_fixed_gold": [],
+      "serial_execution_checks": [
+        {
+          "previous_command_id": "524a7eb4e6e3",
+          "next_command_id": "8491c735e24b",
+          "previous_receipt_trace_id": 64,
+          "next_dispatch_trace_id": 67,
+          "receipt_before_next_dispatch": true
+        },
+        {
+          "previous_command_id": "8491c735e24b",
+          "next_command_id": "739b64be7fbb",
+          "previous_receipt_trace_id": 68,
+          "next_dispatch_trace_id": 71,
+          "receipt_before_next_dispatch": true
+        }
+      ],
+      "tasks_before_after_identical": true,
+      "task_pointers": [
+        "/groups/0/records/2/before/tasks",
+        "/groups/0/records/2/after/tasks"
+      ],
+      "final_answer": "氛围灯颜色设为紫色了。氛围灯亮度设为百分之45了。左后门儿童安全锁开了。要求保持的设置未调整。",
+      "final_wording_matches_actual_receipts_and_holds": true,
+      "final_wording_notes": "逐项对应目标对象、数值与否定保持；不声称额外动作或联网/路线结果。",
+      "latency": {
+        "first_effective_server_ms": 26650.40925005451,
+        "full_turn_server_ms": 26650.441417004913,
+        "full_turn_client_ms": 26651.427,
+        "per_command_receipt_ms": [
+          26640.81120910123,
+          26644.056209130213,
+          26647.521958919242
+        ]
+      },
+      "latency_route": "pro_planning",
+      "raw_assertion_failures": []
+    },
+    {
+      "pointer": "/groups/0/records/3",
+      "group": "mixed_and_holds",
+      "step_id": "mixed_locks_and_ambient",
+      "query": "打开氛围灯，解除左后门儿童安全锁，启用右后门儿童安全锁，颜色和亮度别动。",
+      "session_id": "529f6810bf544e29",
+      "turn_id": "9eaca1a5954c",
+      "raw_pass": true,
+      "human_semantics_and_state_pass": true,
+      "manual_notes": [
+        "Pro首稿动作/参数正确，颜色与亮度的拆分文本遗漏“和”，被unaccounted_request_text拒绝。第二稿以“颜色和亮度别动”记同一保持意图后获接受。",
+        "氛围灯false→true、左儿童锁true→false、右儿童锁false→true；本轮真实before为purple/45且after相同，不存在run1前置失败导致的静态保持误报。"
+      ],
+      "mini_responses": [
+        {
+          "trace_id": 79,
+          "pointer": "/groups/0/records/3/traces/78",
+          "kind": "model.completed",
+          "created_at": "2026-10-14T05:12:56.652306+00:00",
+          "call_id": "c2f184c110dc42d8a5813461897b3660",
+          "calls": [
+            {
+              "id": "call_3ypaythv4u5jcn1zu94vnp3d",
+              "name": "delegate_vehicle_control",
+              "arguments": {
+                "skill_ids": [
+                  "lights",
+                  "locks"
+                ]
+              }
+            }
+          ],
+          "content": null,
+          "meta_pointer": "/groups/0/records/3/traces/78/data/meta"
+        }
+      ],
+      "pro_submitted_plans": [
+        {
+          "trace_id": 85,
+          "pointer": "/groups/0/records/3/traces/84",
+          "kind": "model.completed",
+          "created_at": "2026-10-14T05:13:12.442372+00:00",
+          "call_id": "73a3f1f85516406d92f311622dd2303d",
+          "tool_call_id": "call_vpm5ybr66oxkohxm90qx7bvq",
+          "status": "planned",
+          "intents": [
+            {
+              "id": "intent_ambient_on",
+              "source_text": "打开氛围灯",
+              "status": "planned",
+              "action_ids": [
+                "action_ambient_on"
+              ],
+              "completed_operation_ids": [],
+              "keep_paths": [],
+              "question": "",
+              "reason": ""
+            },
+            {
+              "id": "intent_left_child_lock_off",
+              "source_text": "解除左后门儿童安全锁",
+              "status": "planned",
+              "action_ids": [
+                "action_left_child_lock_off"
+              ],
+              "completed_operation_ids": [],
+              "keep_paths": [],
+              "question": "",
+              "reason": ""
+            },
+            {
+              "id": "intent_right_child_lock_on",
+              "source_text": "启用右后门儿童安全锁",
+              "status": "planned",
+              "action_ids": [
+                "action_right_child_lock_on"
+              ],
+              "completed_operation_ids": [],
+              "keep_paths": [],
+              "question": "",
+              "reason": ""
+            },
+            {
+              "id": "intent_keep_ambient_color",
+              "source_text": "颜色",
+              "status": "keep",
+              "action_ids": [],
+              "completed_operation_ids": [],
+              "keep_paths": [
+                "lights.ambient_color"
+              ],
+              "question": "",
+              "reason": ""
+            },
+            {
+              "id": "intent_keep_ambient_brightness",
+              "source_text": "亮度别动",
+              "status": "keep",
+              "action_ids": [],
+              "completed_operation_ids": [],
+              "keep_paths": [
+                "lights.ambient_brightness"
+              ],
+              "question": "",
+              "reason": ""
+            }
+          ],
+          "actions": [
+            {
+              "id": "action_ambient_on",
+              "intent_id": "intent_ambient_on",
+              "name": "set_ambient_light",
+              "arguments": {
+                "enabled": true
+              },
+              "depends_on": []
+            },
+            {
+              "id": "action_left_child_lock_off",
+              "intent_id": "intent_left_child_lock_off",
+              "name": "set_child_lock",
+              "arguments": {
+                "side": "left",
+                "enabled": false
+              },
+              "depends_on": []
+            },
+            {
+              "id": "action_right_child_lock_on",
+              "intent_id": "intent_right_child_lock_on",
+              "name": "set_child_lock",
+              "arguments": {
+                "side": "right",
+                "enabled": true
+              },
+              "depends_on": []
+            }
+          ],
+          "keep_paths": [
+            "lights.ambient_color",
+            "lights.ambient_brightness"
+          ],
+          "actions_match_fixed_gold": true,
+          "meta_pointer": "/groups/0/records/3/traces/84/data/meta"
+        },
+        {
+          "trace_id": 90,
+          "pointer": "/groups/0/records/3/traces/89",
+          "kind": "model.completed",
+          "created_at": "2026-10-14T05:13:20.541461+00:00",
+          "call_id": "11977faf6aea451e981160faa15c49bd",
+          "tool_call_id": "call_od9lvvnlfllqitftx1shnck5",
+          "status": "planned",
+          "intents": [
+            {
+              "id": "intent_ambient_on",
+              "source_text": "打开氛围灯",
+              "status": "planned",
+              "action_ids": [
+                "action_ambient_on"
+              ],
+              "completed_operation_ids": [],
+              "keep_paths": [],
+              "question": "",
+              "reason": ""
+            },
+            {
+              "id": "intent_left_child_lock_off",
+              "source_text": "解除左后门儿童安全锁",
+              "status": "planned",
+              "action_ids": [
+                "action_left_child_lock_off"
+              ],
+              "completed_operation_ids": [],
+              "keep_paths": [],
+              "question": "",
+              "reason": ""
+            },
+            {
+              "id": "intent_right_child_lock_on",
+              "source_text": "启用右后门儿童安全锁",
+              "status": "planned",
+              "action_ids": [
+                "action_right_child_lock_on"
+              ],
+              "completed_operation_ids": [],
+              "keep_paths": [],
+              "question": "",
+              "reason": ""
+            },
+            {
+              "id": "intent_keep_ambient_color",
+              "source_text": "颜色和亮度别动",
+              "status": "keep",
+              "action_ids": [],
+              "completed_operation_ids": [],
+              "keep_paths": [
+                "lights.ambient_color",
+                "lights.ambient_brightness"
+              ],
+              "question": "",
+              "reason": ""
+            }
+          ],
+          "actions": [
+            {
+              "id": "action_ambient_on",
+              "intent_id": "intent_ambient_on",
+              "name": "set_ambient_light",
+              "arguments": {
+                "enabled": true
+              },
+              "depends_on": []
+            },
+            {
+              "id": "action_left_child_lock_off",
+              "intent_id": "intent_left_child_lock_off",
+              "name": "set_child_lock",
+              "arguments": {
+                "side": "left",
+                "enabled": false
+              },
+              "depends_on": []
+            },
+            {
+              "id": "action_right_child_lock_on",
+              "intent_id": "intent_right_child_lock_on",
+              "name": "set_child_lock",
+              "arguments": {
+                "side": "right",
+                "enabled": true
+              },
+              "depends_on": []
+            }
+          ],
+          "keep_paths": [
+            "lights.ambient_color",
+            "lights.ambient_brightness"
+          ],
+          "actions_match_fixed_gold": true,
+          "meta_pointer": "/groups/0/records/3/traces/89/data/meta"
+        }
+      ],
+      "tool_errors_and_recovery": [
+        {
+          "trace_id": 88,
+          "pointer": "/groups/0/records/3/traces/87",
+          "kind": "tool.error",
+          "created_at": "2026-10-14T05:13:12.457174+00:00",
+          "call_id": "call_vpm5ybr66oxkohxm90qx7bvq",
+          "name": "submit_vehicle_plan",
+          "result": {
+            "ok": false,
+            "executed": false,
+            "error": "unaccounted_request_text",
+            "retry_model": true
+          }
+        }
+      ],
+      "plan_acceptance": [
+        {
+          "trace_id": 96,
+          "pointer": "/groups/0/records/3/traces/95",
+          "kind": "vehicle.plan.accepted",
+          "created_at": "2026-10-14T05:13:20.601892+00:00",
+          "call_id": "call_3ypaythv4u5jcn1zu94vnp3d",
+          "plan_pointer": "/groups/0/records/3/traces/95/data/plan"
+        }
+      ],
+      "plan_completion": [
+        {
+          "trace_id": 109,
+          "pointer": "/groups/0/records/3/traces/108",
+          "kind": "vehicle.plan.completed",
+          "created_at": "2026-10-14T05:13:20.614516+00:00",
+          "call_id": "call_3ypaythv4u5jcn1zu94vnp3d",
+          "status": "completed",
+          "ledger_pointer": "/groups/0/records/3/traces/108/data/ledger"
+        }
+      ],
+      "actual_model_event_counts": {
+        "talker": {
+          "model.started": 1,
+          "model.completed": 1
+        },
+        "vehicle_planner": {
+          "model.started": 2,
+          "model.completed": 2
+        }
+      },
+      "actual_completed_model_ids": {
+        "talker": [
+          "doubao-seed-2-0-mini-260428"
+        ],
+        "vehicle_planner": [
+          "doubao-seed-2-1-pro-260915"
+        ]
+      },
+      "actual_commands_match_gold": true,
+      "actual_commands_and_receipts": [
+        {
+          "command_pointer": "/groups/0/records/3/commands/0",
+          "receipt_pointer": "/groups/0/records/3/receipts/0",
+          "command_id": "0947194f9c0e",
+          "name": "set_ambient_light",
+          "arguments": {
+            "enabled": true
+          },
+          "source": "vehicle_plan",
+          "parent_call_id": "call_3ypaythv4u5jcn1zu94vnp3d",
+          "action_id": "action_ambient_on",
+          "intent_id": "intent_ambient_on",
+          "valid_actual_success_receipt": true,
+          "receipt_latency_ms": 25821.625291835517,
+          "dispatch_trace": {
+            "trace_id": 98,
+            "pointer": "/groups/0/records/3/traces/97",
+            "kind": "vehicle.dispatched",
+            "created_at": "2026-10-14T05:13:20.604693+00:00",
+            "call_id": "call_3ypaythv4u5jcn1zu94vnp3d:action_ambient_on"
+          },
+          "receipt_trace": {
+            "trace_id": 99,
+            "pointer": "/groups/0/records/3/traces/98",
+            "kind": "vehicle.receipt",
+            "created_at": "2026-10-14T05:13:20.606829+00:00",
+            "call_id": "call_3ypaythv4u5jcn1zu94vnp3d:action_ambient_on"
+          },
+          "receipt_not_stale": true
+        },
+        {
+          "command_pointer": "/groups/0/records/3/commands/1",
+          "receipt_pointer": "/groups/0/records/3/receipts/1",
+          "command_id": "0d096fdacdaa",
+          "name": "set_child_lock",
+          "arguments": {
+            "side": "left",
+            "enabled": false
+          },
+          "source": "vehicle_plan",
+          "parent_call_id": "call_3ypaythv4u5jcn1zu94vnp3d",
+          "action_id": "action_left_child_lock_off",
+          "intent_id": "intent_left_child_lock_off",
+          "valid_actual_success_receipt": true,
+          "receipt_latency_ms": 25824.74479195662,
+          "dispatch_trace": {
+            "trace_id": 102,
+            "pointer": "/groups/0/records/3/traces/101",
+            "kind": "vehicle.dispatched",
+            "created_at": "2026-10-14T05:13:20.608149+00:00",
+            "call_id": "call_3ypaythv4u5jcn1zu94vnp3d:action_left_child_lock_off"
+          },
+          "receipt_trace": {
+            "trace_id": 103,
+            "pointer": "/groups/0/records/3/traces/102",
+            "kind": "vehicle.receipt",
+            "created_at": "2026-10-14T05:13:20.609947+00:00",
+            "call_id": "call_3ypaythv4u5jcn1zu94vnp3d:action_left_child_lock_off"
+          },
+          "receipt_not_stale": true
+        },
+        {
+          "command_pointer": "/groups/0/records/3/commands/2",
+          "receipt_pointer": "/groups/0/records/3/receipts/2",
+          "command_id": "a911180ed49c",
+          "name": "set_child_lock",
+          "arguments": {
+            "side": "right",
+            "enabled": true
+          },
+          "source": "vehicle_plan",
+          "parent_call_id": "call_3ypaythv4u5jcn1zu94vnp3d",
+          "action_id": "action_right_child_lock_on",
+          "intent_id": "intent_right_child_lock_on",
+          "valid_actual_success_receipt": true,
+          "receipt_latency_ms": 25827.73766689934,
+          "dispatch_trace": {
+            "trace_id": 106,
+            "pointer": "/groups/0/records/3/traces/105",
+            "kind": "vehicle.dispatched",
+            "created_at": "2026-10-14T05:13:20.611256+00:00",
+            "call_id": "call_3ypaythv4u5jcn1zu94vnp3d:action_right_child_lock_on"
+          },
+          "receipt_trace": {
+            "trace_id": 107,
+            "pointer": "/groups/0/records/3/traces/106",
+            "kind": "vehicle.receipt",
+            "created_at": "2026-10-14T05:13:20.612940+00:00",
+            "call_id": "call_3ypaythv4u5jcn1zu94vnp3d:action_right_child_lock_on"
+          },
+          "receipt_not_stale": true
+        }
+      ],
+      "actual_targets": [
+        {
+          "path": "lights.ambient",
+          "before": false,
+          "actual_after": true,
+          "expected": true,
+          "matches": true
+        },
+        {
+          "path": "locks.child_lock.left",
+          "before": true,
+          "actual_after": false,
+          "expected": false,
+          "matches": true
+        },
+        {
+          "path": "locks.child_lock.right",
+          "before": false,
+          "actual_after": true,
+          "expected": true,
+          "matches": true
+        }
+      ],
+      "actual_keep_checks": [
+        {
+          "path": "lights.ambient_color",
+          "before": "purple",
+          "after": "purple",
+          "gold": "purple",
+          "actually_preserved": true,
+          "precondition_matches_gold": true
+        },
+        {
+          "path": "lights.ambient_brightness",
+          "before": 45,
+          "after": 45,
+          "gold": 45,
+          "actually_preserved": true,
+          "precondition_matches_gold": true
+        }
+      ],
+      "computed_changed_paths": [
+        "lights.ambient",
+        "locks.child_lock.left",
+        "locks.child_lock.right"
+      ],
+      "extra_changes_outside_fixed_gold": [],
+      "serial_execution_checks": [
+        {
+          "previous_command_id": "0947194f9c0e",
+          "next_command_id": "0d096fdacdaa",
+          "previous_receipt_trace_id": 99,
+          "next_dispatch_trace_id": 102,
+          "receipt_before_next_dispatch": true
+        },
+        {
+          "previous_command_id": "0d096fdacdaa",
+          "next_command_id": "a911180ed49c",
+          "previous_receipt_trace_id": 103,
+          "next_dispatch_trace_id": 106,
+          "receipt_before_next_dispatch": true
+        }
+      ],
+      "tasks_before_after_identical": true,
+      "task_pointers": [
+        "/groups/0/records/3/before/tasks",
+        "/groups/0/records/3/after/tasks"
+      ],
+      "final_answer": "氛围灯开了。左后门儿童安全锁关了。右后门儿童安全锁开了。要求保持的设置未调整。",
+      "final_wording_matches_actual_receipts_and_holds": true,
+      "final_wording_notes": "逐项对应目标对象、数值与否定保持；不声称额外动作或联网/路线结果。",
+      "latency": {
+        "first_effective_server_ms": 25830.336041981354,
+        "full_turn_server_ms": 25830.365000059828,
+        "full_turn_client_ms": 25831.392,
+        "per_command_receipt_ms": [
+          25821.625291835517,
+          25824.74479195662,
+          25827.73766689934
+        ]
+      },
+      "latency_route": "pro_planning",
+      "raw_assertion_failures": []
+    },
+    {
+      "pointer": "/groups/0/records/4",
+      "group": "mixed_and_holds",
+      "step_id": "remaining_windows",
+      "query": "副驾车窗别动，把其余三扇窗都关上。",
+      "session_id": "529f6810bf544e29",
+      "turn_id": "e15beca194f7",
+      "raw_pass": true,
+      "human_semantics_and_state_pass": true,
+      "manual_notes": [
+        "Mini直接委托，Pro首稿即接受；三个非副驾窗口均下发0，副驾50未变。",
+        "实际其余三窗before均0，所以只是幂等关窗证据，不能外推打开状态下关窗的转换覆盖。"
+      ],
+      "mini_responses": [
+        {
+          "trace_id": 114,
+          "pointer": "/groups/0/records/4/traces/113",
+          "kind": "model.completed",
+          "created_at": "2026-10-14T05:13:22.566481+00:00",
+          "call_id": "d7026bd94b8d4b1e9ce6026c69d5bdf3",
+          "calls": [
+            {
+              "id": "call_woeg95ew4oasqhbsm9ludk8z",
+              "name": "delegate_vehicle_control",
+              "arguments": {
+                "skill_ids": [
+                  "windows"
+                ]
+              }
+            }
+          ],
+          "content": null,
+          "meta_pointer": "/groups/0/records/4/traces/113/data/meta"
+        }
+      ],
+      "pro_submitted_plans": [
+        {
+          "trace_id": 119,
+          "pointer": "/groups/0/records/4/traces/118",
+          "kind": "model.completed",
+          "created_at": "2026-10-14T05:13:35.441320+00:00",
+          "call_id": "794139cda4fa4d7aaf742c763173cd8c",
+          "tool_call_id": "call_jxjcfrnvw89qluu91evqfaq2",
+          "status": "planned",
+          "intents": [
+            {
+              "id": "intent_keep_front_passenger_window",
+              "source_text": "副驾车窗别动",
+              "status": "keep",
+              "action_ids": [],
+              "completed_operation_ids": [],
+              "keep_paths": [
+                "windows.positions.front_passenger"
+              ],
+              "question": "",
+              "reason": ""
+            },
+            {
+              "id": "intent_close_other_three_windows",
+              "source_text": "把其余三扇窗都关上",
+              "status": "planned",
+              "action_ids": [
+                "action_close_driver_window",
+                "action_close_rear_left_window",
+                "action_close_rear_right_window"
+              ],
+              "completed_operation_ids": [],
+              "keep_paths": [],
+              "question": "",
+              "reason": ""
+            }
+          ],
+          "actions": [
+            {
+              "id": "action_close_driver_window",
+              "intent_id": "intent_close_other_three_windows",
+              "name": "set_window_position",
+              "arguments": {
+                "window": "driver",
+                "position": 0
+              },
+              "depends_on": []
+            },
+            {
+              "id": "action_close_rear_left_window",
+              "intent_id": "intent_close_other_three_windows",
+              "name": "set_window_position",
+              "arguments": {
+                "window": "rear_left",
+                "position": 0
+              },
+              "depends_on": []
+            },
+            {
+              "id": "action_close_rear_right_window",
+              "intent_id": "intent_close_other_three_windows",
+              "name": "set_window_position",
+              "arguments": {
+                "window": "rear_right",
+                "position": 0
+              },
+              "depends_on": []
+            }
+          ],
+          "keep_paths": [
+            "windows.positions.front_passenger"
+          ],
+          "actions_match_fixed_gold": true,
+          "meta_pointer": "/groups/0/records/4/traces/118/data/meta"
+        }
+      ],
+      "tool_errors_and_recovery": [],
+      "plan_acceptance": [
+        {
+          "trace_id": 125,
+          "pointer": "/groups/0/records/4/traces/124",
+          "kind": "vehicle.plan.accepted",
+          "created_at": "2026-10-14T05:13:35.462428+00:00",
+          "call_id": "call_woeg95ew4oasqhbsm9ludk8z",
+          "plan_pointer": "/groups/0/records/4/traces/124/data/plan"
+        }
+      ],
+      "plan_completion": [
+        {
+          "trace_id": 138,
+          "pointer": "/groups/0/records/4/traces/137",
+          "kind": "vehicle.plan.completed",
+          "created_at": "2026-10-14T05:13:35.478895+00:00",
+          "call_id": "call_woeg95ew4oasqhbsm9ludk8z",
+          "status": "completed",
+          "ledger_pointer": "/groups/0/records/4/traces/137/data/ledger"
+        }
+      ],
+      "actual_model_event_counts": {
+        "talker": {
+          "model.started": 1,
+          "model.completed": 1
+        },
+        "vehicle_planner": {
+          "model.started": 1,
+          "model.completed": 1
+        }
+      },
+      "actual_completed_model_ids": {
+        "talker": [
+          "doubao-seed-2-0-mini-260428"
+        ],
+        "vehicle_planner": [
+          "doubao-seed-2-1-pro-260915"
+        ]
+      },
+      "actual_commands_match_gold": true,
+      "actual_commands_and_receipts": [
+        {
+          "command_pointer": "/groups/0/records/4/commands/0",
+          "receipt_pointer": "/groups/0/records/4/receipts/0",
+          "command_id": "f2d1b3f029e5",
+          "name": "set_window_position",
+          "arguments": {
+            "window": "driver",
+            "position": 0
+          },
+          "source": "vehicle_plan",
+          "parent_call_id": "call_woeg95ew4oasqhbsm9ludk8z",
+          "action_id": "action_close_driver_window",
+          "intent_id": "intent_close_other_three_windows",
+          "valid_actual_success_receipt": true,
+          "receipt_latency_ms": 14422.204167116433,
+          "dispatch_trace": {
+            "trace_id": 127,
+            "pointer": "/groups/0/records/4/traces/126",
+            "kind": "vehicle.dispatched",
+            "created_at": "2026-10-14T05:13:35.465186+00:00",
+            "call_id": "call_woeg95ew4oasqhbsm9ludk8z:action_close_driver_window"
+          },
+          "receipt_trace": {
+            "trace_id": 128,
+            "pointer": "/groups/0/records/4/traces/127",
+            "kind": "vehicle.receipt",
+            "created_at": "2026-10-14T05:13:35.468506+00:00",
+            "call_id": "call_woeg95ew4oasqhbsm9ludk8z:action_close_driver_window"
+          },
+          "receipt_not_stale": true
+        },
+        {
+          "command_pointer": "/groups/0/records/4/commands/1",
+          "receipt_pointer": "/groups/0/records/4/receipts/1",
+          "command_id": "c5ebf0816e44",
+          "name": "set_window_position",
+          "arguments": {
+            "window": "rear_left",
+            "position": 0
+          },
+          "source": "vehicle_plan",
+          "parent_call_id": "call_woeg95ew4oasqhbsm9ludk8z",
+          "action_id": "action_close_rear_left_window",
+          "intent_id": "intent_close_other_three_windows",
+          "valid_actual_success_receipt": true,
+          "receipt_latency_ms": 14426.550334086642,
+          "dispatch_trace": {
+            "trace_id": 131,
+            "pointer": "/groups/0/records/4/traces/130",
+            "kind": "vehicle.dispatched",
+            "created_at": "2026-10-14T05:13:35.470352+00:00",
+            "call_id": "call_woeg95ew4oasqhbsm9ludk8z:action_close_rear_left_window"
+          },
+          "receipt_trace": {
+            "trace_id": 132,
+            "pointer": "/groups/0/records/4/traces/131",
+            "kind": "vehicle.receipt",
+            "created_at": "2026-10-14T05:13:35.472850+00:00",
+            "call_id": "call_woeg95ew4oasqhbsm9ludk8z:action_close_rear_left_window"
+          },
+          "receipt_not_stale": true
+        },
+        {
+          "command_pointer": "/groups/0/records/4/commands/2",
+          "receipt_pointer": "/groups/0/records/4/receipts/2",
+          "command_id": "28a7599ed905",
+          "name": "set_window_position",
+          "arguments": {
+            "window": "rear_right",
+            "position": 0
+          },
+          "source": "vehicle_plan",
+          "parent_call_id": "call_woeg95ew4oasqhbsm9ludk8z",
+          "action_id": "action_close_rear_right_window",
+          "intent_id": "intent_close_other_three_windows",
+          "valid_actual_success_receipt": true,
+          "receipt_latency_ms": 14430.559250060469,
+          "dispatch_trace": {
+            "trace_id": 135,
+            "pointer": "/groups/0/records/4/traces/134",
+            "kind": "vehicle.dispatched",
+            "created_at": "2026-10-14T05:13:35.474645+00:00",
+            "call_id": "call_woeg95ew4oasqhbsm9ludk8z:action_close_rear_right_window"
+          },
+          "receipt_trace": {
+            "trace_id": 136,
+            "pointer": "/groups/0/records/4/traces/135",
+            "kind": "vehicle.receipt",
+            "created_at": "2026-10-14T05:13:35.476859+00:00",
+            "call_id": "call_woeg95ew4oasqhbsm9ludk8z:action_close_rear_right_window"
+          },
+          "receipt_not_stale": true
+        }
+      ],
+      "actual_targets": [
+        {
+          "path": "windows.positions.driver",
+          "before": 0,
+          "actual_after": 0,
+          "expected": 0,
+          "matches": true
+        },
+        {
+          "path": "windows.positions.rear_left",
+          "before": 0,
+          "actual_after": 0,
+          "expected": 0,
+          "matches": true
+        },
+        {
+          "path": "windows.positions.rear_right",
+          "before": 0,
+          "actual_after": 0,
+          "expected": 0,
+          "matches": true
+        }
+      ],
+      "actual_keep_checks": [
+        {
+          "path": "windows.positions.front_passenger",
+          "before": 50,
+          "after": 50,
+          "gold": 50,
+          "actually_preserved": true,
+          "precondition_matches_gold": true
+        }
+      ],
+      "computed_changed_paths": [],
+      "extra_changes_outside_fixed_gold": [],
+      "serial_execution_checks": [
+        {
+          "previous_command_id": "f2d1b3f029e5",
+          "next_command_id": "c5ebf0816e44",
+          "previous_receipt_trace_id": 128,
+          "next_dispatch_trace_id": 131,
+          "receipt_before_next_dispatch": true
+        },
+        {
+          "previous_command_id": "c5ebf0816e44",
+          "next_command_id": "28a7599ed905",
+          "previous_receipt_trace_id": 132,
+          "next_dispatch_trace_id": 135,
+          "receipt_before_next_dispatch": true
+        }
+      ],
+      "tasks_before_after_identical": true,
+      "task_pointers": [
+        "/groups/0/records/4/before/tasks",
+        "/groups/0/records/4/after/tasks"
+      ],
+      "final_answer": "主驾车窗关好了。左后排车窗关好了。右后排车窗关好了。要求保持的设置未调整。",
+      "final_wording_matches_actual_receipts_and_holds": true,
+      "final_wording_notes": "逐项对应目标对象、数值与否定保持；不声称额外动作或联网/路线结果。",
+      "latency": {
+        "first_effective_server_ms": 14434.007000178099,
+        "full_turn_server_ms": 14434.039000188932,
+        "full_turn_client_ms": 14434.939,
+        "per_command_receipt_ms": [
+          14422.204167116433,
+          14426.550334086642,
+          14430.559250060469
+        ]
+      },
+      "latency_route": "pro_planning",
+      "raw_assertion_failures": []
+    },
+    {
+      "pointer": "/groups/1/records/0",
+      "group": "dependency_order",
+      "step_id": "window_lock_on",
+      "query": "启用后排车窗童锁。",
+      "session_id": "f102b472ef1149d0",
+      "turn_id": "f0a8541bd256",
+      "raw_pass": true,
+      "human_semantics_and_state_pass": true,
+      "manual_notes": [
+        "Mini委托，Pro首稿即接受，后排车窗童锁false→true；为下一轮建立真实锁定前置条件。"
+      ],
+      "mini_responses": [
+        {
+          "trace_id": 143,
+          "pointer": "/groups/1/records/0/traces/2",
+          "kind": "model.completed",
+          "created_at": "2026-10-14T05:13:37.864070+00:00",
+          "call_id": "a859c1b0a9324e7e8d22241a8c3282c2",
+          "calls": [
+            {
+              "id": "call_q4vf516o1w9uevfaxtmjbx6o",
+              "name": "delegate_vehicle_control",
+              "arguments": {
+                "skill_ids": [
+                  "windows"
+                ]
+              }
+            }
+          ],
+          "content": null,
+          "meta_pointer": "/groups/1/records/0/traces/2/data/meta"
+        }
+      ],
+      "pro_submitted_plans": [
+        {
+          "trace_id": 148,
+          "pointer": "/groups/1/records/0/traces/7",
+          "kind": "model.completed",
+          "created_at": "2026-10-14T05:13:45.466141+00:00",
+          "call_id": "e637b160a5d64fc49abaf70f6a766a50",
+          "tool_call_id": "call_br3tusn7a9qgzhnk8ua16bjb",
+          "status": "planned",
+          "intents": [
+            {
+              "id": "intent_1",
+              "source_text": "启用后排车窗童锁。",
+              "status": "planned",
+              "action_ids": [
+                "action_1"
+              ],
+              "completed_operation_ids": [],
+              "keep_paths": [],
+              "question": "",
+              "reason": ""
+            }
+          ],
+          "actions": [
+            {
+              "id": "action_1",
+              "intent_id": "intent_1",
+              "name": "set_window_child_lock",
+              "arguments": {
+                "enabled": true
+              },
+              "depends_on": []
+            }
+          ],
+          "keep_paths": [],
+          "actions_match_fixed_gold": true,
+          "meta_pointer": "/groups/1/records/0/traces/7/data/meta"
+        }
+      ],
+      "tool_errors_and_recovery": [],
+      "plan_acceptance": [
+        {
+          "trace_id": 154,
+          "pointer": "/groups/1/records/0/traces/13",
+          "kind": "vehicle.plan.accepted",
+          "created_at": "2026-10-14T05:13:45.478439+00:00",
+          "call_id": "call_q4vf516o1w9uevfaxtmjbx6o",
+          "plan_pointer": "/groups/1/records/0/traces/13/data/plan"
+        }
+      ],
+      "plan_completion": [
+        {
+          "trace_id": 159,
+          "pointer": "/groups/1/records/0/traces/18",
+          "kind": "vehicle.plan.completed",
+          "created_at": "2026-10-14T05:13:45.485383+00:00",
+          "call_id": "call_q4vf516o1w9uevfaxtmjbx6o",
+          "status": "completed",
+          "ledger_pointer": "/groups/1/records/0/traces/18/data/ledger"
+        }
+      ],
+      "actual_model_event_counts": {
+        "talker": {
+          "model.started": 1,
+          "model.completed": 1
+        },
+        "vehicle_planner": {
+          "model.started": 1,
+          "model.completed": 1
+        }
+      },
+      "actual_completed_model_ids": {
+        "talker": [
+          "doubao-seed-2-0-mini-260428"
+        ],
+        "vehicle_planner": [
+          "doubao-seed-2-1-pro-260915"
+        ]
+      },
+      "actual_commands_match_gold": true,
+      "actual_commands_and_receipts": [
+        {
+          "command_pointer": "/groups/1/records/0/commands/0",
+          "receipt_pointer": "/groups/1/records/0/receipts/0",
+          "command_id": "b007483a329e",
+          "name": "set_window_child_lock",
+          "arguments": {
+            "enabled": true
+          },
+          "source": "vehicle_plan",
+          "parent_call_id": "call_q4vf516o1w9uevfaxtmjbx6o",
+          "action_id": "action_1",
+          "intent_id": "intent_1",
+          "valid_actual_success_receipt": true,
+          "receipt_latency_ms": 8568.265874870121,
+          "dispatch_trace": {
+            "trace_id": 156,
+            "pointer": "/groups/1/records/0/traces/15",
+            "kind": "vehicle.dispatched",
+            "created_at": "2026-10-14T05:13:45.480855+00:00",
+            "call_id": "call_q4vf516o1w9uevfaxtmjbx6o:action_1"
+          },
+          "receipt_trace": {
+            "trace_id": 157,
+            "pointer": "/groups/1/records/0/traces/16",
+            "kind": "vehicle.receipt",
+            "created_at": "2026-10-14T05:13:45.484388+00:00",
+            "call_id": "call_q4vf516o1w9uevfaxtmjbx6o:action_1"
+          },
+          "receipt_not_stale": true
+        }
+      ],
+      "actual_targets": [
+        {
+          "path": "windows.child_lock",
+          "before": false,
+          "actual_after": true,
+          "expected": true,
+          "matches": true
+        }
+      ],
+      "actual_keep_checks": [],
+      "computed_changed_paths": [
+        "windows.child_lock"
+      ],
+      "extra_changes_outside_fixed_gold": [],
+      "serial_execution_checks": [],
+      "tasks_before_after_identical": true,
+      "task_pointers": [
+        "/groups/1/records/0/before/tasks",
+        "/groups/1/records/0/after/tasks"
+      ],
+      "final_answer": "后排车窗童锁开了。",
+      "final_wording_matches_actual_receipts_and_holds": true,
+      "final_wording_notes": "逐项对应目标对象、数值与否定保持；不声称额外动作或联网/路线结果。",
+      "latency": {
+        "first_effective_server_ms": 8569.756540935487,
+        "full_turn_server_ms": 8569.782166043296,
+        "full_turn_client_ms": 8570.638,
+        "per_command_receipt_ms": [
+          8568.265874870121
+        ]
+      },
+      "latency_route": "pro_planning",
+      "raw_assertion_failures": []
+    },
+    {
+      "pointer": "/groups/1/records/1",
+      "group": "dependency_order",
+      "step_id": "unlock_then_open",
+      "query": "先解除后排车窗童锁，再把左后车窗开到30%，其他设置不变。",
+      "session_id": "f102b472ef1149d0",
+      "turn_id": "103ff5bcfd73",
+      "raw_pass": true,
+      "human_semantics_and_state_pass": true,
+      "manual_notes": [
+        "Pro首稿两动作及depends_on正确，但完全遗漏“其他设置不变”的意图/保持账本，被unaccounted_request_text拒绝；第二稿补保持意图获接受。",
+        "实际before.child_lock=true；先真实解锁回执（trace183），再下发开左后窗30（trace186），再开窗成功回执（trace187）；本轮只有童锁与左后车窗两目标状态变化，所有其余车况实际保持。"
+      ],
+      "mini_responses": [
+        {
+          "trace_id": 164,
+          "pointer": "/groups/1/records/1/traces/23",
+          "kind": "model.completed",
+          "created_at": "2026-10-14T05:13:47.294979+00:00",
+          "call_id": "4563efd8a6e74c918a550e39e81f48a4",
+          "calls": [
+            {
+              "id": "call_tedfitd3brgdstdpc2noj8b0",
+              "name": "delegate_vehicle_control",
+              "arguments": {
+                "skill_ids": [
+                  "windows"
+                ]
+              }
+            }
+          ],
+          "content": null,
+          "meta_pointer": "/groups/1/records/1/traces/23/data/meta"
+        }
+      ],
+      "pro_submitted_plans": [
+        {
+          "trace_id": 169,
+          "pointer": "/groups/1/records/1/traces/28",
+          "kind": "model.completed",
+          "created_at": "2026-10-14T05:13:55.958035+00:00",
+          "call_id": "d917de41ccd74da2ab00c9982564bd8a",
+          "tool_call_id": "call_31f9j8nyvqtkv7knx68iu3vv",
+          "status": "planned",
+          "intents": [
+            {
+              "id": "unlock_rear_window_child_lock",
+              "source_text": "先解除后排车窗童锁",
+              "status": "planned",
+              "action_ids": [
+                "disable_window_child_lock"
+              ],
+              "completed_operation_ids": [],
+              "keep_paths": [],
+              "question": "",
+              "reason": ""
+            },
+            {
+              "id": "open_rear_left_to_30",
+              "source_text": "再把左后车窗开到30%",
+              "status": "planned",
+              "action_ids": [
+                "set_rear_left_window_30"
+              ],
+              "completed_operation_ids": [],
+              "keep_paths": [],
+              "question": "",
+              "reason": ""
+            }
+          ],
+          "actions": [
+            {
+              "id": "disable_window_child_lock",
+              "intent_id": "unlock_rear_window_child_lock",
+              "name": "set_window_child_lock",
+              "arguments": {
+                "enabled": false
+              },
+              "depends_on": []
+            },
+            {
+              "id": "set_rear_left_window_30",
+              "intent_id": "open_rear_left_to_30",
+              "name": "set_window_position",
+              "arguments": {
+                "window": "rear_left",
+                "position": 30
+              },
+              "depends_on": [
+                "disable_window_child_lock"
+              ]
+            }
+          ],
+          "keep_paths": [],
+          "actions_match_fixed_gold": true,
+          "meta_pointer": "/groups/1/records/1/traces/28/data/meta"
+        },
+        {
+          "trace_id": 174,
+          "pointer": "/groups/1/records/1/traces/33",
+          "kind": "model.completed",
+          "created_at": "2026-10-14T05:14:09.614996+00:00",
+          "call_id": "051301eae87d4bd49c4adfe458f1e4ab",
+          "tool_call_id": "call_cf66jpb7c3domqawfyra21am",
+          "status": "planned",
+          "intents": [
+            {
+              "id": "unlock_rear_window_child_lock",
+              "source_text": "先解除后排车窗童锁",
+              "status": "planned",
+              "action_ids": [
+                "disable_window_child_lock"
+              ],
+              "completed_operation_ids": [],
+              "keep_paths": [],
+              "question": "",
+              "reason": ""
+            },
+            {
+              "id": "open_rear_left_to_30",
+              "source_text": "再把左后车窗开到30%",
+              "status": "planned",
+              "action_ids": [
+                "set_rear_left_window_30"
+              ],
+              "completed_operation_ids": [],
+              "keep_paths": [],
+              "question": "",
+              "reason": ""
+            },
+            {
+              "id": "keep_other_settings_unchanged",
+              "source_text": "其他设置不变",
+              "status": "keep",
+              "action_ids": [],
+              "completed_operation_ids": [],
+              "keep_paths": [
+                "windows.positions.driver",
+                "windows.positions.front_passenger",
+                "windows.positions.rear_right",
+                "windows.anti_pinch.driver",
+                "windows.anti_pinch.front_passenger",
+                "windows.anti_pinch.rear_left",
+                "windows.anti_pinch.rear_right",
+                "windows.sunroof",
+                "windows.sunshade",
+                "windows.rain_close"
+              ],
+              "question": "",
+              "reason": ""
+            }
+          ],
+          "actions": [
+            {
+              "id": "disable_window_child_lock",
+              "intent_id": "unlock_rear_window_child_lock",
+              "name": "set_window_child_lock",
+              "arguments": {
+                "enabled": false
+              },
+              "depends_on": []
+            },
+            {
+              "id": "set_rear_left_window_30",
+              "intent_id": "open_rear_left_to_30",
+              "name": "set_window_position",
+              "arguments": {
+                "window": "rear_left",
+                "position": 30
+              },
+              "depends_on": [
+                "disable_window_child_lock"
+              ]
+            }
+          ],
+          "keep_paths": [
+            "windows.positions.driver",
+            "windows.positions.front_passenger",
+            "windows.positions.rear_right",
+            "windows.anti_pinch.driver",
+            "windows.anti_pinch.front_passenger",
+            "windows.anti_pinch.rear_left",
+            "windows.anti_pinch.rear_right",
+            "windows.sunroof",
+            "windows.sunshade",
+            "windows.rain_close"
+          ],
+          "actions_match_fixed_gold": true,
+          "meta_pointer": "/groups/1/records/1/traces/33/data/meta"
+        }
+      ],
+      "tool_errors_and_recovery": [
+        {
+          "trace_id": 172,
+          "pointer": "/groups/1/records/1/traces/31",
+          "kind": "tool.error",
+          "created_at": "2026-10-14T05:13:55.962717+00:00",
+          "call_id": "call_31f9j8nyvqtkv7knx68iu3vv",
+          "name": "submit_vehicle_plan",
+          "result": {
+            "ok": false,
+            "executed": false,
+            "error": "unaccounted_request_text",
+            "retry_model": true
+          }
+        }
+      ],
+      "plan_acceptance": [
+        {
+          "trace_id": 180,
+          "pointer": "/groups/1/records/1/traces/39",
+          "kind": "vehicle.plan.accepted",
+          "created_at": "2026-10-14T05:14:09.644975+00:00",
+          "call_id": "call_tedfitd3brgdstdpc2noj8b0",
+          "plan_pointer": "/groups/1/records/1/traces/39/data/plan"
+        }
+      ],
+      "plan_completion": [
+        {
+          "trace_id": 189,
+          "pointer": "/groups/1/records/1/traces/48",
+          "kind": "vehicle.plan.completed",
+          "created_at": "2026-10-14T05:14:09.659308+00:00",
+          "call_id": "call_tedfitd3brgdstdpc2noj8b0",
+          "status": "completed",
+          "ledger_pointer": "/groups/1/records/1/traces/48/data/ledger"
+        }
+      ],
+      "actual_model_event_counts": {
+        "talker": {
+          "model.started": 1,
+          "model.completed": 1
+        },
+        "vehicle_planner": {
+          "model.started": 2,
+          "model.completed": 2
+        }
+      },
+      "actual_completed_model_ids": {
+        "talker": [
+          "doubao-seed-2-0-mini-260428"
+        ],
+        "vehicle_planner": [
+          "doubao-seed-2-1-pro-260915"
+        ]
+      },
+      "actual_commands_match_gold": true,
+      "actual_commands_and_receipts": [
+        {
+          "command_pointer": "/groups/1/records/1/commands/0",
+          "receipt_pointer": "/groups/1/records/1/receipts/0",
+          "command_id": "14e9b25c87c1",
+          "name": "set_window_child_lock",
+          "arguments": {
+            "enabled": false
+          },
+          "source": "vehicle_plan",
+          "parent_call_id": "call_tedfitd3brgdstdpc2noj8b0",
+          "action_id": "disable_window_child_lock",
+          "intent_id": "unlock_rear_window_child_lock",
+          "valid_actual_success_receipt": true,
+          "receipt_latency_ms": 23588.529707863927,
+          "dispatch_trace": {
+            "trace_id": 182,
+            "pointer": "/groups/1/records/1/traces/41",
+            "kind": "vehicle.dispatched",
+            "created_at": "2026-10-14T05:14:09.647985+00:00",
+            "call_id": "call_tedfitd3brgdstdpc2noj8b0:disable_window_child_lock"
+          },
+          "receipt_trace": {
+            "trace_id": 183,
+            "pointer": "/groups/1/records/1/traces/42",
+            "kind": "vehicle.receipt",
+            "created_at": "2026-10-14T05:14:09.653048+00:00",
+            "call_id": "call_tedfitd3brgdstdpc2noj8b0:disable_window_child_lock"
+          },
+          "receipt_not_stale": true
+        },
+        {
+          "command_pointer": "/groups/1/records/1/commands/1",
+          "receipt_pointer": "/groups/1/records/1/receipts/1",
+          "command_id": "e6edb061a981",
+          "name": "set_window_position",
+          "arguments": {
+            "window": "rear_left",
+            "position": 30
+          },
+          "source": "vehicle_plan",
+          "parent_call_id": "call_tedfitd3brgdstdpc2noj8b0",
+          "action_id": "set_rear_left_window_30",
+          "intent_id": "open_rear_left_to_30",
+          "valid_actual_success_receipt": true,
+          "receipt_latency_ms": 23592.97762485221,
+          "dispatch_trace": {
+            "trace_id": 186,
+            "pointer": "/groups/1/records/1/traces/45",
+            "kind": "vehicle.dispatched",
+            "created_at": "2026-10-14T05:14:09.654933+00:00",
+            "call_id": "call_tedfitd3brgdstdpc2noj8b0:set_rear_left_window_30"
+          },
+          "receipt_trace": {
+            "trace_id": 187,
+            "pointer": "/groups/1/records/1/traces/46",
+            "kind": "vehicle.receipt",
+            "created_at": "2026-10-14T05:14:09.657493+00:00",
+            "call_id": "call_tedfitd3brgdstdpc2noj8b0:set_rear_left_window_30"
+          },
+          "receipt_not_stale": true
+        }
+      ],
+      "actual_targets": [
+        {
+          "path": "windows.child_lock",
+          "before": true,
+          "actual_after": false,
+          "expected": false,
+          "matches": true
+        },
+        {
+          "path": "windows.positions.rear_left",
+          "before": 0,
+          "actual_after": 30,
+          "expected": 30,
+          "matches": true
+        }
+      ],
+      "actual_keep_checks": [],
+      "computed_changed_paths": [
+        "windows.child_lock",
+        "windows.positions.rear_left"
+      ],
+      "extra_changes_outside_fixed_gold": [],
+      "serial_execution_checks": [
+        {
+          "previous_command_id": "14e9b25c87c1",
+          "next_command_id": "e6edb061a981",
+          "previous_receipt_trace_id": 183,
+          "next_dispatch_trace_id": 186,
+          "receipt_before_next_dispatch": true
+        }
+      ],
+      "tasks_before_after_identical": true,
+      "task_pointers": [
+        "/groups/1/records/1/before/tasks",
+        "/groups/1/records/1/after/tasks"
+      ],
+      "final_answer": "后排车窗童锁关了。左后排车窗开到百分之30了。要求保持的设置未调整。",
+      "final_wording_matches_actual_receipts_and_holds": true,
+      "final_wording_notes": "逐项对应目标对象、数值与否定保持；不声称额外动作或联网/路线结果。",
+      "latency": {
+        "first_effective_server_ms": 23595.741624943912,
+        "full_turn_server_ms": 23595.774124842137,
+        "full_turn_client_ms": 23596.635,
+        "per_command_receipt_ms": [
+          23588.529707863927,
+          23592.97762485221
+        ]
+      },
+      "latency_route": "pro_planning",
+      "raw_assertion_failures": []
+    },
+    {
+      "pointer": "/groups/1/records/2",
+      "group": "dependency_order",
+      "step_id": "close_rear",
+      "query": "把左后车窗关上。",
+      "session_id": "f102b472ef1149d0",
+      "turn_id": "4f3afa308305",
+      "raw_pass": true,
+      "human_semantics_and_state_pass": true,
+      "manual_notes": [
+        "Mini单次热调用，左后窗真实30→0，包含非幂等关闭转换；输出对象与已执行事实准确。"
+      ],
+      "mini_responses": [
+        {
+          "trace_id": 194,
+          "pointer": "/groups/1/records/2/traces/53",
+          "kind": "model.completed",
+          "created_at": "2026-10-14T05:14:11.416616+00:00",
+          "call_id": "1983123938644d02958c708e6d80b606",
+          "calls": [
+            {
+              "id": "call_36i46p7ma5cqq1sweshm4rxe",
+              "name": "set_window_position",
+              "arguments": {
+                "window": "rear_left",
+                "position": 0
+              }
+            }
+          ],
+          "content": null,
+          "meta_pointer": "/groups/1/records/2/traces/53/data/meta"
+        }
+      ],
+      "pro_submitted_plans": [],
+      "tool_errors_and_recovery": [],
+      "plan_acceptance": [],
+      "plan_completion": [],
+      "actual_model_event_counts": {
+        "talker": {
+          "model.started": 1,
+          "model.completed": 1
+        }
+      },
+      "actual_completed_model_ids": {
+        "talker": [
+          "doubao-seed-2-0-mini-260428"
+        ]
+      },
+      "actual_commands_match_gold": true,
+      "actual_commands_and_receipts": [
+        {
+          "command_pointer": "/groups/1/records/2/commands/0",
+          "receipt_pointer": "/groups/1/records/2/receipts/0",
+          "command_id": "9aee90534818",
+          "name": "set_window_position",
+          "arguments": {
+            "window": "rear_left",
+            "position": 0
+          },
+          "source": null,
+          "parent_call_id": null,
+          "action_id": null,
+          "intent_id": null,
+          "valid_actual_success_receipt": true,
+          "receipt_latency_ms": 1114.5652499981225,
+          "dispatch_trace": {
+            "trace_id": 196,
+            "pointer": "/groups/1/records/2/traces/55",
+            "kind": "vehicle.dispatched",
+            "created_at": "2026-10-14T05:14:11.420294+00:00",
+            "call_id": "call_36i46p7ma5cqq1sweshm4rxe"
+          },
+          "receipt_trace": {
+            "trace_id": 197,
+            "pointer": "/groups/1/records/2/traces/56",
+            "kind": "vehicle.receipt",
+            "created_at": "2026-10-14T05:14:11.425654+00:00",
+            "call_id": "call_36i46p7ma5cqq1sweshm4rxe"
+          },
+          "receipt_not_stale": true
+        }
+      ],
+      "actual_targets": [
+        {
+          "path": "windows.positions.rear_left",
+          "before": 30,
+          "actual_after": 0,
+          "expected": 0,
+          "matches": true
+        }
+      ],
+      "actual_keep_checks": [],
+      "computed_changed_paths": [
+        "windows.positions.rear_left"
+      ],
+      "extra_changes_outside_fixed_gold": [],
+      "serial_execution_checks": [],
+      "tasks_before_after_identical": true,
+      "task_pointers": [
+        "/groups/1/records/2/before/tasks",
+        "/groups/1/records/2/after/tasks"
+      ],
+      "final_answer": "左后排车窗关好了。",
+      "final_wording_matches_actual_receipts_and_holds": true,
+      "final_wording_notes": "逐项对应目标对象、数值与否定保持；不声称额外动作或联网/路线结果。",
+      "latency": {
+        "first_effective_server_ms": 1115.6682500150055,
+        "full_turn_server_ms": 1115.731833036989,
+        "full_turn_client_ms": 1117.424,
+        "per_command_receipt_ms": [
+          1114.5652499981225
+        ]
+      },
+      "latency_route": "mini_hot",
+      "raw_assertion_failures": []
+    }
+  ]
+}

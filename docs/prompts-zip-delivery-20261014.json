@@ -1,0 +1,144 @@
+{
+  "created_at": "2026-10-14T20:36:04.533141+00:00",
+  "request": "Apply the user supplied prompt rewrite package and restart online services",
+  "plan_archive": "/Users/weitianwen/Downloads/prompts_rewrite.zip",
+  "plan_sha256": "58e40f9b49d27dc08b22e7e526ee8594ae1e33ad46ad9951a22c7b86f5b0fb02",
+  "templates": {
+    "replaced": 15,
+    "exact_to_zip": 14,
+    "only_modified": "backend/prompts/talker.txt",
+    "modification": "Two generic examples under #示例, per README acceptance item 2; no original package lines removed or changed",
+    "diff": "docs/prompts-zip-applied-diff-20261014.txt",
+    "package_template_bytes": 13781,
+    "applied_template_bytes": 14390
+  },
+  "code_changes": [
+    "Remove answer_constraints and its four Turn fields, classification helpers, output gates/retries and speech-routing exceptions",
+    "Remove task-read proof helper and single-example official-task semantic source guard",
+    "Keep generic session task IDs, batching, revision, real receipts and execution checks",
+    "Allow nonempty plain-text auxiliary prompt files with strict variables and startup preloading",
+    "Move required tool specifics to schema/descriptions: manage_task update, seat/window mapping, adjust_temperature side effect, POI relevance ordering"
+  ],
+  "optional_speech_merge_applied": false,
+  "AGENTS_modified": false,
+  "new_regex_calls": 0,
+  "removed_regex_calls": 14,
+  "validation": {
+    "offline_before": {
+      "passed": 1388,
+      "failed": 0,
+      "log": "docs/prompts-zip-before-pytest-20261014.log"
+    },
+    "offline_after": {
+      "passed": 1357,
+      "failed": 0,
+      "reason_for_count_change": "Removed tests for explicitly cancelled gates/classifiers and all-files-heading requirement; added no-gate and plain-text contracts",
+      "log": "docs/prompts-zip-final-pytest-20261014.log"
+    },
+    "frontend_tests": {
+      "passed": 40,
+      "failed": 0,
+      "log": "docs/prompts-zip-frontend-tests-20261014.log"
+    },
+    "frontend_build_passed": true,
+    "control_before": {
+      "planned": 24,
+      "attempted": 24,
+      "passed": 24,
+      "failed": 0,
+      "groups_with_errors": 0
+    },
+    "control_after": {
+      "planned": 24,
+      "attempted": 24,
+      "passed": 24,
+      "failed": 0,
+      "groups_with_errors": 0
+    },
+    "control_before_report": "docs/prompts-zip-control-before-20261014.json",
+    "control_after_report": "docs/prompts-zip-control-after-run2-20261014.json",
+    "empty_startup_attempt_retained": "docs/prompts-zip-control-after-20261014.json",
+    "first_decision_before": {
+      "attempted": 30,
+      "automatic_passed": 23,
+      "manual_reviews_required": 13,
+      "errors": 0
+    },
+    "first_decision_initial_zip": {
+      "attempted": 30,
+      "automatic_passed": 23,
+      "manual_reviews_required": 13,
+      "errors": 0
+    },
+    "first_decision_final": {
+      "attempted": 30,
+      "automatic_passed": 23,
+      "manual_reviews_required": 13,
+      "errors": 0
+    },
+    "comparison": "docs/prompts-zip-final-comparison-20261014.json",
+    "actual_trace_audit": "docs/prompts-zip-trace-audit-20261014.json",
+    "unique_actual_prompt_checks": {
+      "talker": 27,
+      "vehicle_planner": 14
+    },
+    "frontend_build_log": "docs/prompts-zip-frontend-build-20261014.log"
+  },
+  "remaining_observed_failures": [
+    "Waiting hotel task city reply can wrongly call get_weather instead of manage_task reply",
+    "A read-only window question generated a same-value set_window_position in the one-shot replay; no tools were executed in that replay",
+    "Hold exclusions, ambiguous target/pronoun and missing origin/location still have first-decision errors"
+  ],
+  "limits": [
+    "23/30 is automatic first-decision structure/parameter checking, not a guarantee of semantic correctness",
+    "24/24 is actual Mini/Pro and simulated device execution; no ASR/TTS/browser/acoustic latency measurement",
+    "Legacy word-shape-only policy was explicitly removed by the user plan; not imposed as a new product hard rule",
+    "Real model decision suite uses the warm persona only"
+  ],
+  "online_restarted": true,
+  "deployment_report": "docs/prompts-zip-deployment-20261014.json",
+  "source_sha256": {
+    "AGENTS.md": "5acbea6dcdefc50de57e08eb7542886503b3ebb8b50c5b3ee41732df0ac9687f",
+    "backend/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend/app.py": "9072bf5167641553da6ef324ed36d3c0aece51c45b438db595fe20f60d64c013",
+    "backend/asr.py": "91373a01e7980c3573723b375740f4612865b6ab911c1f591684d3e48f61a4d5",
+    "backend/asr_endpoint.py": "980c31ea982199f6d7e09e74aed90eb34290d6d5ad2e86973f403f83fba9c923",
+    "backend/authorization.py": "42174a749ac7e3b889b240d95cfc71c8b4254f775d75c024563db56ceac215ab",
+    "backend/catalog.py": "aa58c55ccd4ec3bec0a2d01300c0eb94b12b6b99f5882238922c3d4b171fa1cc",
+    "backend/conditions.py": "10a50ae48790ce8b564dec03304b04d87eec7b2891dbb87f2e00a72bee21c837",
+    "backend/db.py": "e50669312a9c7b3d25d421654909a1d4e5ea2bcf8981bb202588f089dd4af011",
+    "backend/google_maps.py": "a93951c71badf864f1f16057a5100b5e1bbec1153f3c4e41e5a0831328a8d588",
+    "backend/maps_tools.py": "50fe88d3c24d87a430de044743a55d3507812b2667e9a31f71759853bd0e2a60",
+    "backend/model_context.py": "2756619cd2bdaec385ba39b74ca1107b415a125a77675ffab2706e6fe20bff8d",
+    "backend/models.py": "d5838b3f1cf8ebd5acaeeb0ea442486acd10212cb69e42c3daec26e967b9a3f9",
+    "backend/persona.py": "9b9f96278666c81dc4b74fd54816709ffe5f624789683cde56f6b81006a10020",
+    "backend/prompt_templates.py": "db7870dba00e6d040e8fe3f702c634d74989125155e4bc99d4651065ec63e5d2",
+    "backend/prompts/current_turn.txt": "4132c530891993f74f66c8918cfbe16e6aec1abbef8c71d058c4b3f48c9f10de",
+    "backend/prompts/history_attribution.txt": "74d868f66a2b59fd9a4426c925886071a340585844932d4148edfa22871ff0c3",
+    "backend/prompts/persona.txt": "3f3dc80f4e04e2eb6539ccdc445f96fb66e4dd59841b1310495a429672bf6414",
+    "backend/prompts/planner_retry.txt": "86c0ffb60a9d7d4f9ea9d097455335679e0eaabdcaa096618fc96abcbf406249",
+    "backend/prompts/prewarm.txt": "05e0edb263f87ca77d9c5b427994bfdc9c2d2d84df75a4b42d452ad9c251b465",
+    "backend/prompts/session_snapshot.txt": "b852f1297530f9baec1323702f73ec35628343071c4183f1b9dfba11bf382b96",
+    "backend/prompts/speech_chat.txt": "5aea004d52da55c24d5ab242c181ff2ce2d8e466171897ab5cee98b49f514fe2",
+    "backend/prompts/speech_route.txt": "f2fce148ae1cfde36bb5d2a07d55790708095a2bad1743589b01414fe05fd491",
+    "backend/prompts/talker.txt": "e999dc93ae96efedb22ed4ffc5464ddcbad569cc6e88861948406e1914d81c54",
+    "backend/prompts/task_snapshot_notice.txt": "c1a92b4b38b68a5d87bb084a320e856700b09d2b9967b5817d6235727936433e",
+    "backend/prompts/thinker_quick.txt": "ae8cc00d3938286eb0b45d00d3988649db9f12dce57d1da4b8cee5357f058363",
+    "backend/prompts/thinker_research.txt": "a2444d6921192f87001c4837c7faa90d352505044c611f08a65c85d1c395018f",
+    "backend/prompts/thinker_retry.txt": "7f892909df363284064f5c9ddceb989c8e92d99a39d12404f0b9397610720c32",
+    "backend/prompts/thinker_revision.txt": "f44b64de2c1bce59cfc78ddb25436784ba3d4223aaf41c52d8d1eebae99a3176",
+    "backend/prompts/vehicle_planner.txt": "0417303d1042715086be1ff3421b9bcf08db9263978d1e3f673cbd61f122f58c",
+    "backend/session.py": "ea7e9f3520f8611f69086e0a68ea013a8c5a993e809ac6ce1b231645c26fca18",
+    "backend/settings.py": "4935b334b6500dbcc5a7eabbd1dcb4326896e76f26dcaf8e5dc567b22caa6bb6",
+    "backend/speech_stream.py": "747a8d6cabc5c824db61c1219c42343634a2baae25c3dc98e7254cefe375bf65",
+    "backend/speech_text.py": "5651079f45fdb4d78de741b275583a0b49fd94d9b0d060e986476cb74c7071dd",
+    "backend/tts.py": "c58497a48242be8e5165bdcdc771e50fd598b67ca3f5e860b9e7215875fbe06d",
+    "backend/types.py": "5308c31369af6dc4626150d06e767c766eb90723127910ba170eef2d16acdb00",
+    "backend/vehicle_feedback.py": "96ba16cba851363ae393806dddb71bc52277222d68094bbe2fb7676859562152",
+    "backend/vehicle_planner.py": "4551e4468b85f47e838cd1944f7ad53f994524ae5822195d0b5f8363a986a6d3",
+    "backend/vehicle_simulator.py": "04873dc9bf6fce3d2a25732930cebf0c961f45082b2f8e8c957f198615b022ee",
+    "backend/weather.py": "d8d8e065bd1a304547b065e84878abfb1253893890cb182a6431c1800590fab7",
+    "backend/worker.py": "714a0bd37b62b602b76555df73b068d8633755bb190625443663085f3a4e4cae",
+    "evals/prompts_zip_regressions.json": "8e0bcec03d324a9b4b019c007659077bb2973d1f3969f78826dcbd50985a8f1d"
+  }
+}

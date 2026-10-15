@@ -1,0 +1,120 @@
+{
+  "observed_at": "2026-10-14T19:45:51.782147+00:00",
+  "scope": "P0/P1工程改动及下发即播、成功静默、失败补报",
+  "offline_before": {
+    "cases": [
+      "clarification_budget",
+      "resume_checkpoint"
+    ],
+    "passed": 0,
+    "total": 2,
+    "evidence": "data/engineering-before-eval.txt"
+  },
+  "offline_after": {
+    "backend_regression_passed": 1364,
+    "engineering_cases_passed": 25,
+    "total_passed": 1389,
+    "failed": 0,
+    "frontend_passed": 40,
+    "frontend_failed": 0,
+    "build": "passed"
+  },
+  "live_initial": {
+    "passed": 2,
+    "total": 4,
+    "failures": [
+      "长规划空TTS会话零音频",
+      "聊天路由未遵守格式、长等待零音频"
+    ],
+    "evidence": "engineering-live-initial.json"
+  },
+  "live_after": {
+    "passed": 4,
+    "total": 4,
+    "evidence": "engineering-live.json",
+    "cases": [
+      {
+        "name": "window",
+        "passed": true,
+        "first_nonzero_pcm_ms": 2329.302999889478,
+        "receipt_timings": [
+          {
+            "outbound_ms": 201.0662080720067,
+            "execution_ms": 301.6692087985575,
+            "inbound_ms": 200.26329113170505,
+            "total_ms": 702.9989168513566
+          }
+        ]
+      },
+      {
+        "name": "failure",
+        "passed": true,
+        "first_nonzero_pcm_ms": 7801.158374873921,
+        "receipt_timings": [
+          {
+            "outbound_ms": 201.11533417366445,
+            "execution_ms": 302.16370802372694,
+            "inbound_ms": 201.14837493747473,
+            "total_ms": 704.4277091044933
+          }
+        ]
+      },
+      {
+        "name": "parallel",
+        "passed": true,
+        "first_nonzero_pcm_ms": 12087.834458099678,
+        "receipt_timings": [
+          {
+            "outbound_ms": 201.13183301873505,
+            "execution_ms": 301.9983749836683,
+            "inbound_ms": 200.29062521643937,
+            "total_ms": 703.4211670979857
+          },
+          {
+            "outbound_ms": 201.16004184819758,
+            "execution_ms": 302.7533751446754,
+            "inbound_ms": 200.75799990445375,
+            "total_ms": 704.6715829055756
+          }
+        ]
+      },
+      {
+        "name": "chat",
+        "passed": true,
+        "first_nonzero_pcm_ms": 4061.851582955569,
+        "receipt_timings": []
+      }
+    ]
+  },
+  "browser": {
+    "query": "打开主驾车窗",
+    "dispatch_text_ms": 1309,
+    "first_nonzero_pcm_ms": 1968,
+    "first_nonzero_render_notification_ms": 2014,
+    "receipt_ms": 2045,
+    "speech": "正在为你打开主驾车窗。",
+    "success_silent": true,
+    "played_text_verified": true,
+    "trace": "engineering-browser-trace.json",
+    "screenshot": "engineering-browser.png",
+    "controls_tested": [
+      "speed_kph",
+      "gear",
+      "timezone"
+    ]
+  },
+  "limitations": [
+    "真实首PCM仍未达到1500ms目标；本轮没有声称模型推理提速。",
+    "聊天流式阶段需额外一次模型调用；路由JSON不合规时保守等完整无工具消息。",
+    "播放历史保守保留完整供应商句子，无字级时间戳时不猜半句。",
+    "全双工麦克风与客户端VAD按用户要求留待后续。"
+  ],
+  "invariants": {
+    "new_regex": false,
+    "agents_md_modified": false,
+    "completion_requires_bound_device_receipt": true,
+    "stale_outputs_trace_only": true,
+    "task_status_and_event_transaction": true
+  },
+  "evaluation_clients": "Live HTTP/WS harnesses migrated from vehicle.execute ACK to bound simulator receipts; independent commands dispatched asynchronously."
+}

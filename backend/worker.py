@@ -1,0 +1,993 @@
+"""Independent, bounded Thinker ReAct process.
+
+The worker owns task execution, never the vehicle or conversation actor. SQLite
+transactions finish before every external await. Fake clients are accepted only
+through explicit dependency injection, for deterministic offline harness tests.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+from copy import deepcopy
+from datetime import datetime, timedelta, timezone
+import json
+import logging
+import math
+import os
+import re
+import signal
+import time
+from typing import Any
+from urllib.parse import urlparse
+from uuid import uuid4
+from zoneinfo import ZoneInfo
+
+from jsonschema import Draft202012Validator
+
+from .catalog import SKILLS
+from .prompt_templates import render_prompt
+from .speech_text import brief_result
+
+logger = logging.getLogger(__name__)
+SKILL_GUIDE = "；".join(f"{skill_id}：{SKILLS[skill_id].name}" for skill_id in sorted(SKILLS))
+
+
+def _weather_task(task):
+    """Narrow evidence scope, never a tool selector or a vehicle-temperature router."""
+    context = task.get("context") or {}
+    if context.get("query_domain") == "weather":
+        return True
+    goal = task.get("goal", "")
+    return "天气" in goal or ("气温" in goal and not re.search(r"(?:车内|车里|车厢|座舱|空调).{0,8}气温", goal))
+
+
+def _forecast_raw_matches(record, raw):
+    if not isinstance(record, dict) or not isinstance(raw, dict):
+        return False
+    low, high = record.get("temperature_min"), record.get("temperature_max")
+    daily, units = raw.get("daily") or {}, raw.get("daily_units") or {}
+    return (isinstance(daily, dict) and isinstance(units, dict)
+            and isinstance(record.get("date"), str) and bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", record["date"]))
+            and all(type(value) in (int, float) and math.isfinite(value) for value in (low, high))
+            and low <= high and record.get("unit") == "°C" and bool(record.get("timezone"))
+            and raw.get("timezone") == record["timezone"] and daily.get("time") == [record.get("date")]
+            and daily.get("temperature_2m_min") == [low] and daily.get("temperature_2m_max") == [high]
+            and units.get("temperature_2m_min") == units.get("temperature_2m_max") == "°C")
+
+
+def _verified_forecast_records(observations):
+    return [item["record"] for item in observations if item.get("tool") == "get_weather_forecast"
+            and item.get("ok") is True and item.get("forecast_verified") is True
+            and _forecast_raw_matches(item.get("record", {}), item.get("raw_forecast", {}))]
+
+
+def _weather_numbers(text):
+    """Normalize numerals for validation only; never rewrite the returned prose."""
+    digits = {char: index for index, char in enumerate("零一二三四五六七八九")}
+    digits.update({"〇": 0, "两": 2})
+    def convert(match):
+        value = match.group(); negative = value.startswith("负"); value = value.removeprefix("负")
+        whole, _, fraction = value.partition("点")
+        try:
+            if "百" in whole:
+                return match.group()  # Forecast bounds do not need ambiguous hundred expressions.
+            if "十" in whole:
+                lead, tail = whole.split("十", 1)
+                number = digits.get(lead, 1) * 10 + (digits[tail] if tail else 0)
+            else:
+                number = int("".join(str(digits[char]) for char in whole))
+            if fraction:
+                number += float("0." + "".join(str(digits[char]) for char in fraction))
+            number = -number if negative else number
+            return str(number)
+        except (KeyError, ValueError):
+            return match.group()
+    text = re.sub(r"[负零〇一二两三四五六七八九十百点]+", convert, text)
+    return text.replace("摄氏度", "°C").replace("℃", "°C")
+
+
+def _temperature_claims(text):
+    text = _weather_numbers(text)
+    claims = []
+    atom = r"(-?\d+(?:\.\d+)?)"
+    for match in re.finditer(atom + r"\s*(?:°C|度)?\s*(?:至|到|[~～–—-])\s*" + atom + r"\s*(?:°C|度)", text, re.I):
+        claims.extend([("minimum", float(match[1])), ("maximum", float(match[2]))])
+    for label, role in (("最低", "minimum"), ("最高", "maximum")):
+        for match in re.finditer(label + r"(?:气温|温度)?[^\d-]{0,6}" + atom, text):
+            if re.match(r"-\d{2}-\d{2}\b", text[match.end():]):
+                continue  # An ISO date following an unavailable field is not a temperature.
+            claims.append((role, float(match[1])))
+    for match in re.finditer(atom + r"\s*(?:°C|°F|度|华氏度)", text, re.I):
+        claims.append(("value", float(match[1])))
+    return text, claims
+
+
+def _official_limit(text):
+    return bool(re.search(r"(?:官网|官方|法国气象局|Météo[- ]?France).{0,25}(?:未|没有|没能|无法|不能|尚未)|(?:未|没有|没能|无法|不能|尚未).{0,25}(?:官网|官方|法国气象局|Météo[- ]?France)", text, re.I))
+
+
+def _required_source_domains(task):
+    if not _weather_task(task):
+        return []
+    domains = list((task.get('context') or {}).get('required_source_domains') or [])
+    if re.search(r'法国气象局|Météo[- ]?France|meteofrance\.(?:com|fr)', task.get('goal', ''), re.I):
+        domains.append('meteofrance.com')
+    return list(dict.fromkeys(domains))
+
+
+def _redundant_source_url_question(task, question):
+    """Recognize only a URL-only request for an already identified weather source.
+
+    This checks the claimed missing condition; it does not select or invoke an
+    evidence tool. Unknown wording and mixed city/date questions remain valid
+    clarification requests.
+    """
+    if (task.get("context") or {}).get("query_mode") != "quick":
+        return []
+    domains = _required_source_domains(task)
+    if not domains or not isinstance(question, str):
+        return []
+    parts = re.split(r"[，,]", question.strip(), maxsplit=1)
+    if len(parts) == 2 and not re.fullmatch(
+            r"\s*(?:以便|方便|用于)[^，,；;。！？!?]*(?:[。.!！])?\s*", parts[1]):
+        return []
+    head = parts[0].strip().rstrip("。！？.!?").strip()
+    source = (r"(?:法国气象局|Météo[- ]?France|气象局|官方|官网|网站|网页|来源|"
+              r"指定|具体|准确|完整|该|这个|的|您|你|\s|"
+              + "|".join(re.escape(domain) for domain in domains) + r")*")
+    request = (r"(?:请|麻烦|能否|可否|能不能|可以)?(?:您|你)?"
+               r"(?:提供|告知|给我|告诉我|发给我|补充)(?:一下)?\s*"
+               + source + r"(?:网址|URL|链接|网站地址)(?:吗|呢|可以吗)?")
+    return domains if re.fullmatch(request, head, re.I) else []
+
+
+class RedundantSourceURL(ValueError):
+    def __init__(self, domains):
+        self.domains = domains
+        super().__init__("官方来源域名已确定（" + "、".join(domains)
+                         + "），无需用户补充官网网址；请使用现有证据工具核实，不能确认则如实说明。"
+                           "城市或日期确实不明确时仍可澄清。")
+
+
+def _source_in_domains(url, domains):
+    host = (urlparse(url).hostname or '').lower()
+    return any(host == domain.lower() or host.endswith('.' + domain.lower()) for domain in domains)
+
+
+def _weather_finish_guard(args, task, sources, observations):
+    if not _weather_task(task):
+        return
+    goal = task.get("goal", "")
+    domains = _required_source_domains(task)
+    records = _verified_forecast_records(observations)
+    urls = args.get("source_urls", list(sources)[:20])
+    adopted = [record for record in records if record.get("source_url") in urls]
+    bodies = (args["summary"], args.get("spoken_summary") or args["summary"])
+    for body in bodies:
+        normalized, claims = _temperature_claims(body)
+        if claims and not adopted:
+            raise ValueError("天气温度数字须有本版本成功get_weather_forecast及一致raw记录；请核实后再finish，未核实说明不能豁免数字。")
+        if claims and re.search(r"°F|华氏", normalized, re.I):
+            raise ValueError("天气数字须保留实际forecast的摄氏单位，不能混用华氏数值。")
+        if claims and domains and not re.search(r"open[- ]?meteo", body, re.I) and not _official_limit(body):
+            raise ValueError("指定官网任务的实际温度来自Open-Meteo；报告和口语须明确提供方或说明官网温度未核实，不能混淆来源。")
+        tolerance = .51 if re.search(r"大约|约合|大概|约\s*[-\d]|about|approximately", normalized, re.I) else 1e-6
+        for role, value in claims:
+            key = "temperature_min" if role == "minimum" else "temperature_max"
+            if not any(abs(value - record[key]) <= tolerance if role != "value" else
+                       min(abs(value - record["temperature_min"]), abs(value - record["temperature_max"])) <= tolerance for record in adopted):
+                raise ValueError("天气报告的温度数字与本版本实际forecast最低/最高值不一致，不能提交未观测数值。")
+        # Explicit forecast dates must match adopted observations; query/update
+        # timestamps are metadata, not claims about the forecast day.
+        for clause in re.split(r"[，,。；;\n]", normalized):
+            for mention in re.finditer(r"(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)", clause):
+                if re.search(r"(?:查询时间|读取时间|更新于|更新时间)[：:\s]*$", clause[:mention.start()]):
+                    continue
+                if claims and adopted and mention.group() not in {record["date"] for record in adopted}:
+                    raise ValueError("天气报告日期与实际forecast日期不一致。")
+        if claims and re.search(r"明天|后天|今天", task.get("goal", "")):
+            captured = (task.get("context") or {}).get("captured_at")
+            if captured:
+                offset = 2 if "后天" in task["goal"] else 1 if "明天" in task["goal"] else 0
+                if not any(record["date"] == (datetime.fromisoformat(captured.replace("Z", "+00:00")).astimezone(
+                        ZoneInfo(record["timezone"])).date() + timedelta(days=offset)).isoformat() for record in adopted):
+                    raise ValueError("实际forecast日期不符合本版本任务的当地目标日。")
+        for clause in re.split(r"[，,。；;\n]", body):
+            official_name = re.search(r"官方|官网|法国气象局|Météo[- ]?France", clause, re.I)
+            # A separate sentence may explicitly attribute the preceding
+            # temperatures, but merely saying a page was consulted is not
+            # a temperature attribution.
+            attribution = re.search(r"^(?:该)?(?:数字|数据|温度|气温|预报)?(?:来自|出自|来源(?:于|为|是)?)", clause.strip())
+            if (claims and official_name and (_temperature_claims(clause)[1] or attribution)
+                    and not _official_limit(clause) and not re.search(r"并非|不是|非官方|不属于", clause)):
+                raise ValueError("实际Open-Meteo温度不能标为气象局官方数值；官网读取不等于核实该温度。")
+            if re.search(r"open[- ]?meteo", clause, re.I) and re.search(r"官方|法国气象局|Météo[- ]?France", clause, re.I):
+                if not _official_limit(clause) and not re.search(r"并非|不是|非官方|不属于", clause):
+                    raise ValueError("Open-Meteo不是法国气象局官网预报，不能标为官方来源。")
+    for domain in set(domains):
+        official = [source for source in sources.values() if source.get("extracted") is True and
+                    ((urlparse(source.get("url", "")).hostname or "") == domain or
+                     (urlparse(source.get("url", "")).hostname or "").endswith("." + domain))]
+        if not official and not all(_official_limit(body) for body in bodies):
+            raise ValueError("未真实读取任务要求的官方域名页面；请在预算内核实，或在完整报告和口语中明确官方来源未完整核实，不得称已查询确认。")
+
+
+def _object(properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
+    return {"type": "object", "properties": properties, "required": required,
+            "additionalProperties": False}
+
+
+def _tool(name: str, description: str, parameters: dict[str, Any]) -> dict[str, Any]:
+    return {"type": "function", "function": {
+        "name": name, "description": description, "parameters": parameters}}
+
+
+THINKER_TOOLS = [
+    _tool("search_web", "真实 Tavily 网络搜索。返回来源 URL 和本次查询时间；不能用记忆替代实时检索。",
+          _object({"query": {"type": "string", "minLength": 1, "maxLength": 1500},
+                   "max_results": {"type": "integer", "minimum": 1, "maximum": 5}}, ["query"])),
+    _tool("extract_web", "真实 Tavily Extract 读取已经搜索获得的页面，核实与任务相关的信息。",
+          _object({"urls": {"type": "array", "items": {"type": "string", "minLength": 8},
+                            "minItems": 1, "maxItems": 5, "uniqueItems": True}}, ["urls"])),
+    _tool("load_skill", "查看一个车辆子系统的详细说明、函数和参数schema。",
+          _object({"skill_id": {"type": "string", "enum": sorted(SKILLS)}}, ["skill_id"])),
+    _tool("ask_clarification", "必要条件不足时只问一个关键问题，用简短自然口语提问并暂停任务；释放并发名额，收到答复后继续。",
+          _object({"question": {"type": "string", "minLength": 1, "maxLength": 1500}}, ["question"])),
+    _tool("suggest_vehicle_action", "提出一个模拟车辆动作建议。只保存建议，由会话层结合最新车况重新校验执行。",
+          _object({"name": {"type": "string", "minLength": 1, "maxLength": 120},
+                   "arguments": {"type": "object"},
+                   "reason": {"type": "string", "minLength": 1, "maxLength": 1500}},
+                  ["name", "arguments", "reason"])),
+    _tool("finish_task", "同时提交完整报告summary与简短口语spoken_summary，不增加润色步骤。只能引用本任务真实搜索/读取过的来源。",
+          _object({"summary": {"type": "string", "minLength": 1, "maxLength": 12000},
+                   "spoken_summary": {"type": "string", "minLength": 1, "maxLength": 2000,
+                                      "pattern": r"[\s\S]*\S[\s\S]*",
+                                      "description": "中性自然口语，先说最有用的结论，通常30至100字、1至3句。不要Markdown、列表、表格、URL、引用标记、JSON或任务/工具编号。保留必要的未核实、尚未执行等限制。"},
+                   "reuse_prior_evidence": {"type": "boolean", "description": "仅在核对已有真实资料仍完整支持本次补充条件后为true；否则必须补查。"},
+                   "source_urls": {"type": "array", "items": {"type": "string"}, "maxItems": 20,
+                                   "uniqueItems": True}}, ["summary"])),
+]
+FORECAST_TOOL = _tool("get_weather_forecast", "查询明确城市和日期的真实结构化天气预报（Open-Meteo），只提供日最低/最高气温，不提供雨晴、降水或风力，不得由温度推断这些现象。未来温度优先此工具，历史记录或气候平均值不能当未来预报。城市不明确需澄清；本工具不能冒充用户指定的气象局官网。",
+    _object({"city": {"type": "string", "minLength": 1, "maxLength": 120},
+             "date": {"type": "string", "pattern": r"^\d{4}-\d{2}-\d{2}$", "description": "目标城市当地日期YYYY-MM-DD；按当前时间与用户所指日期填写"},
+             "country_code": {"type": "string", "pattern": r"^[A-Za-z]{2}$", "description": "用户已明确的ISO两字母国家代码，用于区分同名城市；不猜测"}}, ["city", "date"]))
+THINKER_TOOLS.append(FORECAST_TOOL)
+TOOL_SCHEMAS = {tool["function"]["name"]: tool["function"]["parameters"] for tool in THINKER_TOOLS}
+LOOKUP_TOOL = _tool("lookup_web", "快速实时核实：真实Search后按相关性排序读取前两个实际来源页面，一次返回完整搜索和Extract材料。",
+    _object({"query": {"type": "string", "minLength": 1, "maxLength": 1500},
+             "max_results": {"type": "integer", "minimum": 1, "maximum": 3}}, ["query"]))
+QUICK_TOOLS = [FORECAST_TOOL, LOOKUP_TOOL] + [tool for tool in THINKER_TOOLS
+    if tool["function"]["name"] in {"ask_clarification", "finish_task"}]
+TOOL_SCHEMAS["lookup_web"] = LOOKUP_TOOL["function"]["parameters"]
+QUICK_PROMPT = render_prompt("thinker_quick")
+SYSTEM_PROMPT = render_prompt("thinker_research", skill_guide=SKILL_GUIDE)
+
+
+class RevisionChanged(Exception):
+    def __init__(self, task: dict[str, Any]):
+        self.task = task
+
+
+class TaskCancelled(Exception):
+    pass
+
+
+def _safe_error(exc: BaseException, max_length: int | None = 500) -> str:
+    """Never let provider diagnostics disclose credentials in cards or logs."""
+    value = str(exc)
+    for variable in ("ARK_API_KEY", "TAVILY_API_KEY", "OPENAI_API_KEY"):
+        secret = os.getenv(variable)
+        if secret:
+            value = value.replace(secret, "[redacted]")
+    value = re.sub(r"(?i)bearer\s+[^\s,;]+", "Bearer [redacted]", value)
+    value = re.sub(r"\b(?:sk|tvly)-[A-Za-z0-9_-]{10,}", "[redacted]", value)
+    return f"{type(exc).__name__}: {value if max_length is None else value[:max_length]}"
+
+
+class ThinkerWorker:
+    def __init__(self, db: Any, ark: Any = None, tavily: Any = None, *,
+                 max_steps: int = 20, timeout_seconds: float = 300,
+                 concurrency: int = 2,
+                 catalog: dict[str, Any] | None = None,
+                 tool_timeout_seconds: float | None = None,
+                 quick_max_steps: int = 4, quick_timeout_seconds: float = 45, weather: Any = None):
+        self.db = db
+        if ark is None or tavily is None:
+            from .models import ArkClient, TavilyClient
+            ark = ark or ArkClient()
+            tavily = tavily or TavilyClient()
+        self.ark, self.tavily = ark, tavily
+        self.weather = weather
+        self.max_steps = max(1, min(20, max_steps))
+        self.timeout_seconds = max(0.01, min(300, timeout_seconds))
+        self.concurrency = max(1, concurrency)
+        self.quick_max_steps = max(1, min(self.max_steps, 4, quick_max_steps))
+        self.quick_timeout_seconds = max(0.01, min(45, quick_timeout_seconds))
+        self.tool_timeout_seconds = max(0.01, tool_timeout_seconds if tool_timeout_seconds is not None
+                                        else float(os.getenv("TOOL_TIMEOUT_SECONDS", "35")))
+        self.catalog = catalog
+        self._stopping = asyncio.Event()
+        self._active: dict[str, asyncio.Task] = {}
+
+    def stop(self) -> None:
+        self._stopping.set()
+
+    async def run_forever(self, poll_interval: float = 0.15) -> None:
+        """Claim only free slots. Clarification returns immediately to this loop."""
+        try:
+            while not self._stopping.is_set():
+                for task_id, future in list(self._active.items()):
+                    if future.done():
+                        # run_task handles ordinary failures, but surface unexpected ones.
+                        if not future.cancelled() and future.exception():
+                            logger.error("Thinker task failed unexpectedly: %s", _safe_error(future.exception()))
+                        del self._active[task_id]
+                # A queued task can be cancelled before any worker claims it.
+                # Database.apply_pending is also used by mutate_task in the actor.
+                while len(self._active) < self.concurrency and not self._stopping.is_set():
+                    task = self.db.claim_next(exclude_ids=tuple(self._active))
+                    if task is None:
+                        break
+                    if task["id"] in self._active:
+                        # A cancelling task remains claimable until its currently
+                        # active coroutine reaches a boundary. Yield to it.
+                        break
+                    self._active[task["id"]] = asyncio.create_task(self.run_task(task))
+                expire = getattr(self.db, "expire_tasks", None)
+                if expire:
+                    expire(self.timeout_seconds)
+                try:
+                    await asyncio.wait_for(self._stopping.wait(), timeout=poll_interval)
+                except asyncio.TimeoutError:
+                    pass
+        finally:
+            for future in self._active.values():
+                future.cancel()
+            await asyncio.gather(*self._active.values(), return_exceptions=True)
+
+    def _boundary(self, task_id: str, revision: int | None = None) -> dict[str, Any]:
+        task = self.db.apply_pending(task_id)
+        if not task:
+            raise RuntimeError("Task no longer exists")
+        if task["status"] in ("cancelling", "cancelled"):
+            self.db.save_task(task_id, task["revision"], status="cancelled", summary="任务已取消。", question=None)
+            raise TaskCancelled()
+        if task["status"] in ("completed", "failed"):
+            # A concurrent deadline sweep may have closed this task while an
+            # external request was in flight. Never resurrect it.
+            raise TaskCancelled()
+        if revision is not None and task["revision"] != revision:
+            raise RevisionChanged(task)
+        return task
+
+    def _save(self, task_id: str, revision: int, **fields: Any) -> None:
+        if not self.db.save_task(task_id, revision, **fields):
+            raise RevisionChanged(self._boundary(task_id))
+
+    def _messages(self, task: dict[str, Any]) -> list[dict[str, Any]]:
+        # A new goal starts with a fresh context; revisions resume checkpoints.
+        context = {"goal": task["goal"], "constraints": task.get("constraints", []),
+                   "revision": task["revision"], "query_mode": self._query_mode(task),
+                   "current_utc": datetime.now(timezone.utc).isoformat()}
+        if task.get("context"):
+            context["context"] = task["context"]
+        # apply_pending may store a user's reply in transcript or a replies field.
+        if task.get("replies"):
+            context["user_replies"] = task["replies"]
+        prompt = QUICK_PROMPT if self._query_mode(task) == "quick" else SYSTEM_PROMPT
+        return [{"role": "system", "content": prompt},
+                {"role": "user", "content": json.dumps(context, ensure_ascii=False)}]
+
+    @staticmethod
+    def _query_mode(task: dict[str, Any]) -> str:
+        # The delegating model chooses this field; no goal-keyword routing.
+        return "quick" if (task.get("context") or {}).get("query_mode") == "quick" else "research"
+
+    def _quick_usage(self, task: dict[str, Any]) -> tuple[float, int]:
+        elapsed, lookups, cursor = 0.0, 0, 0
+        while True:
+            rows = self.db.traces_after(task["session_id"], after_id=cursor, task_id=task["id"])
+            for row in rows:
+                data = row["data"]
+                if row["kind"] == "task.execution.finished" and data.get("query_mode") == "quick":
+                    elapsed += max(0, float(data.get("elapsed_seconds", 0)))
+                if row["kind"] == "tool.started" and data.get("name") == "lookup_web":
+                    lookups += 1
+            if len(rows) < 200:
+                return elapsed, lookups
+            cursor = rows[-1]["trace_id"]
+
+    def _trace(self, task: dict[str, Any], kind: str, data: dict[str, Any], *,
+               revision: int | None = None, step: int | None = None,
+               call_id: str | None = None, status: str | None = None,
+               model_call_id: str | None = None) -> dict[str, Any]:
+        # append_trace completes its own short transaction before any await.
+        # Record only model inputs/outputs, never client headers or configuration.
+        return self.db.append_trace(task["session_id"], kind,
+            {"agent": "thinker", "model_call_index": step, "model_call_id": model_call_id,
+             "observed_at": datetime.now(timezone.utc).isoformat(), **data},
+            task_id=task["id"], revision=revision if revision is not None else task["revision"],
+            turn_id=(task.get("context") or {}).get("origin_turn_id") or
+                    (task.get("context") or {}).get("turn_id"), step=step,
+            call_id=call_id, status=status)
+
+    def _response_status(self, task_id: str, revision: int, default: str) -> str:
+        latest = self.db.get_task(task_id)
+        if not latest or latest['revision'] != revision or latest['status'] in {
+                'cancelling', 'cancelled', 'completed', 'failed'}:
+            return 'stale'
+        return default
+
+    @staticmethod
+    def _has_current_attempt(observations: list[dict[str, Any]]) -> bool:
+        return any(item.get("attempted") is True and item.get("tool") in {
+            "search_web", "extract_web", "get_weather_forecast"} for item in observations)
+
+    async def run_task(self, task: dict[str, Any]) -> None:
+        started = time.perf_counter()
+        mode = self._query_mode(task)
+        deadline_reason = "running_budget"
+        try:
+            # Waiting/queued time never consumes the cumulative running budget.
+            remaining = self.timeout_seconds - self.db.running_elapsed(task)
+            if remaining <= 0:
+                raise asyncio.TimeoutError()
+            if mode == "quick":
+                spent, _ = self._quick_usage(task)
+                execution_remaining = self.quick_timeout_seconds - spent
+                if execution_remaining < remaining:
+                    remaining, deadline_reason = execution_remaining, "quick_execution_budget"
+                if remaining <= 0:
+                    raise asyncio.TimeoutError()
+            await asyncio.wait_for(self._run_task(task), remaining)
+        except TaskCancelled:
+            return
+        except asyncio.TimeoutError:
+            current = self.db.get_task(task["id"]) or task
+            self._trace(current, "task.timeout", {"reason": deadline_reason, "query_mode": mode},
+                        step=current.get("steps"), status="failed")
+            error = (f"快速查询累计执行超过{self.quick_timeout_seconds:g}秒时间上限，已停止；没有宣称完成。"
+                     if deadline_reason == "quick_execution_budget" else "任务超过时间上限，已停止；没有宣称完成。")
+            self._fail_current(task["id"], error)
+        except asyncio.CancelledError:
+            # Process shutdown is outside the promised continuous-online scope.
+            self._trace(task, "worker.interrupted", {"reason": "worker_coroutine_cancelled"},
+                        step=task.get("steps"), status="cancelled")
+            raise
+        except Exception as exc:
+            # Unexpected setup errors still belong to the claimed revision. An
+            # old failure must never terminate subsequently updated conditions.
+            self._trace(task, "step.error", {"error": _safe_error(exc, None), "phase": "setup"},
+                        step=task.get("steps"), status="error")
+            self._fail_revision(task["id"], task["revision"], _safe_error(exc))
+        finally:
+            if mode == "quick":
+                current = self.db.get_task(task["id"]) or task
+                self._trace(current, "task.execution.finished", {"query_mode": mode,
+                    "elapsed_seconds": time.perf_counter() - started},
+                    step=current.get("steps"), status=current["status"])
+
+    def _fail_revision(self, task_id: str, revision: int, error: str) -> bool:
+        """Return False if the failing work became stale and should be retried."""
+        try:
+            self._boundary(task_id, revision)
+            return self.db.save_task(task_id, revision, status="failed", error=error,
+                                     summary="任务未完成。" + error, question=None)
+        except RevisionChanged:
+            return False
+        except TaskCancelled:
+            return True
+
+    def _fail_current(self, task_id: str, error: str) -> None:
+        try:
+            current = self._boundary(task_id)
+            self.db.save_task(task_id, current["revision"], status="failed", error=error,
+                              summary="任务未完成。" + error, question=None)
+        except TaskCancelled:
+            pass
+
+    async def _run_task(self, task: dict[str, Any]) -> None:
+        task_id = task["id"]
+        current = self._boundary(task_id)
+        revision = -1
+        messages: list[dict[str, Any]] = []
+        sources: dict[str, dict[str, Any]] = {}
+        suggestions: list[dict[str, Any]] = []
+        observations: list[dict[str, Any]] = []
+        tool_count = 0
+        _, lookup_count = self._quick_usage(current) if self._query_mode(current) == "quick" else (0, 0)
+        for step in range(int(current.get("steps", 0)) + 1, self.max_steps + 1):
+            phase = "boundary"
+            model_call_id = None
+            try:
+                current = self._boundary(task_id)
+                mode = self._query_mode(current)
+                step_limit = self.quick_max_steps if mode == "quick" else self.max_steps
+                if step > step_limit:
+                    self._fail_current(task_id, "任务达到推理步骤上限，已停止；没有宣称完成。")
+                    return
+                tools = QUICK_TOOLS if mode == "quick" else THINKER_TOOLS
+                thinker = mode != "quick"
+                options = {}
+                if mode == "quick":
+                    options["tool_choice"] = "required"
+                    if step == step_limit:
+                        tools = [tool for tool in QUICK_TOOLS if tool["function"]["name"] == "finish_task"]
+                        options["tool_choice"] = {"type": "function", "function": {"name": "finish_task"}}
+                    elif lookup_count >= 2:
+                        tools = [tool for tool in QUICK_TOOLS if tool["function"]["name"] in {"get_weather_forecast", "finish_task"}]
+                if revision != current["revision"]:
+                    previous_revision = revision if revision >= 0 else None
+                    revision = current["revision"]
+                    checkpoint = current.get('checkpoint') or {}
+                    restored = checkpoint.get('goal') == current['goal'] and bool(checkpoint.get('messages'))
+                    if restored:
+                        messages = deepcopy(checkpoint['messages'])
+                        sources = {item['url']: deepcopy(item) for item in checkpoint.get('sources', [])}
+                        suggestions = deepcopy(checkpoint.get('suggestions', []))
+                        observations = deepcopy(checkpoint.get('observations', []))
+                        if checkpoint.get('revision') != revision:
+                            for observation in observations:
+                                observation['attempted'] = False
+                                observation['from_revision'] = checkpoint.get('revision')
+                        tool_count = checkpoint.get('tool_count', 0)
+                        prior_count = checkpoint.get('constraint_count', 0)
+                        additions = current.get('constraints', [])[prior_count:]
+                        if additions:
+                            messages.append({'role': 'user', 'content': json.dumps({
+                                'revision': revision, 'additional_conditions': additions, 'current_utc': datetime.now(timezone.utc).isoformat(),
+                                'instruction': render_prompt('thinker_revision')}, ensure_ascii=False)})
+                    else:
+                        messages = self._messages(current)
+                        sources, suggestions, observations = {}, [], []
+                        tool_count = 0
+                    self._trace(current, "revision.started", {"previous_revision": previous_revision,
+                                "checkpoint_restored": restored,
+                                "source_count": len(sources)}, revision=revision, step=step, status="running")
+                if (mode == "quick" and step < step_limit
+                        and (current.get("context") or {}).get("query_domain") == "weather"):
+                    forecast_attempted = any(item.get("tool") == "get_weather_forecast"
+                                             and item.get("attempted") is True for item in observations)
+                    records = _verified_forecast_records(observations)
+                    domains = _required_source_domains(current)
+                    if not forecast_attempted:
+                        available = {"get_weather_forecast", "ask_clarification"}
+                    elif not records:
+                        available = {"finish_task", "ask_clarification"}
+                    elif domains and lookup_count < 2 and not all(any(
+                            source.get("extracted") is True and _source_in_domains(source.get("url", ""), [domain])
+                            for source in sources.values()) for domain in domains):
+                        available = {"lookup_web", "ask_clarification"}
+                    else:
+                        available = None
+                    if available is not None:
+                        tools = [tool for tool in QUICK_TOOLS if tool["function"]["name"] in available]
+                if mode == "quick" and lookup_count >= 2 and not sources and not self._has_current_attempt(observations) and (
+                        not _weather_task(current) or step == step_limit):
+                    error = "快速查询预算已用尽，新条件尚未进行真实核实；任务未完成，请新建任务重新查询。"
+                    self._trace(current, "task.budget_exhausted", {"reason": "quick_lookup_budget",
+                        "lookup_limit": 2, "current_revision_attempts": 0}, revision=revision,
+                        step=current.get("steps"), status="failed")
+                    self._save(task_id, revision, status="failed", error=error, summary=error,
+                               result=None, sources=[], transcript=messages, question=None)
+                    return
+                self._save(task_id, revision, status="running", steps=step, error=None,
+                           summary=f"正在推理，第 {step} 步。", question=None)
+                self._trace(current, "step.started", {}, revision=revision, step=step, status="running")
+                phase = "model"
+                model_call_id = uuid4().hex
+                self._trace(current, "model.started", {"request": {
+                    "messages": deepcopy(messages), "tools": tools, "thinker": thinker, **options}, "query_mode": mode},
+                    revision=revision, step=step, call_id=model_call_id,
+                    model_call_id=model_call_id, status="running")
+                try:
+                    response = await self.ark.complete(deepcopy(messages), tools=tools, thinker=thinker, **options)
+                except asyncio.CancelledError as exc:
+                    self._trace(current, "model.error", {"error": _safe_error(exc, None),
+                                "partial": getattr(exc, 'trace_partial', None)}, revision=revision,
+                                step=step, call_id=model_call_id, model_call_id=model_call_id, status="cancelled")
+                    raise
+                except Exception as exc:
+                    self._trace(current, "model.error", {"error": _safe_error(exc, None),
+                                "partial": getattr(exc, 'trace_partial', None)}, revision=revision,
+                                step=step, call_id=model_call_id, model_call_id=model_call_id,
+                                status=self._response_status(task_id, revision, 'error'))
+                    raise
+                # Preserve the full response before checking whether it became
+                # stale. Provider metadata is diagnostic data, never a message.
+                response = deepcopy(response)
+                meta = response.pop("_meta", {}) if isinstance(response, dict) else {}
+                self._trace(current, "model.completed", {"message": response, "meta": meta},
+                            revision=revision, step=step, call_id=model_call_id,
+                            model_call_id=model_call_id, status=self._response_status(task_id, revision, 'received'))
+                self._boundary(task_id, revision)
+                if not isinstance(response, dict):
+                    raise RuntimeError("Thinker returned a malformed message")
+                message = {"role": "assistant", "content": response.get("content")}
+                calls = response.get("tool_calls") or []
+                if calls:
+                    message["tool_calls"] = calls
+                messages.append(message)
+                if not calls:
+                    # Ask once for a structured terminal result instead of silently
+                    # treating unsupported model text as successful research.
+                    messages.append({"role": "user", "content": render_prompt("thinker_retry")})
+                    self._save(task_id, revision, transcript=messages)
+                    continue
+                if not isinstance(calls, list) or len(calls) > 8:
+                    raise RuntimeError("Thinker returned too many or malformed tool calls")
+                terminal: tuple[str, dict[str, Any]] | None = None
+                for index, call in enumerate(calls):
+                    phase = "tool"
+                    self._boundary(task_id, revision)
+                    tool_count += 1
+                    if tool_count > step_limit:
+                        raise RuntimeError("任务达到工具步骤上限，未完成。")
+                    function = call.get("function", {})
+                    name = function.get("name", "")
+                    call_id = call.get("id", f"step{step}_{index}")
+                    arguments = function.get("arguments", "{}")
+                    actual_attempt = False
+                    self._trace(current, "tool.started", {"name": name, "call": call,
+                                "arguments": arguments}, revision=revision, step=step,
+                                call_id=call_id, model_call_id=model_call_id, status="running")
+                    try:
+                        arguments = json.loads(arguments) if isinstance(arguments, str) else arguments
+                        if name not in {item["function"]["name"] for item in tools}:
+                            raise ValueError(f"Unknown tool: {name}")
+                        errors = sorted(Draft202012Validator(TOOL_SCHEMAS[name]).iter_errors(arguments),
+                                        key=lambda item: str(list(item.path)))
+                        if errors:
+                            raise ValueError("参数校验失败：" + errors[0].message)
+                        if terminal:
+                            result = {"ok": False, "error": "本轮已提交终止操作，剩余调用未执行。"}
+                        else:
+                            self._save(task_id, revision, summary=self._progress(name, arguments))
+                            if name == "lookup_web":
+                                lookup_count += 1
+                                if lookup_count > 2:
+                                    raise ValueError("快速查询最多两次lookup，请根据实际材料finish_task，不能确认就如实说明。")
+                                operation = self._quick_lookup(arguments, sources, suggestions, observations,
+                                    current, revision, step, model_call_id, call_id)
+                            else:
+                                if name == "ask_clarification":
+                                    domains = _redundant_source_url_question(current, arguments["question"])
+                                    if domains:
+                                        raise RedundantSourceURL(domains)
+                                if (mode == "quick" and name == "finish_task" and not self._has_current_attempt(observations)
+                                        and not (arguments.get("reuse_prior_evidence") is True and sources
+                                                 and any(source.get("extracted") or source.get("verified") for source in sources.values()))):
+                                    raise ValueError("当前版本须先lookup_web或get_weather_forecast真实核实；旧版本查询不能完成新条件。必要条件不足请ask_clarification。")
+                                if name == "finish_task":
+                                    _weather_finish_guard(arguments, current, sources, observations)
+                                operation = self._execute_tool(name, arguments, sources, suggestions, observations,
+                                                               source_domains=_required_source_domains(current))
+                            actual_attempt = True
+                            result = await asyncio.wait_for(
+                                operation,
+                                timeout=self.tool_timeout_seconds)
+                            if name == "finish_task" and result.get("ok"):
+                                result["result"]["query_mode"] = mode
+                            self._trace(current, "tool.completed", {"name": name,
+                                        "arguments": arguments, "result": result}, revision=revision,
+                                        step=step, call_id=call_id, model_call_id=model_call_id,
+                                        status=self._response_status(task_id, revision, "completed" if result.get("ok") else "rejected"))
+                            self._boundary(task_id, revision)
+                            if name == "ask_clarification" and result.get("ok"):
+                                terminal = ("waiting_clarification", {"question": arguments["question"],
+                                            "summary": arguments["question"]})
+                            elif name == "finish_task" and result.get("ok"):
+                                terminal = ("completed", {"result": result["result"],
+                                            "summary": result["result"]["summary"], "question": None})
+                        if terminal and result.get("ok") is False:
+                            self._trace(current, "tool.completed", {"name": name,
+                                        "arguments": arguments, "result": result}, revision=revision,
+                                        step=step, call_id=call_id, model_call_id=model_call_id, status="skipped")
+                    except (RevisionChanged, TaskCancelled):
+                        raise
+                    except asyncio.CancelledError as exc:
+                        self._trace(current, "tool.error", {"name": name, "arguments": arguments,
+                                    "error": _safe_error(exc, None)}, revision=revision,
+                                    step=step, call_id=call_id, model_call_id=model_call_id, status="cancelled")
+                        raise
+                    except Exception as exc:
+                        result = {"ok": False, "error": _safe_error(exc)}
+                        if isinstance(exc, RedundantSourceURL):
+                            result.update(code="known_source_url", required_source_domains=exc.domains)
+                        if name == "finish_task":
+                            result["citable_source_urls"] = list(sources)
+                            result["forecast_records"] = deepcopy(_verified_forecast_records(observations))
+                        self._trace(current, "tool.error", {"name": name, "arguments": arguments,
+                                    "error": _safe_error(exc, None), "result": result}, revision=revision,
+                                    step=step, call_id=call_id, model_call_id=model_call_id,
+                                    status=self._response_status(task_id, revision, 'error'))
+                        observations.append({"tool": name, "ok": False, "attempted": actual_attempt,
+                                             "error": result["error"]})
+                    messages.append({"role": "tool", "tool_call_id": call_id,
+                                     "content": json.dumps(result, ensure_ascii=False)})
+                self._save(task_id, revision, transcript=messages, sources=list(sources.values()),
+                    checkpoint={'goal': current['goal'], 'revision': revision, 'messages': messages,
+                                'sources': list(sources.values()), 'suggestions': suggestions,
+                                'observations': observations, 'tool_count': tool_count,
+                                'constraint_count': len(current.get('constraints', []))})
+                if terminal:
+                    status, fields = terminal
+                    self._boundary(task_id, revision)
+                    self._save(task_id, revision, status=status, transcript=messages,
+                               sources=list(sources.values()), **fields)
+                    return
+            except RevisionChanged as changed:
+                self._trace(current, "revision.discarded", {"new_revision": changed.task["revision"],
+                            "phase": phase, "reason": "updated_during_step"}, revision=revision,
+                            step=step, call_id=model_call_id, model_call_id=model_call_id, status="stale")
+                current = changed.task
+                # Next iteration reconstructs the prompt. The already spent time
+                # and steps still count towards the same bounded task execution.
+                continue
+            except TaskCancelled:
+                latest = self.db.get_task(task_id) or current
+                self._trace(current, "step.stopped", {"phase": phase,
+                            "latest_revision": latest["revision"], "latest_status": latest["status"]},
+                            revision=revision, step=step, call_id=model_call_id,
+                            model_call_id=model_call_id, status="cancelled")
+                raise
+            except Exception as exc:
+                self._trace(current, "step.error", {"phase": phase, "error": _safe_error(exc, None)},
+                            revision=revision, step=step, call_id=model_call_id, model_call_id=model_call_id,
+                            status=self._response_status(task_id, revision, 'error'))
+                if self._fail_revision(task_id, revision, _safe_error(exc)):
+                    return
+                latest = self.db.get_task(task_id) or current
+                self._trace(current, "revision.discarded", {"new_revision": latest["revision"],
+                            "phase": phase, "reason": "error_from_old_revision", "error": _safe_error(exc, None)},
+                            revision=revision, step=step, call_id=model_call_id,
+                            model_call_id=model_call_id, status="stale")
+                # A model/network failure from an old revision is discarded just
+                # like a late successful response. Continue with new conditions.
+                continue
+        self._fail_current(task_id, "任务达到推理步骤上限，已停止；没有宣称完成。")
+
+    async def _quick_lookup(self, args, sources, suggestions, observations, task, revision,
+                            step, model_call_id, parent_call_id):
+        async def invoke(name, arguments):
+            self._boundary(task["id"], revision)
+            call_id = uuid4().hex
+            self._trace(task, "tool.started", {"name": name, "arguments": arguments,
+                "parent_call_id": parent_call_id}, revision=revision, step=step, call_id=call_id,
+                model_call_id=model_call_id, status="running")
+            try:
+                result = await self._execute_tool(name, arguments, sources, suggestions, observations,
+                                                  source_domains=_required_source_domains(task))
+            except (RevisionChanged, TaskCancelled):
+                raise
+            except BaseException as exc:
+                status = "cancelled" if isinstance(exc, asyncio.CancelledError) else self._response_status(task["id"], revision, "error")
+                self._trace(task, "tool.error", {"name": name, "arguments": arguments,
+                    "error": _safe_error(exc, None), "parent_call_id": parent_call_id},
+                    revision=revision, step=step, call_id=call_id, model_call_id=model_call_id, status=status)
+                observations.append({"tool": name, "ok": False, "attempted": True, "error": _safe_error(exc)})
+                raise
+            self._trace(task, "tool.completed", {"name": name, "arguments": arguments,
+                "result": result, "parent_call_id": parent_call_id}, revision=revision, step=step,
+                call_id=call_id, model_call_id=model_call_id,
+                status=self._response_status(task["id"], revision, "completed"))
+            self._boundary(task["id"], revision)
+            return result
+
+        search = await invoke("search_web", {"query": args["query"], "max_results": args.get("max_results", 3)})
+        urls = []
+        domains = _required_source_domains(task)
+        for row in search.get("results", []):
+            url = row.get("url") if isinstance(row, dict) else None
+            if domains and (not isinstance(url, str) or not _source_in_domains(url, domains)):
+                continue
+            if url in sources and url not in urls:
+                urls.append(url)
+            if len(urls) == 2:
+                break
+        if not urls:
+            return {"ok": True, "search": search, "extract": None,
+                    "notice": "真实搜索没有获得可读取来源，无法确认实时事实。"}
+        try:
+            extract = await invoke("extract_web", {"urls": urls})
+        except (RevisionChanged, TaskCancelled):
+            raise
+        except Exception as exc:
+            extract = {"ok": False, "error": _safe_error(exc)}
+        return {"ok": True, "search": search, "extract": extract}
+
+    @staticmethod
+    def _progress(name: str, arguments: dict[str, Any]) -> str:
+        return {"search_web": f"正在搜索：{arguments.get('query', '')[:90]}",
+                "lookup_web": f"正在查询并核实：{arguments.get('query', '')[:90]}",
+                "get_weather_forecast": "正在读取目标日期的结构化天气预报。",
+                "extract_web": "正在读取搜索来源页面。",
+                "load_skill": "正在查看车辆子系统说明。", "ask_clarification": "等待必要条件。",
+                "suggest_vehicle_action": "正在整理待校验的模拟车辆动作建议。",
+                "finish_task": "正在整理结果。"}.get(name, "正在处理任务。")
+
+    async def _execute_tool(self, name: str, args: dict[str, Any], sources: dict[str, Any],
+                            suggestions: list[dict[str, Any]], observations: list[dict[str, Any]], *,
+                            source_domains=None) -> dict[str, Any]:
+        if name == "get_weather_forecast":
+            if self.weather is None:
+                from .weather import WeatherClient
+                self.weather = WeatherClient()
+            data = await self.weather.forecast(args["city"], args["date"], country_code=args.get("country_code"))
+            if data.get("ok") is False:
+                observations.append({"tool": name, "ok": False, "attempted": True,
+                                     "needs_clarification": bool(data.get("needs_clarification"))})
+                return data
+            if data.get("ok") is not True or data.get("data_type") != "forecast" or data.get("date") != args["date"]:
+                raise ValueError("天气工具未返回所请求日期的真实forecast记录，不能当预报。")
+            low, high = data.get("temperature_min"), data.get("temperature_max")
+            if any(type(value) not in (int, float) or not math.isfinite(value) for value in (low, high)) or low > high:
+                raise ValueError("天气工具的温度记录无效，不能当预报。")
+            raw_forecast = (data.get("raw") or {}).get("forecast")
+            if not isinstance(raw_forecast, dict) or not _forecast_raw_matches(data, raw_forecast):
+                raise ValueError("天气工具的date/timezone/摄氏单位或温度与原始raw不一致，不能补造或当作已验证预报。")
+            url = data.get("source_url", "")
+            parsed = urlparse(url)
+            if parsed.scheme not in ("http", "https") or not parsed.netloc or not data.get("queried_at") or not data.get("timezone") or data.get("unit") != "°C":
+                raise ValueError("天气工具缺少真实来源、查询时间、时区或摄氏单位，不能当预报。")
+            geo_url = data.get("geocoding_source_url")
+            if geo_url:
+                geo = urlparse(geo_url)
+                if geo.scheme not in ("http", "https") or not geo.netloc:
+                    raise ValueError("天气工具的地理编码来源 URL 无效。")
+            record = {key: deepcopy(data[key]) for key in ("date", "location", "timezone", "temperature_min", "temperature_max", "unit", "source_url", "queried_at")}
+            sources[url] = {"url": url, "title": "Open-Meteo结构化天气预报", "queried_at": data["queried_at"],
+                            "kind": "forecast", "verified": True, "extracted": False,
+                            "forecast_date": data["date"], "timezone": data["timezone"], "unit": data["unit"]}
+            if geo_url:
+                sources[geo_url] = {"url": geo_url, "title": "Open-Meteo城市地理编码", "queried_at": data["queried_at"],
+                                    "kind": "geocoding", "verified": True, "extracted": False,
+                                    "supports": "location"}
+            observations.append({"tool": name, "ok": True, "attempted": True,
+                                 "record": record, "queried_at": data["queried_at"],
+                                 "forecast_verified": True, "raw_forecast": deepcopy(raw_forecast)})
+            return data
+        if name == "search_web":
+            options = {'include_domains': source_domains} if source_domains else {}
+            data = await self.tavily.search(args["query"], max_results=args.get("max_results", 5), **options)
+            self._collect_sources(data, sources, "search")
+            observations.append({"tool": name, "query": args["query"], "ok": True, "attempted": True,
+                                 "result_count": len(data.get("results", [])), "queried_at": data.get("queried_at")})
+            return {"ok": True, **data}
+        if name == "extract_web":
+            for url in args["urls"]:
+                parsed = urlparse(url)
+                if parsed.scheme not in ("https", "http") or not parsed.netloc or url not in sources:
+                    raise ValueError("只能读取本任务真实搜索获得的 http(s) 来源 URL。")
+            data = await self.tavily.extract(args["urls"])
+            self._collect_sources(data, sources, "extract")
+            observations.append({"tool": name, "ok": True, "attempted": True, "result_count": len(data.get("results", [])),
+                                 "failed_results": data.get("failed_results", []), "queried_at": data.get("queried_at")})
+            return {"ok": True, **data}
+        if name == "load_skill":
+            from .catalog import load_skill
+            return load_skill(args["skill_id"])
+        if name == "ask_clarification":
+            return {"ok": True, "question": args["question"]}
+        if name == "suggest_vehicle_action":
+            if self.catalog is None:
+                from .catalog import TOOLS
+                self.catalog = TOOLS
+            spec = self.catalog.get(args["name"])
+            if spec is None:
+                raise ValueError("未知模拟车辆函数；请先按分类ID用load_skill查看有效函数。")
+            schema = spec.parameters if hasattr(spec, "parameters") else spec["parameters"]
+            errors = list(Draft202012Validator(schema).iter_errors(args["arguments"]))
+            if errors:
+                raise ValueError("模拟动作参数无效：" + errors[0].message)
+            suggestions.append(deepcopy(args))
+            return {"ok": True, "status": "suggested_only", "executed": False,
+                    "message": "建议已记录，尚未执行；会话层将依据最新车况校验。"}
+        if name == "finish_task":
+            urls = args.get("source_urls", list(sources)[:20])
+            unknown = [url for url in urls if url not in sources]
+            # Apply the same ledger constraint to prose/Markdown citations. A
+            # correct structured list must not hide an invented URL in summary.
+            inline_urls = [url.rstrip(".,;:，。；：！？!?）】》*`")
+                           for url in re.findall(r"https?://[^\s<>\"\]\)）】》」』，。；！？]+",
+                                                 args["summary"] + "\n" + args.get("spoken_summary", ""))]
+            unknown += [url for url in inline_urls if url not in sources]
+            if unknown:
+                raise ValueError("无法引用未经本任务真实工具查询的来源 URL。")
+            used_sources = [sources[url] for url in urls]
+            web_attempts = [item for item in observations if item["tool"] in ("search_web", "extract_web", "get_weather_forecast")]
+            extracts = [item for item in observations if item["tool"] == "extract_web"]
+            if any(source.get("kind") == "geocoding" for source in used_sources) and not any(
+                    source.get("kind") == "forecast" for source in used_sources):
+                raise ValueError("地理编码来源只能说明地点，不能单独支撑天气预报；请引用实际forecast来源，无法核实则如实说明。")
+            if any(source.get("kind") not in {"forecast", "geocoding"} for source in used_sources) and not extracts:
+                raise ValueError("已找到真实网页来源，请先extract_web读取核实；提取失败也要如实报告。")
+            summary = args["summary"]
+            evidence = "extracted" if used_sources and all(source.get("extracted") for source in used_sources) else "none"
+            if used_sources and any(source.get("kind") == "forecast" for source in used_sources) and all(
+                    source.get("kind") in {"forecast", "geocoding"} for source in used_sources):
+                evidence = "forecast"
+            elif used_sources and all(source.get("extracted") or source.get("verified") for source in used_sources):
+                evidence = "verified" if any(source.get("kind") == "forecast" for source in used_sources) else "extracted"
+            if used_sources and evidence == "none":
+                evidence = "search_only"
+                summary += "\n限制：部分来源仅有搜索摘要，页面未成功提取，相关信息尚未核实。"
+            elif not used_sources and web_attempts:
+                summary += "\n限制：真实信息工具未取得可核实来源，不能据此确认实时事实。"
+            # Produce the concise spoken form in the same finish call. The
+            # shared guard only removes display syntax; legacy reports without
+            # a generated spoken summary retain every statement and condition,
+            # with no sentence/character cutoff or second rewrite model call.
+            # Original reports and raw model/tool output remain in result/trace.
+            spoken_summary = brief_result(args.get("spoken_summary") or args["summary"])
+            if not spoken_summary:
+                spoken_summary = brief_result(args["summary"])
+            if evidence == "search_only" and not re.search(r"未核实|还没核实|尚未确认|无法确认", spoken_summary):
+                spoken_summary += "部分内容仅有搜索摘要，尚未核实。"
+            elif not used_sources and web_attempts and not re.search(
+                    r"未核实|无法确认|不能确认|没有.*(?:信息|来源|结果)|没(?:有)?查到|未(?:取得|找到)", spoken_summary):
+                spoken_summary += "没有查到可核实来源，无法确认实时信息。"
+            if suggestions and not re.search(r"未执行|尚未(?:实际)?执行|还没(?:有)?执行|没有执行", spoken_summary):
+                spoken_summary += "这些是动作建议，尚未执行。"
+            queried = [source.get("queried_at") for source in used_sources if source.get("queried_at")]
+            return {"ok": True, "result": {"summary": summary, "spoken_summary": spoken_summary,
+                    "sources": used_sources,
+                    "suggested_actions": deepcopy(suggestions), "query_times": sorted(set(queried)),
+                    "web_evidence": evidence,
+                    "forecast_records": [deepcopy(item["record"]) for item in observations
+                        if item["tool"] == "get_weather_forecast" and item.get("ok") and item["record"]["source_url"] in urls],
+                    "tool_observations": deepcopy(observations)}}
+        raise ValueError("Unknown tool")
+
+    @staticmethod
+    def _collect_sources(data: dict[str, Any], sources: dict[str, Any], kind: str) -> None:
+        # Dates come from the tool response, not model-generated arguments.
+        queried_at = data.get("queried_at") or datetime.now(timezone.utc).isoformat()
+        for row in data.get("results", []):
+            if not isinstance(row, dict):
+                continue
+            url = row.get("url")
+            if not isinstance(url, str) or urlparse(url).scheme not in ("http", "https") or not urlparse(url).netloc:
+                continue
+            prior = sources.get(url, {})
+            sources[url] = {"url": url, "title": row.get("title") or prior.get("title", ""),
+                            "queried_at": queried_at, "kind": kind,
+                            "extracted": kind == "extract" or prior.get("extracted", False)}
+
+    async def aclose(self) -> None:
+        for client in (self.ark, self.tavily, self.weather):
+            close = getattr(client, "aclose", None)
+            if close:
+                await close()
+
+
+async def _main() -> None:
+    from dotenv import load_dotenv
+    load_dotenv()
+    from .db import Database
+    parser = argparse.ArgumentParser(description="Independent SQLite Thinker worker")
+    parser.add_argument("--database", default=os.getenv("DATABASE_PATH", "data/super_xd.sqlite3"))
+    parser.add_argument("--concurrency", type=int, default=int(os.getenv("THINKER_CONCURRENCY", "2")))
+    args = parser.parse_args()
+    db = Database(args.database)
+    worker = ThinkerWorker(db, concurrency=args.concurrency,
+                           max_steps=int(os.getenv("THINKER_MAX_STEPS", "20")),
+                           timeout_seconds=float(os.getenv("THINKER_TIMEOUT_SECONDS", "300")))
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, worker.stop)
+    logger.info("Thinker started: concurrency=%s, max_steps=%s, timeout_seconds=%s",
+                worker.concurrency, worker.max_steps, worker.timeout_seconds)
+    try:
+        await worker.run_forever()
+    finally:
+        await worker.aclose()
+        close = getattr(db, "close", None)
+        if close:
+            close()
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    asyncio.run(_main())

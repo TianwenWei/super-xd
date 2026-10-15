@@ -1,0 +1,195 @@
+{
+  "id": "349311307eb6",
+  "goal": "请查阅 Tavily 官方资料，比较 Search API 与 Extract API 的用途。必须真实搜索并读取官方文档，给出两点简洁结论及来源URL、查询时间；不需要操作车辆。",
+  "status": "completed",
+  "revision": 1,
+  "summary": "已真实搜索并读取 Tavily 官方文档。两点结论：\n\n1. **Search API 用于“按问题发现来源”**：它接收自然语言查询，返回实时、相关且经评分/排序的网页结果（标题、URL、相关性分数、内容摘要），支持时间范围、域名包含/排除、搜索深度等控制，面向 LLM/RAG 工作流；适合查最新信息、新闻监控或不知道具体 URL 时寻找资料。\n\n2. **Extract API 用于“从已知 URL 取正文”**：它不负责发现网页，而是接收一个 URL 或一次最多 20 个 URL，提取清理后的页面内容（Markdown/文本等），可按 query 重排分块，并分别返回 `results` 与 `failed_results`；适合已经掌握链接、需要批量抓取和结构化读取页面内容的场景。\n\n**来源 URL**：\n- https://docs.tavily.com/faq/faq\n- https://docs.tavily.com/documentation/api-reference/introduction\n- https://docs.tavily.com/documentation/api-reference/endpoint/extract\n- https://docs.tavily.com/examples/quick-tutorials/search-api\n- https://docs.tavily.com/documentation/about\n\n**查询/读取时间（UTC）**：\n- 首次官方资料搜索：2026-10-11T13:52:03.244797+00:00\n- 官方 FAQ、API 简介、Extract 文档读取：2026-10-11T13:52:14.247709+00:00\n- Search 教程与 About 页面读取：2026-10-11T13:52:41.749084+00:00\n\n备注：Search API endpoint 参考页曾被搜索到，但直接提取失败；以上结论基于成功读取的 Tavily 官方 FAQ、API 简介、Extract 参考、Search 教程和 About 页面。",
+  "result": {
+    "summary": "已真实搜索并读取 Tavily 官方文档。两点结论：\n\n1. **Search API 用于“按问题发现来源”**：它接收自然语言查询，返回实时、相关且经评分/排序的网页结果（标题、URL、相关性分数、内容摘要），支持时间范围、域名包含/排除、搜索深度等控制，面向 LLM/RAG 工作流；适合查最新信息、新闻监控或不知道具体 URL 时寻找资料。\n\n2. **Extract API 用于“从已知 URL 取正文”**：它不负责发现网页，而是接收一个 URL 或一次最多 20 个 URL，提取清理后的页面内容（Markdown/文本等），可按 query 重排分块，并分别返回 `results` 与 `failed_results`；适合已经掌握链接、需要批量抓取和结构化读取页面内容的场景。\n\n**来源 URL**：\n- https://docs.tavily.com/faq/faq\n- https://docs.tavily.com/documentation/api-reference/introduction\n- https://docs.tavily.com/documentation/api-reference/endpoint/extract\n- https://docs.tavily.com/examples/quick-tutorials/search-api\n- https://docs.tavily.com/documentation/about\n\n**查询/读取时间（UTC）**：\n- 首次官方资料搜索：2026-10-11T13:52:03.244797+00:00\n- 官方 FAQ、API 简介、Extract 文档读取：2026-10-11T13:52:14.247709+00:00\n- Search 教程与 About 页面读取：2026-10-11T13:52:41.749084+00:00\n\n备注：Search API endpoint 参考页曾被搜索到，但直接提取失败；以上结论基于成功读取的 Tavily 官方 FAQ、API 简介、Extract 参考、Search 教程和 About 页面。",
+    "sources": [
+      {
+        "url": "https://docs.tavily.com/faq/faq",
+        "title": "Frequently Asked Questions - Tavily Docs",
+        "queried_at": "2026-10-11T13:52:32.385000+00:00",
+        "kind": "search",
+        "extracted": true
+      },
+      {
+        "url": "https://docs.tavily.com/documentation/api-reference/introduction",
+        "title": "Introduction - Tavily Docs",
+        "queried_at": "2026-10-11T13:52:14.247709+00:00",
+        "kind": "extract",
+        "extracted": true
+      },
+      {
+        "url": "https://docs.tavily.com/documentation/api-reference/endpoint/extract",
+        "title": "Tavily Extract - Tavily Docs",
+        "queried_at": "2026-10-11T13:52:14.247709+00:00",
+        "kind": "extract",
+        "extracted": true
+      },
+      {
+        "url": "https://docs.tavily.com/examples/quick-tutorials/search-api",
+        "title": "Web Search Essentials - Tavily Docs",
+        "queried_at": "2026-10-11T13:52:41.749084+00:00",
+        "kind": "extract",
+        "extracted": true
+      },
+      {
+        "url": "https://docs.tavily.com/documentation/about",
+        "title": "About - Tavily Docs",
+        "queried_at": "2026-10-11T13:52:41.749084+00:00",
+        "kind": "extract",
+        "extracted": true
+      }
+    ],
+    "suggested_actions": [],
+    "query_times": [
+      "2026-10-11T13:52:14.247709+00:00",
+      "2026-10-11T13:52:32.385000+00:00",
+      "2026-10-11T13:52:41.749084+00:00"
+    ],
+    "web_evidence": "extracted",
+    "tool_observations": [
+      {
+        "tool": "search_web",
+        "query": "site:docs.tavily.com Search API Extract API Tavily official documentation",
+        "ok": true,
+        "result_count": 5,
+        "queried_at": "2026-10-11T13:52:03.244797+00:00"
+      },
+      {
+        "tool": "search_web",
+        "query": "site:docs.tavily.com/documentation/api-reference/endpoint Tavily Search endpoint query official",
+        "ok": true,
+        "result_count": 5,
+        "queried_at": "2026-10-11T13:52:11.162661+00:00"
+      },
+      {
+        "tool": "extract_web",
+        "ok": true,
+        "result_count": 3,
+        "failed_results": [],
+        "queried_at": "2026-10-11T13:52:14.247709+00:00"
+      },
+      {
+        "tool": "extract_web",
+        "ok": true,
+        "result_count": 0,
+        "failed_results": [
+          {
+            "url": "https://docs.tavily.com/documentation/api-reference/endpoint/search",
+            "error": "Error fetching content"
+          }
+        ],
+        "queried_at": "2026-10-11T13:52:19.487356+00:00"
+      },
+      {
+        "tool": "search_web",
+        "query": "site:docs.tavily.com Tavily Search API real-time RAG ready search results official docs",
+        "ok": true,
+        "result_count": 5,
+        "queried_at": "2026-10-11T13:52:32.385000+00:00"
+      },
+      {
+        "tool": "extract_web",
+        "ok": true,
+        "result_count": 2,
+        "failed_results": [],
+        "queried_at": "2026-10-11T13:52:41.749084+00:00"
+      }
+    ]
+  },
+  "sources": [
+    {
+      "url": "https://docs.tavily.com/faq/faq",
+      "title": "Frequently Asked Questions - Tavily Docs",
+      "queried_at": "2026-10-11T13:52:32.385000+00:00",
+      "kind": "search",
+      "extracted": true
+    },
+    {
+      "url": "https://docs.tavily.com/documentation/keyless",
+      "title": "Try Tavily Without an API Key - Tavily Docs",
+      "queried_at": "2026-10-11T13:52:03.244797+00:00",
+      "kind": "search",
+      "extracted": false
+    },
+    {
+      "url": "https://docs.tavily.com/documentation/api-reference/introduction",
+      "title": "Introduction - Tavily Docs",
+      "queried_at": "2026-10-11T13:52:14.247709+00:00",
+      "kind": "extract",
+      "extracted": true
+    },
+    {
+      "url": "https://docs.tavily.com/documentation/api-reference/endpoint/extract",
+      "title": "Tavily Extract - Tavily Docs",
+      "queried_at": "2026-10-11T13:52:14.247709+00:00",
+      "kind": "extract",
+      "extracted": true
+    },
+    {
+      "url": "https://docs.tavily.com/documentation/about",
+      "title": "About - Tavily Docs",
+      "queried_at": "2026-10-11T13:52:41.749084+00:00",
+      "kind": "extract",
+      "extracted": true
+    },
+    {
+      "url": "https://docs.tavily.com/documentation/api-reference/endpoint/search",
+      "title": "Tavily Search",
+      "queried_at": "2026-10-11T13:52:11.162661+00:00",
+      "kind": "search",
+      "extracted": false
+    },
+    {
+      "url": "https://docs.tavily.com/documentation/api-reference/endpoint/research-streaming",
+      "title": "Streaming - Tavily Docs",
+      "queried_at": "2026-10-11T13:52:11.162661+00:00",
+      "kind": "search",
+      "extracted": false
+    },
+    {
+      "url": "https://docs.tavily.com/documentation/api-reference/endpoint/crawl",
+      "title": "Tavily Crawl",
+      "queried_at": "2026-10-11T13:52:11.162661+00:00",
+      "kind": "search",
+      "extracted": false
+    },
+    {
+      "url": "https://docs.tavily.com/documentation/api-reference/endpoint/usage",
+      "title": "Usage",
+      "queried_at": "2026-10-11T13:52:11.162661+00:00",
+      "kind": "search",
+      "extracted": false
+    },
+    {
+      "url": "https://docs.tavily.com/sdk/python/reference",
+      "title": "SDK Reference - Tavily Docs",
+      "queried_at": "2026-10-11T13:52:32.385000+00:00",
+      "kind": "search",
+      "extracted": false
+    },
+    {
+      "url": "https://docs.tavily.com/examples/use-cases/web-eval",
+      "title": "RAG Evaluation - Tavily Docs",
+      "queried_at": "2026-10-11T13:52:32.385000+00:00",
+      "kind": "search",
+      "extracted": false
+    },
+    {
+      "url": "https://docs.tavily.com/examples/quick-tutorials/search-api",
+      "title": "Web Search Essentials - Tavily Docs",
+      "queried_at": "2026-10-11T13:52:41.749084+00:00",
+      "kind": "extract",
+      "extracted": true
+    }
+  ],
+  "steps": 6,
+  "error": null,
+  "created_at": "2026-10-11T13:51:56.554766+00:00",
+  "updated_at": "2026-10-11T13:53:08.573756+00:00",
+  "elapsed_seconds": 71.986,
+  "validation_mode": "live Ark Thinker + live Tavily Search/Extract; no fake clients"
+}

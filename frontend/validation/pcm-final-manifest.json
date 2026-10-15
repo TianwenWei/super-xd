@@ -1,0 +1,129 @@
+{
+  "session_id": "b45e4e2b88fe4763",
+  "page_id": "616989ea-ff21-47a9-8178-fd1809d5519f",
+  "attempts": [
+    {
+      "client_request_id": "00af89e6-a58b-4c6d-990d-b7dc2fe89143",
+      "scenario_id": "greeting",
+      "sample_phase": "first-query-after-restart",
+      "purpose": "representative_latency"
+    },
+    {
+      "client_request_id": "b8a0a00d-e8b2-48d9-b656-1d28de2c5657",
+      "scenario_id": "greeting",
+      "sample_phase": "warm-progressive-history",
+      "purpose": "representative_latency"
+    },
+    {
+      "client_request_id": "386241ed-9121-4ea1-b161-2993e12d9e6f",
+      "scenario_id": "chat",
+      "sample_phase": "warm-progressive-history",
+      "purpose": "representative_latency"
+    },
+    {
+      "client_request_id": "c6991908-3464-4890-8f58-7a12cd9af440",
+      "scenario_id": "chat",
+      "sample_phase": "warm-progressive-history",
+      "purpose": "representative_latency"
+    },
+    {
+      "client_request_id": "68245e69-c97a-4872-9d29-1dfb240126d2",
+      "scenario_id": "temperature",
+      "sample_phase": "warm-progressive-history",
+      "purpose": "representative_latency"
+    },
+    {
+      "client_request_id": "19dd6dbd-04cc-45a5-837f-087623bf0dad",
+      "scenario_id": "temperature",
+      "sample_phase": "warm-progressive-history",
+      "purpose": "representative_latency"
+    },
+    {
+      "client_request_id": "9a87eb7d-e0a4-4b00-ac6e-d1ec38ed9be7",
+      "scenario_id": "window",
+      "sample_phase": "warm-progressive-history",
+      "purpose": "representative_latency"
+    },
+    {
+      "client_request_id": "5118c43e-fc58-42e6-9d97-4dfa0a3dd065",
+      "scenario_id": "window",
+      "sample_phase": "warm-progressive-history",
+      "purpose": "representative_latency"
+    },
+    {
+      "client_request_id": "a0fb1143-2f03-4233-b5c2-7da0637cb3b9",
+      "scenario_id": "navigation",
+      "sample_phase": "warm-progressive-history",
+      "purpose": "representative_latency"
+    },
+    {
+      "client_request_id": "7097820a-6372-4dcb-8009-5f4b5ef1bbe3",
+      "scenario_id": "navigation",
+      "sample_phase": "warm-progressive-history",
+      "purpose": "representative_latency"
+    },
+    {
+      "client_request_id": "8e536cff-d10e-451d-bd98-57c5a0797f30",
+      "scenario_id": "delegate",
+      "sample_phase": "warm-progressive-history",
+      "purpose": "representative_latency"
+    },
+    {
+      "client_request_id": "ef3c2cd1-2f5c-4cdb-8e67-3958caf162d9",
+      "scenario_id": "delegate",
+      "sample_phase": "warm-progressive-history",
+      "observed_route": "task_progress",
+      "note": "Same exact query reused active task; no new registration. Included in all-query latency denominator.",
+      "turn_id": "c448e64bb47f",
+      "existing_task_id": "269f6a3190ac",
+      "purpose": "representative_latency"
+    },
+    {
+      "client_request_id": "17ead6f4-abe6-493e-815a-0f6c3da0be16",
+      "scenario_id": "loaded_volume",
+      "sample_phase": "warm-progressive-history",
+      "purpose": "representative_latency"
+    },
+    {
+      "client_request_id": "7486baf5-f68a-4b7a-ae35-a3e75538989e",
+      "scenario_id": "loaded_volume",
+      "sample_phase": "warm-progressive-history",
+      "purpose": "representative_latency"
+    },
+    {
+      "client_request_id": "97ca7124-714b-4cf9-b9d6-fa217c41ee22",
+      "scenario_id": "loaded_chat",
+      "sample_phase": "warm-progressive-history",
+      "purpose": "representative_latency",
+      "note": ""
+    },
+    {
+      "client_request_id": "6f17f20a-a8c1-4910-b9ea-b613fe789522",
+      "scenario_id": "chat",
+      "sample_phase": "warm-progressive-history",
+      "purpose": "intentional_cancellation_validation",
+      "note": "Old query intentionally interrupted before first PCM"
+    },
+    {
+      "client_request_id": "1dca47f8-f217-421b-9fcd-8d0ca3b75e4a",
+      "scenario_id": "chat",
+      "sample_phase": "warm-progressive-history",
+      "purpose": "intentional_cancellation_validation",
+      "note": "Long real PCM playback to verify background task natural-drain arbitration"
+    }
+  ],
+  "conditions": {
+    "browser": "CUA Chrome connector",
+    "first_enable_to_submit_ms": 270.39999997615814,
+    "model_prewarmed_by_service": true,
+    "provider_cold_claim": false
+  },
+  "validation": {
+    "pre_pcm_cancel_turn_id": "8eafb6b4a669",
+    "replacement_turn_id": "8f964134f49a",
+    "actual_play_stop_turn_id": "f83c210bf205",
+    "completed_while_playing_task_id": "5413b505",
+    "task_result_turn_id": "baee16c3b5b7",
+    "natural_drain_to_result_audio_started_ms": 253.60000002384186
+  }
+}

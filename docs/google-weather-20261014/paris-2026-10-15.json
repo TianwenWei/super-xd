@@ -1,0 +1,144 @@
+{
+  "interval": {
+    "startTime": "2026-10-15T05:00:00Z",
+    "endTime": "2026-10-16T05:00:00Z"
+  },
+  "displayDate": {
+    "year": 2026,
+    "month": 10,
+    "day": 15
+  },
+  "daytimeForecast": {
+    "interval": {
+      "startTime": "2026-10-15T05:00:00Z",
+      "endTime": "2026-10-15T17:00:00Z"
+    },
+    "weatherCondition": {
+      "iconBaseUri": "https://maps.gstatic.com/weather/v1/partly_cloudy",
+      "description": {
+        "text": "多云间晴",
+        "languageCode": "zh-CN"
+      },
+      "type": "PARTLY_CLOUDY"
+    },
+    "precipitation": {
+      "probability": {
+        "type": "RAIN",
+        "percent": 10
+      },
+      "snowQpf": {
+        "unit": "MILLIMETERS",
+        "quantity": 0
+      },
+      "qpf": {
+        "unit": "MILLIMETERS",
+        "quantity": 0
+      }
+    },
+    "wind": {
+      "direction": {
+        "cardinal": "SOUTH_SOUTHEAST",
+        "degrees": 165
+      },
+      "speed": {
+        "unit": "KILOMETERS_PER_HOUR",
+        "value": 10
+      },
+      "gust": {
+        "unit": "KILOMETERS_PER_HOUR",
+        "value": 24
+      }
+    },
+    "iceThickness": {
+      "unit": "MILLIMETERS",
+      "thickness": 0
+    },
+    "relativeHumidity": 77,
+    "uvIndex": 1,
+    "thunderstormProbability": 0,
+    "cloudCover": 97
+  },
+  "nighttimeForecast": {
+    "interval": {
+      "startTime": "2026-10-15T17:00:00Z",
+      "endTime": "2026-10-16T05:00:00Z"
+    },
+    "weatherCondition": {
+      "iconBaseUri": "https://maps.gstatic.com/weather/v1/clear",
+      "description": {
+        "text": "晴",
+        "languageCode": "zh-CN"
+      },
+      "type": "CLEAR"
+    },
+    "precipitation": {
+      "probability": {
+        "type": "RAIN",
+        "percent": 0
+      },
+      "snowQpf": {
+        "unit": "MILLIMETERS",
+        "quantity": 0
+      },
+      "qpf": {
+        "unit": "MILLIMETERS",
+        "quantity": 0
+      }
+    },
+    "wind": {
+      "direction": {
+        "cardinal": "SOUTH",
+        "degrees": 178
+      },
+      "speed": {
+        "unit": "KILOMETERS_PER_HOUR",
+        "value": 6
+      },
+      "gust": {
+        "unit": "KILOMETERS_PER_HOUR",
+        "value": 13
+      }
+    },
+    "iceThickness": {
+      "unit": "MILLIMETERS",
+      "thickness": 0
+    },
+    "relativeHumidity": 88,
+    "uvIndex": 0,
+    "thunderstormProbability": 0,
+    "cloudCover": 19
+  },
+  "maxTemperature": {
+    "unit": "CELSIUS",
+    "degrees": 22.8
+  },
+  "minTemperature": {
+    "unit": "CELSIUS",
+    "degrees": 8.2
+  },
+  "feelsLikeMaxTemperature": {
+    "unit": "CELSIUS",
+    "degrees": 24.8
+  },
+  "feelsLikeMinTemperature": {
+    "unit": "CELSIUS",
+    "degrees": 8
+  },
+  "sunEvents": {
+    "sunriseTime": "2026-10-15T06:10:46.531195016Z",
+    "sunsetTime": "2026-10-15T17:01:08.157573596Z"
+  },
+  "moonEvents": {
+    "moonPhase": "WAXING_CRESCENT",
+    "moonriseTimes": [
+      "2026-10-15T11:45:27.768854306Z"
+    ],
+    "moonsetTimes": [
+      "2026-10-15T19:04:34.385243375Z"
+    ]
+  },
+  "maxHeatIndex": {
+    "unit": "CELSIUS",
+    "degrees": 24.8
+  }
+}

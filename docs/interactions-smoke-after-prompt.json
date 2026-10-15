@@ -1,0 +1,180 @@
+{
+  "session_id": "4db8262860af49fe",
+  "records": [
+    {
+      "query": "帮我打开空调，关闭车窗，打开座椅按摩。",
+      "kind": "mixed",
+      "at": "2026-10-13T04:41:59.462318+00:00",
+      "success": true,
+      "first_effective_ms": 2346.8,
+      "receipt_ms": 2346.1,
+      "total_ms": 2352.7,
+      "calls": [
+        {
+          "name": "set_climate_power",
+          "arguments": {
+            "enabled": true
+          }
+        },
+        {
+          "name": "close_all_windows",
+          "arguments": {}
+        },
+        {
+          "name": "set_seat_massage",
+          "arguments": {
+            "seat": "driver",
+            "mode": "relax"
+          }
+        }
+      ],
+      "text": "空调开了，全部车窗关了，主驾座椅按摩开放松模式了。",
+      "metrics": {
+        "first_effective_ms": 2345.1384999789298,
+        "total_ms": 2345.184125006199,
+        "model_calls": 2,
+        "route": "tool",
+        "commands": [
+          {
+            "command_id": "1f911b856746",
+            "name": "set_climate_power",
+            "arguments": {
+              "enabled": true
+            },
+            "receipt_ms": 1132.9494169913232,
+            "ok": true
+          },
+          {
+            "command_id": "cfd68c908e29",
+            "name": "close_all_windows",
+            "arguments": {},
+            "receipt_ms": 1134.1244999784976,
+            "ok": true
+          },
+          {
+            "command_id": "874ac85a1f00",
+            "name": "set_seat_massage",
+            "arguments": {
+              "seat": "driver",
+              "mode": "relax"
+            },
+            "receipt_ms": 2343.2810000376776,
+            "ok": true
+          }
+        ],
+        "error": null
+      },
+      "background_active": [],
+      "hot_path_only": false,
+      "error": null
+    },
+    {
+      "query": "现在车窗是开的还是关的？",
+      "kind": "mixed",
+      "at": "2026-10-13T04:42:01.815181+00:00",
+      "success": true,
+      "first_effective_ms": 1366.6,
+      "receipt_ms": null,
+      "total_ms": 1442.8,
+      "calls": [],
+      "text": "现在四门车窗都是关闭状态，开度百分比都是0。",
+      "metrics": {
+        "first_effective_ms": 1365.8943750197068,
+        "total_ms": 1436.4075839985162,
+        "model_calls": 1,
+        "route": "chat",
+        "commands": [],
+        "error": null
+      },
+      "background_active": [],
+      "hot_path_only": false,
+      "error": null
+    },
+    {
+      "query": "不是关闭按摩，是把主驾按摩切换成腰部模式。",
+      "kind": "mixed",
+      "at": "2026-10-13T04:42:03.258016+00:00",
+      "success": true,
+      "first_effective_ms": 1450.4,
+      "receipt_ms": 1450.2,
+      "total_ms": 1460.5,
+      "calls": [
+        {
+          "name": "set_seat_heating",
+          "arguments": {
+            "seat": "driver",
+            "level": 0
+          }
+        },
+        {
+          "name": "set_seat_heating",
+          "arguments": {
+            "seat": "driver",
+            "level": 0
+          }
+        }
+      ],
+      "text": "主驾座椅加热关了，主驾座椅加热关了。",
+      "metrics": {
+        "first_effective_ms": 1448.444625013508,
+        "total_ms": 1448.476874968037,
+        "model_calls": 1,
+        "route": "tool",
+        "commands": [
+          {
+            "command_id": "766be6c1c497",
+            "name": "set_seat_heating",
+            "arguments": {
+              "seat": "driver",
+              "level": 0
+            },
+            "receipt_ms": 1446.4985419763252,
+            "ok": true
+          },
+          {
+            "command_id": "796c2f453a76",
+            "name": "set_seat_heating",
+            "arguments": {
+              "seat": "driver",
+              "level": 0
+            },
+            "receipt_ms": 1447.493000072427,
+            "ok": true
+          }
+        ],
+        "error": null
+      },
+      "background_active": [],
+      "hot_path_only": false,
+      "error": null
+    },
+    {
+      "query": "导航去最近的机场。",
+      "kind": "mixed",
+      "at": "2026-10-13T04:42:04.718499+00:00",
+      "success": true,
+      "first_effective_ms": 1813.9,
+      "receipt_ms": null,
+      "total_ms": 1819.7,
+      "calls": [],
+      "text": "我帮你导航去最近的机场，有结果告诉你。",
+      "metrics": {
+        "first_effective_ms": 1811.6453749826178,
+        "total_ms": 1811.6779159754515,
+        "model_calls": 1,
+        "route": "delegate",
+        "commands": [],
+        "error": null
+      },
+      "background_active": [
+        {
+          "id": "098f9c964ad9",
+          "status": "queued",
+          "revision": 1
+        }
+      ],
+      "hot_path_only": false,
+      "error": null
+    }
+  ]
+}

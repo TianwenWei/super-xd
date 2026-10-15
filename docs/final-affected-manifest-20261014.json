@@ -1,0 +1,62 @@
+{
+  "kind": "final_affected_verification_manifest",
+  "frozen_at": "2026-10-14T03:48:58.169002+00:00",
+  "files": {
+    "backend/session.py": "8c165129ec39b1d95a82a036b7d52e8e99f2f75ac3f2872030a6166e8c14e4cb",
+    "backend/worker.py": "a8e667a161a9f9da870069391d0bd4c4a83491ba917722178e948cf58af6bbd2",
+    "backend/authorization.py": "42174a749ac7e3b889b240d95cfc71c8b4254f775d75c024563db56ceac215ab",
+    "backend/conditions.py": "c480a3abdac35549342794b38dd460cf818d7d556108714836576100f398c323",
+    "backend/weather.py": "d8d8e065bd1a304547b065e84878abfb1253893890cb182a6431c1800590fab7",
+    "backend/model_context.py": "2756619cd2bdaec385ba39b74ca1107b415a125a77675ffab2706e6fe20bff8d",
+    "backend/models.py": "a15e8519f47973ddd9701c0a44f26cb84d5efc7f315453789886ac37752e42d9",
+    "scripts/evaluate_interactions.py": "86397773c3d587a729c556a230cc573e11e4081c94ad50e342f2d3c6cb0feef4",
+    "scripts/evaluate_voice_interactions.py": "6bad7bf2669413d067528f56680249b50fb42eda9e351bc5b2235e01272f1a84"
+  },
+  "offline_validation": {
+    "backend": "1196 passed in 9.06s",
+    "frontend": "previously verified 30 tests and TypeScript/Vite build; frontend code unchanged by final session/worker fixes"
+  },
+  "planned_live": [
+    "chat_no_actions:4",
+    "explicit_country_weather_v6:4"
+  ],
+  "report": "docs/interactions-mini-final-affected-20261014.json",
+  "health": {
+    "ok": true,
+    "sessions": 0,
+    "model_prewarm": {
+      "ok": true,
+      "model": "doubao-seed-2-0-mini-260428",
+      "at": "2026-10-14T03:48:34.215402+00:00"
+    },
+    "retrieval": {
+      "status": "disabled",
+      "model": null,
+      "reason": "本版不实现检索；按skill分类直接加载。"
+    },
+    "tts": {
+      "configured": true,
+      "voice": "zh_female_xiaohe_uranus_bigtts",
+      "provider": "volcengine-speech-tts",
+      "missing_fields": [],
+      "source": "config_file",
+      "stream_pool_ready": 0,
+      "stream_prewarming": false
+    },
+    "asr": {
+      "configured": true,
+      "missing_fields": [],
+      "provider": "volcengine-speech-asr",
+      "sample_rate": 16000,
+      "channels": 1,
+      "format": "pcm_s16le",
+      "resource_id": "volc.bigasr.sauc.duration",
+      "source": "config_file"
+    }
+  },
+  "limitations": [
+    "frozen v6 oracle; no replacement attempts",
+    "No browser/physical microphone/acoustic measurement in these 8 text turns",
+    "Official source target-day forecast may remain unavailable; honest partial not full success"
+  ]
+}
