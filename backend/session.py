@@ -4,14 +4,15 @@ import copy
 import json
 import logging
 import math
-import re
 import time
+import unicodedata
 from dataclasses import dataclass, field
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 from jsonschema import validate, ValidationError
 from backend.catalog import TOOLS, SKILLS, HOT_TOOL_NAMES, initial_vehicle_state, execute_tool
-from backend.vehicle_planner import VehicleControlPlanner, validate_vehicle_plan, validate_vehicle_action_keep, _write_paths, _overlap
+from backend.vehicle_planner import (VehicleControlPlanner, destination_grounded, validate_vehicle_plan,
+                                     validate_vehicle_action_keep, _write_paths, _overlap)
 from backend.persona import PERSONAS, style_prompt, render
 from backend.prompt_templates import render_prompt
 from backend.types import PersonaConfig, SessionSnapshot
@@ -19,13 +20,12 @@ from backend.settings import TOOL_TIMEOUT
 from backend.models import utcnow, sanitized_error
 from backend.model_context import compact_message, compact_tool_result
 from backend.speech_text import speech_text, brief_result, spoken_number
-from backend.authorization import (validate_literal_authorization, validate_literal_feature_target,
-                                   validate_literal_window_hold)
-from backend.conditions import validate_required_origin
 from backend.google_maps import GoogleMapsClient, MapsError
 from backend.vehicle_simulator import VehicleSimulator
 from backend.vehicle_feedback import dispatch_feedback
 from backend.maps_tools import MAPS_TOOLS, MAPS_BY_NAME, READ_TOOLS
+from backend.textutil import is_domain, is_identifier, is_snake_code
+from backend.db import step_summary
 
 
 def function(name, description, properties=None, required=None):
@@ -43,7 +43,10 @@ CONTROL_TOOLS = [
              {'goal': STR, 'spoken_goal': {'type': 'string', 'maxLength': 80, 'description': '自然短称，概括主题约8–15字；不复述查询过程/来源要求，完整条件全部写goal；不能称已完成'},
               'read_details': {'type': 'boolean', 'description': '仅用户明确要求详细朗读最终报告时为true，默认false'},
               'query_domain': {'type': 'string', 'enum': ['weather', 'general'], 'description': '城市天气预报/气温查询填weather，以核对目标日预报证据；本原型weather入口仅支持quick，必须同时显式填写query_mode=quick，包括指定官网天气查询。车内温控不是天气。其他任务general。'},
-              'query_mode': {'type': 'string', 'enum': ['quick', 'research'], 'description': 'quick用于一个明确地点/日期的简单事实查询；query_domain=weather在本原型只能显式选quick，不能research或省略模式。其他领域的比较、调研、多条件规划或复杂推理可research。缺少必要地点先询问，不委托空目标。'}}, ['goal']),
+              'query_mode': {'type': 'string', 'enum': ['quick', 'research'], 'description': 'quick用于一个明确地点/日期的简单事实查询；query_domain=weather在本原型只能显式选quick，不能research或省略模式。其他领域的比较、调研、多条件规划或复杂推理可research。缺少必要地点先询问，不委托空目标。'},
+              'required_source_domains': {'type': 'array', 'maxItems': 5, 'uniqueItems': True,
+                                          'items': {'type': 'string', 'minLength': 3, 'maxLength': 253},
+                                          'description': '仅当用户要求核实某个官方网站且你确知其域名时填写，如metoffice.gov.uk；不确定就不填，不要问用户要网址。'}}, ['goal']),
     function('manage_task', '处理已有任务。等待澄清时，用户提供该任务缺少的城市/日期等条件必须reply原任务，不另delegate；补充或修改已有任务的条件用update。多个明确任务的进度用task_ids一次读取全部。车况与新话题不使用本工具。',
              {'action': {'type':'string','enum':['get','reply','update','cancel'], 'description':'get读取进度或结果；reply回答等待补充任务的问题；update补充或修改已有任务条件；cancel取消任务。'}, 'task_id': TASK_ID,
               'task_ids': {'type':'array','items':TASK_ID,'minItems':1,'maxItems':8,'uniqueItems':True,'description':'仅get可用，与task_id互斥；用户指定的所有任务ID，不漏任何一项'},
@@ -60,43 +63,16 @@ CURRENT_TURN_PROMPT = render_prompt('current_turn')
 TASK_SNAPSHOT_NOTICE = render_prompt('task_snapshot_notice')
 
 
-def validate_destination_literal(text, destination):
-    """Reject changed explicit place names before dispatch; never rewrite model args.
-
-    This only validates literal navigation commands, not intent routing or place
-    lookup. Contextual references still require the model to resolve or clarify.
-    """
-    match = re.search(r'(?:目的地\s*(?:设置|设|更改|修改|改|切换)(?:成|为|到)|导航(?:到|去))\s*(.+?)\s*[。！？!?]*$', text)
-    if not match:
-        return
-    target = match.group(1).strip().strip('“”"「」『』')
-    target = re.sub(r'，\s*(?:谢谢|麻烦了|好吗|可以吗)$', '', target).strip()
-    if destination != target:
-        raise ValueError(f'目的地与用户原文不一致；未执行。请确认完整地点“{target[:160]}”。')
+DESTINATION_NOT_GROUNDED = {
+    'ok': False, 'executed': False, 'retry_model': True, 'code': 'destination_not_in_request',
+    'reason': '目的地必须逐字取自用户原话、近期对话或本会话查到的地点名，不能改写、补全或猜测；未执行。'
+              '用户说的是相对地点（附近、最近）且没有给出位置时，直接问用户在哪里。',
+    'spoken_reason': '目的地还没确认，暂时没有修改。你要去哪里？'}
 
 
 def effective_text(text):
-    clean = re.sub(r'[\s，。！!、：:…～~]+', '', text)
-    clean = re.sub(r'^(好的|好呀|好啊|好|嗯|收到|没问题|我来看看|让我看看|我查一下|我来查一下)+', '', clean)
-    return len(clean) >= 4
-
-
-
-
-
-
-
-
-def explicit_setting_clauses(text):
-    """A conservative completion floor, never a function/argument selector.
-
-    Only distinct, explicitly worded setting clauses count. Uncovered wording
-    remains the model's responsibility; no feature or operation is inferred.
-    """
-    parts = [part.strip() for part in re.split(r'[，,、；;]|并且|同时|并', text) if part.strip()]
-    setting = re.compile(r'打开|开启|关闭|关掉|关上|锁上|解锁|启用|停用|设(?:置|为|成)|设\s*[+-]?\d|开到|调到|调至|调低|调高|清洗')
-    hold = re.compile(r'不要|别动|先别|不是|先不|保持(?:原状|现状|不变)|不调整|不改变')
-    return list(dict.fromkeys(part for part in parts if setting.search(part) and not hold.search(part)))
+    """Metric only: at least four letters/digits/CJK characters have streamed."""
+    return sum(1 for c in text if unicodedata.category(c)[0] in 'LN') >= 4
 
 
 def state_path_value(state, path):
@@ -173,9 +149,6 @@ def receipt_detail(name, args, result):
 def spoken_reason(reason):
     """Keep physical refusal conditions; move protocol/schema detail to trace."""
     text = str(reason)
-    if '目的地与用户原文不一致' in text:
-        match = re.search(r'请确认完整地点“([^”]+)”', text)
-        return f'目的地还没确认，暂时没有修改。你是要去{match.group(1)}吗？' if match else '目的地还没确认，暂时没有修改。你要去哪里？'
     if text.startswith('参数校验失败'):
         return '设置参数没确认清楚，这次没有调整。请把要求说具体一点。'
     if any(marker in text for marker in ('load_skill', 'skill_id', '未知工具', '未知函数')):
@@ -212,7 +185,6 @@ class Turn:
     group: list = field(default_factory=list)
     group_results: dict = field(default_factory=dict)
     tool_results: dict = field(default_factory=dict)
-    setting_clauses: list = field(default_factory=list)
     has_reads: bool = False
     needs_model: bool = False
     feedback: list = field(default_factory=list)
@@ -493,7 +465,7 @@ class SessionActor:
             self.start_turn(text, str(e.get('client_request_id', ''))[:80] or None)
         elif kind == 'asr.capture':
             capture_id = e.get('capture_id')
-            if not isinstance(capture_id, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', capture_id):
+            if not is_identifier(capture_id, max_length=80):
                 raise ValueError('无效语音录音标识')
             if e.get('active') is True:
                 if self.asr_capture_id == capture_id:
@@ -728,7 +700,6 @@ class SessionActor:
         self.speaking = False
         turn = Turn(uuid4().hex[:12], text, self.persona.model_copy(deep=True), self.persona_version)
         turn.loaded = list(self.loaded_tools)
-        turn.setting_clauses = explicit_setting_clauses(text)
         turn.client_request_id = client_request_id
         turn.messages.append({'role': 'user', 'content': text})
         self.turns.append(turn)
@@ -886,22 +857,19 @@ class SessionActor:
                     self.finish(turn)
                     return
             handled = self.handled_vehicle_settings(turn)
-            incomplete = not turn.vehicle_plans and 0 < handled < len(turn.setting_clauses)
             verified = self.receipt_feedback(turn, mutations_only=True) if turn.has_reads or handled or turn.vehicle_plans else ''
             if verified:
                 turn.output = ''
                 self.append_text(turn, verified, speak=not turn.dispatch_announced, source='verified_partial_receipts')
                 if turn.dispatch_announced:
                     self.speak_vehicle_failures(turn)
-                if incomplete:
-                    self.append_text(turn, '还有明确设置没能确认，未完成的部分没有执行。')
-                elif turn.has_reads:
+                if turn.has_reads:
                     self.append_text(turn, original, source='model_content', original_text=original)
             else:
                 turn.output = speech_text(original)
                 self.feed_audio(turn, original, 'model_content', original)
             turn.model_text_pending = ''
-            self.finish(turn, error='incomplete_request' if incomplete else self.vehicle_plan_error(turn))
+            self.finish(turn, error=self.vehicle_plan_error(turn))
             return
         turn.model_text_pending = ''
         turn.output = ''  # Tool-call prefaces are retained in raw model trace, not final feedback.
@@ -944,25 +912,17 @@ class SessionActor:
                     if name not in HOT_TOOL_NAMES:
                         raise ValueError('非热车控必须delegate_vehicle_control')
                     validate(arguments, TOOLS[name].parameters)
-                    guard = (validate_required_origin(turn.text, name, arguments, [t.text for t in self.turns[-2:-1]])
-                             or validate_literal_feature_target(turn.text, name, arguments, self.vehicle)
-                             or validate_literal_window_hold(turn.text, name, arguments, self.vehicle)
-                             or validate_literal_authorization(turn.text, name, arguments, self.vehicle))
-                    if guard:
-                        self.literal_refusal(turn, call, guard)
+                    if name == 'set_navigation_destination' and not destination_grounded(
+                            arguments['destination'], self.destination_sources(turn)):
+                        turn.needs_model = True
+                        self.tool_result(turn, call, dict(DESTINATION_NOT_GROUNDED))
                         continue
-                    if name == 'set_navigation_destination':
-                        validate_destination_literal(turn.text, arguments['destination'])
                     if TOOLS[name].state_mapping.get('operation') == 'read':
                         turn.has_reads = True
                         turn.needs_model = True  # Reading must answer the returned facts, not a generic success template.
                     self.send_command(turn, call, name, arguments)
                 elif name in MAPS_BY_NAME:
                     validate(arguments, MAPS_BY_NAME[name]['function']['parameters'])
-                    guard = validate_required_origin(turn.text, name, arguments, self.recent_user_inputs(turn))
-                    if guard:
-                        self.literal_refusal(turn, call, guard)
-                        continue
                     if name in READ_TOOLS:
                         turn.has_reads = turn.needs_model = True
                         turn.route = 'lookup'
@@ -976,10 +936,6 @@ class SessionActor:
                     if name == 'delegate_vehicle_control':
                         self.launch_vehicle_plan(turn, call, arguments)
                     else:
-                        guard = validate_required_origin(turn.text, name, arguments, [t.text for t in self.turns[-2:-1]])
-                        if guard:
-                            self.literal_refusal(turn, call, guard)
-                            continue
                         result = self.task_tool(name, arguments)
                         if result.get('retry_model'):
                             turn.needs_model = True
@@ -990,9 +946,15 @@ class SessionActor:
                 self.tool_result(turn, call, {'ok': False, 'reason': f'参数校验失败：{str(exc).splitlines()[0][:180]}',
                                              'spoken_reason': validation_feedback(exc, call.get('function', {}).get('name'))})
 
-    def recent_user_inputs(self, turn):
-        previous = self.turns[:self.turns.index(turn)] if turn in self.turns else self.turns
-        return [item.text for item in previous if item.text and not item.proactive][-1:]
+    def destination_sources(self, turn):
+        """Texts a destination may be copied from: this request, recent dialogue, found places."""
+        sources = [turn.text]
+        for previous in self.turns[-5:]:
+            if previous is not turn:
+                sources.extend(m['content'] for m in previous.messages
+                               if m.get('role') in {'user', 'assistant'} and isinstance(m.get('content'), str))
+        sources.extend(place.get('name', '') for place in self.recent_places)
+        return sources
 
     def launch_lookup(self, turn, call, name, arguments):
         async def lookup():
@@ -1104,7 +1066,7 @@ class SessionActor:
             # the execution validator still handles every nonempty action set.
             reason = plan['reason']
             original_code = plan.get('code') or plan.get('error_code')
-            code = original_code or (reason if re.fullmatch(r'[a-z][a-z0-9_]*', reason) else 'vehicle_planning_failed')
+            code = original_code or (reason if is_snake_code(reason) else 'vehicle_planning_failed')
             self.trace('vehicle.plan.failed', {'agent': 'vehicle_planner', 'source': 'vehicle_planner',
                        'parent_call_id': call['id'], 'code': code, 'reason': reason,
                        'planner_error': plan}, turn, call_id=call['id'], status='failed')
@@ -1157,16 +1119,9 @@ class SessionActor:
         if name not in TOOLS:
             raise ValueError('计划包含非车控函数')
         validate(arguments, TOOLS[name].parameters)
-        guard = (validate_required_origin(turn.text, name, arguments, [t.text for t in self.turns[-2:-1]])
-                 or validate_literal_feature_target(turn.text, name, arguments, state)
-                 or validate_literal_window_hold(turn.text, name, arguments, state)
-                 or validate_literal_authorization(turn.text, name, arguments, state))
-        if guard:
-            raise ValueError(guard['reason'])
-        if name == 'set_navigation_destination':
-            intent = next(item for item in plan['intents'] if item['id'] == action['intent_id'])
-            validate_destination_literal(intent.get('source_text') or intent.get('text') or turn.text,
-                                         arguments['destination'])
+        if name == 'set_navigation_destination' and not destination_grounded(
+                arguments['destination'], self.destination_sources(turn)):
+            raise ValueError(DESTINATION_NOT_GROUNDED['reason'])
 
     def execute_planned_command(self, turn, parent_id, action):
         """Validate and commit in one synchronous actor operation at real ACK.
@@ -1358,19 +1313,10 @@ class SessionActor:
                      if result.get('source') == 'vehicle_plan' and result.get('ok') is False
                      and not result.get('needs_clarification') and not result.get('retry_model')), None)
 
-    def literal_refusal(self, turn, call, guard):
-        retry = guard.get('retry_model') is True
-        if retry:
-            turn.needs_model = True
-        self.tool_result(turn, call, {'ok': False, 'executed': False, 'retry_model': retry,
-            'authorization_guard': guard, 'reason': guard['reason'], 'spoken_reason': guard['spoken_reason'],
-            'needs_clarification': guard.get('needs_clarification', False)})
-
     def handled_vehicle_settings(self, turn):
         return sum(1 for message in turn.messages for call in message.get('tool_calls', [])
                    if call['id'] in turn.tool_results and call['function']['name'] in TOOLS
                    and TOOLS[call['function']['name']].state_mapping.get('operation') != 'read'
-                   and not turn.tool_results[call['id']].get('authorization_guard')
                    and not turn.tool_results[call['id']].get('retry_model'))
 
 
@@ -1391,7 +1337,8 @@ class SessionActor:
         return None, {'ok': False, 'needs_clarification': True, 'reason': '请明确指哪个任务',
                       'candidates': [{'id': t['id'], 'goal': t['goal'], 'status': t['status']} for t in (active or tasks)[-8:]]}
 
-    def task_context(self, origin_turn_id=None, read_details=False, query_mode='research', spoken_goal=None, query_domain='general'):
+    def task_context(self, origin_turn_id=None, read_details=False, query_mode='research', spoken_goal=None,
+                     query_domain='general', required_source_domains=()):
         from backend.models import utcnow
         recent = [{'role': message['role'], 'content': message['content']}
                   for turn in self.turns[-4:] for message in turn.messages
@@ -1399,6 +1346,7 @@ class SessionActor:
         return {'vehicle': copy.deepcopy(self.vehicle), 'recent_history': recent,
                 'origin_turn_id': origin_turn_id, 'query_mode': query_mode, 'spoken_goal': spoken_goal,
                 'query_domain': query_domain,
+                'required_source_domains': [d.lower() for d in required_source_domains if is_domain(d)],
                 'read_details': read_details,
                 'active_tasks': [{k:t[k] for k in ('id','goal','status','summary')} for t in self.db.list_tasks(self.id)
                                  if t['status'] not in {'completed','failed','cancelled'}],
@@ -1421,7 +1369,8 @@ class SessionActor:
                                        context=self.task_context(self.current.id if self.current else None,
                                                                  args.get('read_details') is True,
                                                                  args.get('query_mode', 'research'), args.get('spoken_goal'),
-                                                                 args.get('query_domain', 'general')))
+                                                                 args.get('query_domain', 'general'),
+                                                                 args.get('required_source_domains', ())))
             self.emit('ui.card', task=task, origin_turn_id=self.current.id if self.current else None)
             goal = speech_text(args.get('spoken_goal') or task['goal']).rstrip('。')
             return {'ok': True, 'task': task, 'feedback_kind': 'delegated', 'detail': goal}
@@ -1453,7 +1402,7 @@ class SessionActor:
                 detail = result.get('summary', '') if args.get('read_details') is True else result.get('spoken_summary') or brief_result(result.get('summary', ''))
             else:
                 detail = task.get('question') or task['summary']
-                if re.search(r'正在推理.*第\s*\d+\s*步', detail):
+                if detail == step_summary(task.get('steps')):
                     detail = '还在分析，结果出来就告诉你。'
             return {'ok': True, 'task': task, 'feedback_kind': 'progress', 'detail': detail}
         action = args['action']
@@ -1620,8 +1569,7 @@ class SessionActor:
         turn.group = []
         if not self.is_current(turn):
             return
-        handled = self.handled_vehicle_settings(turn)
-        if turn.needs_model or turn.has_reads or (not turn.vehicle_plans and 0 < handled < len(turn.setting_clauses)):
+        if turn.needs_model or turn.has_reads:
             self.launch_model(turn)
             return
         # The outer delegated call closes only after its per-intent ledger is
@@ -1664,10 +1612,6 @@ class SessionActor:
             body = turn.tool_results[item['id']]
             if item['function']['name'] == 'delegate_vehicle_control' and body.get('source') == 'vehicle_plan':
                 feedback.extend(self.vehicle_plan_feedback(turn, body, mutations_only=mutations_only))
-                continue
-            if body.get('authorization_guard'):
-                feedback.append(render(turn.persona, 'clarify' if body.get('needs_clarification') else 'result',
-                                       body['spoken_reason']))
                 continue
             if body.get('ok', True):
                 if body.get('feedback_kind'):

@@ -96,7 +96,6 @@ async def capture_case(runtime, case, fixed_time):
         actor.turns.append(turn)
     turn = session.Turn(case['id'], case['text'], actor.persona.model_copy(deep=True), 1)
     turn.messages = [{'role': 'user', 'content': case['text']}]
-    turn.setting_clauses = session.explicit_setting_clauses(case['text'])
     if case.get('speech_mode') in {'route', 'answer'}:
         turn.audio_queue = asyncio.Queue()
     if case.get('speech_mode') == 'answer':

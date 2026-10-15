@@ -237,16 +237,27 @@ async def test_invalid_arguments_do_not_change_state(make_actor):
     assert '没确认清楚' not in done['text']
 
 
-@pytest.mark.parametrize('destination', ['沪', '沪 ', '上海', '上海虹桥站 ', 'Shanghai Hongqiao Railway Station'])
-async def test_changed_navigation_place_is_rejected_before_dispatch(make_actor, destination):
-    actor, q, _ = await make_actor([{'tool_calls': [call('set_navigation_destination', {'destination': destination})]}])
+@pytest.mark.parametrize('destination', ['沪', 'Shanghai Hongqiao Railway Station', '上海南站'])
+async def test_destination_not_in_user_words_is_rejected_and_model_asked_again(make_actor, destination):
+    actor, q, ark = await make_actor([{'tool_calls': [call('set_navigation_destination', {'destination': destination}, 'nav')]},
+                                      {'content': '你要去哪里？'}])
     old = copy.deepcopy(actor.vehicle)
     await actor.post({'type': 'input', 'text': '把模拟导航目的地设为上海虹桥站'})
     done, events = await wait_for(q, 'stream.done', actor)
     assert actor.vehicle == old
     assert not any(e['type'] == 'vehicle.command' for e in events)
-    assert '暂时没有修改' in done['text'] and '上海虹桥站' in done['text']
-    assert '没能执行' in done['text'] or '未执行' in done['text']
+    assert actor.current.tool_results['nav']['code'] == 'destination_not_in_request'
+    assert len(ark.requests) == 2 and done['text'] == '你要去哪里？'
+
+
+async def test_destination_may_come_from_recent_dialogue_with_asr_spacing(make_actor):
+    actor, q, _ = await make_actor([{'content': '要导航去上海 虹桥站吗？'},
+                                    {'tool_calls': [call('set_navigation_destination', {'destination': '上海虹桥站'})]}])
+    await actor.post({'type': 'input', 'text': '我要去火车站'})
+    await wait_for(q, 'stream.done', actor)
+    await actor.post({'type': 'input', 'text': '对，就去那里'})
+    await wait_for(q, 'stream.done', actor)
+    assert actor.vehicle['navigation']['destination'] == '上海虹桥站'
 
 
 @pytest.mark.parametrize(('text', 'destination'), [
@@ -271,8 +282,8 @@ async def test_network_error_is_explicit_failure(make_actor):
     assert '401' not in done['text']
 
 
-@pytest.mark.parametrize('value', ['好的','好的，我来看看','收到','我查一下。','好呀'])
-def test_placeholders_are_not_effective_words(value):
+@pytest.mark.parametrize('value', ['', '，。！ ', '好的', '……'])
+def test_short_or_punctuation_only_text_is_not_effective(value):
     assert not effective_text(value)
 
 
@@ -283,7 +294,8 @@ def test_real_content_is_effective():
 @pytest.mark.parametrize('name', __import__('backend.catalog',fromlist=['HOT_TOOL_NAMES']).HOT_TOOL_NAMES)
 async def test_every_hot_receipt_template_completes_after_state_commit(make_actor, name):
     actor, q, _ = await make_actor([{'tool_calls': [call(name, TOOLS[name].example)]}])
-    await actor.post({'type':'input','text':'明确执行热工具示例'})
+    # The request quotes the example so a destination is grounded in user words.
+    await actor.post({'type':'input','text':'明确执行热工具示例：' + json.dumps(TOOLS[name].example, ensure_ascii=False)})
     done, events = await wait_for(q, 'stream.done', actor)
     receipt = next(e for e in events if e['type']=='vehicle.result')
     assert receipt['result']['ok'] and done['metrics']['error'] is None
@@ -481,98 +493,6 @@ async def test_corrected_explicit_ambient_power_request_is_executed(make_actor):
     done, events = await wait_for(q, 'stream.done', actor)
     assert [e['name'] for e in events if e['type'] == 'vehicle.command'] == ['set_ambient_light']
     assert actor.vehicle['lights']['ambient'] is True and '开' in done['text']
-
-
-async def test_wrong_heating_target_cannot_execute_and_same_talker_delegates_correct_intent(make_actor):
-    planner = FakeVehiclePlanner(plan_response(('set_mirror_heating', {'enabled': True})))
-    actor, q, _ = await make_actor([
-        {'tool_calls': [call('set_seat_heating', {'seat': 'driver', 'level': 1}, 'wrong')]},
-        {'tool_calls': [call('delegate_vehicle_control', {'skill_ids': ['mirrors']}, 'correct')]},
-    ], planner)
-    await actor.post({'type': 'input', 'text': '打开后视镜加热。'})
-    done, events = await wait_for(q, 'stream.done', actor)
-    assert [e['name'] for e in events if e['type'] == 'vehicle.command'] == ['set_mirror_heating']
-    assert actor.vehicle['mirrors']['heating'] is True
-    assert actor.vehicle['seats']['positions']['driver']['heating'] == 0
-    assert actor.current.tool_results['wrong']['authorization_guard']['kind'] == 'literal_target_mismatch'
-    assert '后视镜加热开了' in done['text']
-
-
-async def test_nearest_airport_missing_origin_does_not_register_placeholder_task(make_actor):
-    actor, q, ark = await make_actor([
-        {'tool_calls': [call('delegate_task', {'goal': '导航去最近的机场'}, 'wrong')]},
-        {'content': '你现在在哪个城市或地址？'},
-    ])
-    await actor.post({'type': 'input', 'text': '导航去最近的机场。'})
-    done, events = await wait_for(q, 'stream.done', actor)
-    assert actor.db.list_tasks(actor.id) == []
-    assert not any(e['type'] == 'vehicle.command' for e in events)
-    assert done['text'] == '你现在在哪个城市或地址？' and len(ark.requests) == 2
-    assert actor.current.tool_results['wrong']['authorization_guard']['kind'] == 'missing_required_origin'
-
-
-async def test_close_all_cannot_overwrite_explicit_preserved_window(make_actor):
-    actor, q, _ = await make_actor([
-        {'tool_calls': [call('close_all_windows', {}, 'wrong')]},
-        {'tool_calls': [call('set_window_position', {'window': window, 'position': 0}, window)
-                        for window in ('driver', 'rear_left', 'rear_right')]},
-    ])
-    actor.vehicle['windows']['positions'].update(driver=25, front_passenger=50, rear_left=30, rear_right=40)
-    await actor.post({'type': 'input', 'text': '副驾别动，其余三窗关上。'})
-    done, events = await wait_for(q, 'stream.done', actor)
-    commands = [e for e in events if e['type'] == 'vehicle.command']
-    assert [e['name'] for e in commands] == ['set_window_position'] * 3
-    assert {e['arguments']['window'] for e in commands} == {'driver', 'rear_left', 'rear_right'}
-    assert actor.vehicle['windows']['positions'] == {'driver': 0, 'front_passenger': 50, 'rear_left': 0, 'rear_right': 0}
-    assert actor.current.tool_results['wrong']['authorization_guard']['kind'] == 'literal_window_hold'
-    assert '全部车窗关' not in done['text']
-
-
-async def test_ambient_request_cannot_be_replaced_by_interior_lights(make_actor):
-    planner = FakeVehiclePlanner(plan_response(('set_ambient_light', {'enabled': True}),
-                                               ('set_child_lock', {'side': 'left', 'enabled': True})))
-    actor, q, _ = await make_actor([
-        {'tool_calls': [call('set_interior_light', {'zone': 'all', 'enabled': True}, 'wrong')]},
-        {'tool_calls': [call('delegate_vehicle_control', {'skill_ids': ['lights', 'locks']}, 'whole')]},
-    ], planner)
-    await actor.post({'type': 'input', 'text': '打开氛围灯和左后车门儿童安全锁。'})
-    done, events = await wait_for(q, 'stream.done', actor)
-    assert [e['name'] for e in events if e['type'] == 'vehicle.command'] == ['set_ambient_light', 'set_child_lock']
-    assert actor.vehicle['lights']['interior'] == {'front': False, 'rear': False}
-    assert actor.vehicle['lights']['ambient'] is True
-    assert actor.vehicle['locks']['child_lock']['left'] is True
-    assert actor.current.tool_results['wrong']['authorization_guard']['kind'] == 'literal_target_mismatch'
-
-
-async def test_recovery_delegates_complete_two_intent_request_once(make_actor):
-    planner = FakeVehiclePlanner(plan_response(('set_ambient_light', {'enabled': True}),
-                                               ('set_child_lock', {'side': 'left', 'enabled': True})))
-    actor, q, ark = await make_actor([
-        {'tool_calls': [call('set_interior_light', {'zone': 'all', 'enabled': True}, 'wrong')]},
-        {'tool_calls': [call('delegate_vehicle_control', {'skill_ids': ['lights', 'locks']}, 'complete')]},
-    ], planner)
-    original = '打开氛围灯，并启用左后门儿童安全锁。'
-    await actor.post({'type': 'input', 'text': original})
-    done, events = await wait_for(q, 'stream.done', actor)
-    assert len(ark.requests) == 2 and planner.requests[0]['request_text'] == original
-    assert [e['name'] for e in events if e['type'] == 'vehicle.command'] == ['set_ambient_light', 'set_child_lock']
-    assert actor.vehicle['lights']['ambient'] is True
-    assert actor.vehicle['locks']['child_lock']['left'] is True
-    assert '氛围灯' in done['text'] and '儿童安全锁' in done['text']
-
-
-async def test_incomplete_setting_followup_cannot_claim_everything_completed(make_actor):
-    actor, q, _ = await make_actor([
-        {'tool_calls': [call('set_climate_power', {'enabled': True}, 'power')]},
-        {'content': '空调和车窗都已经调整好了。'},
-    ])
-    actor.vehicle['windows']['positions']['driver'] = 50
-    await actor.post({'type': 'input', 'text': '打开空调，并关闭全部车窗。'})
-    done, _ = await wait_for(q, 'stream.done', actor)
-    assert actor.vehicle['windows']['positions']['driver'] == 50
-    assert '空调开了' in done['text'] and '未完成的部分没有执行' in done['text']
-    assert '车窗都已经调整好了' not in done['text']
-    assert done['metrics']['error'] == 'incomplete_request'
 
 
 async def test_task_registration_captures_vehicle_history_without_persona(make_actor):

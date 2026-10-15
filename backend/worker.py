@@ -10,36 +10,32 @@ from __future__ import annotations
 import argparse
 import asyncio
 from copy import deepcopy
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 import json
 import logging
 import math
 import os
-import re
 import signal
 import time
 from typing import Any
 from urllib.parse import urlparse
 from uuid import uuid4
-from zoneinfo import ZoneInfo
 
 from jsonschema import Draft202012Validator
 
 from .catalog import SKILLS
+from .db import step_summary
 from .prompt_templates import render_prompt
-from .speech_text import brief_result
+from .speech_text import brief_result, spoken_number
+from .textutil import find_urls, is_domain, redact
 
 logger = logging.getLogger(__name__)
 SKILL_GUIDE = "；".join(f"{skill_id}：{SKILLS[skill_id].name}" for skill_id in sorted(SKILLS))
 
 
 def _weather_task(task):
-    """Narrow evidence scope, never a tool selector or a vehicle-temperature router."""
-    context = task.get("context") or {}
-    if context.get("query_domain") == "weather":
-        return True
-    goal = task.get("goal", "")
-    return "天气" in goal or ("气温" in goal and not re.search(r"(?:车内|车里|车厢|座舱|空调).{0,8}气温", goal))
+    """The delegating Talker declares the domain; the goal text is never parsed."""
+    return (task.get("context") or {}).get("query_domain") == "weather"
 
 
 def _forecast_raw_matches(record, raw):
@@ -48,12 +44,19 @@ def _forecast_raw_matches(record, raw):
     low, high = record.get("temperature_min"), record.get("temperature_max")
     daily, units = raw.get("daily") or {}, raw.get("daily_units") or {}
     return (isinstance(daily, dict) and isinstance(units, dict)
-            and isinstance(record.get("date"), str) and bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", record["date"]))
+            and _iso_date(record.get("date"))
             and all(type(value) in (int, float) and math.isfinite(value) for value in (low, high))
             and low <= high and record.get("unit") == "°C" and bool(record.get("timezone"))
             and raw.get("timezone") == record["timezone"] and daily.get("time") == [record.get("date")]
             and daily.get("temperature_2m_min") == [low] and daily.get("temperature_2m_max") == [high]
             and units.get("temperature_2m_min") == units.get("temperature_2m_max") == "°C")
+
+
+def _iso_date(value):
+    try:
+        return isinstance(value, str) and len(value) == 10 and bool(date.fromisoformat(value))
+    except ValueError:
+        return False
 
 
 def _verified_forecast_records(observations):
@@ -62,92 +65,10 @@ def _verified_forecast_records(observations):
             and _forecast_raw_matches(item.get("record", {}), item.get("raw_forecast", {}))]
 
 
-def _weather_numbers(text):
-    """Normalize numerals for validation only; never rewrite the returned prose."""
-    digits = {char: index for index, char in enumerate("零一二三四五六七八九")}
-    digits.update({"〇": 0, "两": 2})
-    def convert(match):
-        value = match.group(); negative = value.startswith("负"); value = value.removeprefix("负")
-        whole, _, fraction = value.partition("点")
-        try:
-            if "百" in whole:
-                return match.group()  # Forecast bounds do not need ambiguous hundred expressions.
-            if "十" in whole:
-                lead, tail = whole.split("十", 1)
-                number = digits.get(lead, 1) * 10 + (digits[tail] if tail else 0)
-            else:
-                number = int("".join(str(digits[char]) for char in whole))
-            if fraction:
-                number += float("0." + "".join(str(digits[char]) for char in fraction))
-            number = -number if negative else number
-            return str(number)
-        except (KeyError, ValueError):
-            return match.group()
-    text = re.sub(r"[负零〇一二两三四五六七八九十百点]+", convert, text)
-    return text.replace("摄氏度", "°C").replace("℃", "°C")
-
-
-def _temperature_claims(text):
-    text = _weather_numbers(text)
-    claims = []
-    atom = r"(-?\d+(?:\.\d+)?)"
-    for match in re.finditer(atom + r"\s*(?:°C|度)?\s*(?:至|到|[~～–—-])\s*" + atom + r"\s*(?:°C|度)", text, re.I):
-        claims.extend([("minimum", float(match[1])), ("maximum", float(match[2]))])
-    for label, role in (("最低", "minimum"), ("最高", "maximum")):
-        for match in re.finditer(label + r"(?:气温|温度)?[^\d-]{0,6}" + atom, text):
-            if re.match(r"-\d{2}-\d{2}\b", text[match.end():]):
-                continue  # An ISO date following an unavailable field is not a temperature.
-            claims.append((role, float(match[1])))
-    for match in re.finditer(atom + r"\s*(?:°C|°F|度|华氏度)", text, re.I):
-        claims.append(("value", float(match[1])))
-    return text, claims
-
-
-def _official_limit(text):
-    return bool(re.search(r"(?:官网|官方|法国气象局|Météo[- ]?France).{0,25}(?:未|没有|没能|无法|不能|尚未)|(?:未|没有|没能|无法|不能|尚未).{0,25}(?:官网|官方|法国气象局|Météo[- ]?France)", text, re.I))
-
-
 def _required_source_domains(task):
-    if not _weather_task(task):
-        return []
-    domains = list((task.get('context') or {}).get('required_source_domains') or [])
-    if re.search(r'法国气象局|Météo[- ]?France|meteofrance\.(?:com|fr)', task.get('goal', ''), re.I):
-        domains.append('meteofrance.com')
-    return list(dict.fromkeys(domains))
-
-
-def _redundant_source_url_question(task, question):
-    """Recognize only a URL-only request for an already identified weather source.
-
-    This checks the claimed missing condition; it does not select or invoke an
-    evidence tool. Unknown wording and mixed city/date questions remain valid
-    clarification requests.
-    """
-    if (task.get("context") or {}).get("query_mode") != "quick":
-        return []
-    domains = _required_source_domains(task)
-    if not domains or not isinstance(question, str):
-        return []
-    parts = re.split(r"[，,]", question.strip(), maxsplit=1)
-    if len(parts) == 2 and not re.fullmatch(
-            r"\s*(?:以便|方便|用于)[^，,；;。！？!?]*(?:[。.!！])?\s*", parts[1]):
-        return []
-    head = parts[0].strip().rstrip("。！？.!?").strip()
-    source = (r"(?:法国气象局|Météo[- ]?France|气象局|官方|官网|网站|网页|来源|"
-              r"指定|具体|准确|完整|该|这个|的|您|你|\s|"
-              + "|".join(re.escape(domain) for domain in domains) + r")*")
-    request = (r"(?:请|麻烦|能否|可否|能不能|可以)?(?:您|你)?"
-               r"(?:提供|告知|给我|告诉我|发给我|补充)(?:一下)?\s*"
-               + source + r"(?:网址|URL|链接|网站地址)(?:吗|呢|可以吗)?")
-    return domains if re.fullmatch(request, head, re.I) else []
-
-
-class RedundantSourceURL(ValueError):
-    def __init__(self, domains):
-        self.domains = domains
-        super().__init__("官方来源域名已确定（" + "、".join(domains)
-                         + "），无需用户补充官网网址；请使用现有证据工具核实，不能确认则如实说明。"
-                           "城市或日期确实不明确时仍可澄清。")
+    """Official domains named by the Talker in structured task context."""
+    domains = (task.get("context") or {}).get("required_source_domains") or []
+    return list(dict.fromkeys(domain.lower() for domain in domains if is_domain(domain)))
 
 
 def _source_in_domains(url, domains):
@@ -156,61 +77,44 @@ def _source_in_domains(url, domains):
 
 
 def _weather_finish_guard(args, task, sources, observations):
+    """Check structured forecast claims against what the tools actually returned.
+
+    Numbers the user hears come from ``forecast_claims`` (rendered by
+    ``_forecast_sentence``), so only those structured fields need checking.
+    """
     if not _weather_task(task):
-        return
-    goal = task.get("goal", "")
-    domains = _required_source_domains(task)
+        return []
     records = _verified_forecast_records(observations)
-    urls = args.get("source_urls", list(sources)[:20])
-    adopted = [record for record in records if record.get("source_url") in urls]
-    bodies = (args["summary"], args.get("spoken_summary") or args["summary"])
-    for body in bodies:
-        normalized, claims = _temperature_claims(body)
-        if claims and not adopted:
-            raise ValueError("天气温度数字须有本版本成功get_weather_forecast及一致raw记录；请核实后再finish，未核实说明不能豁免数字。")
-        if claims and re.search(r"°F|华氏", normalized, re.I):
-            raise ValueError("天气数字须保留实际forecast的摄氏单位，不能混用华氏数值。")
-        if claims and domains and not re.search(r"open[- ]?meteo", body, re.I) and not _official_limit(body):
-            raise ValueError("指定官网任务的实际温度来自Open-Meteo；报告和口语须明确提供方或说明官网温度未核实，不能混淆来源。")
-        tolerance = .51 if re.search(r"大约|约合|大概|约\s*[-\d]|about|approximately", normalized, re.I) else 1e-6
-        for role, value in claims:
-            key = "temperature_min" if role == "minimum" else "temperature_max"
-            if not any(abs(value - record[key]) <= tolerance if role != "value" else
-                       min(abs(value - record["temperature_min"]), abs(value - record["temperature_max"])) <= tolerance for record in adopted):
-                raise ValueError("天气报告的温度数字与本版本实际forecast最低/最高值不一致，不能提交未观测数值。")
-        # Explicit forecast dates must match adopted observations; query/update
-        # timestamps are metadata, not claims about the forecast day.
-        for clause in re.split(r"[，,。；;\n]", normalized):
-            for mention in re.finditer(r"(?<!\d)\d{4}-\d{2}-\d{2}(?!\d)", clause):
-                if re.search(r"(?:查询时间|读取时间|更新于|更新时间)[：:\s]*$", clause[:mention.start()]):
-                    continue
-                if claims and adopted and mention.group() not in {record["date"] for record in adopted}:
-                    raise ValueError("天气报告日期与实际forecast日期不一致。")
-        if claims and re.search(r"明天|后天|今天", task.get("goal", "")):
-            captured = (task.get("context") or {}).get("captured_at")
-            if captured:
-                offset = 2 if "后天" in task["goal"] else 1 if "明天" in task["goal"] else 0
-                if not any(record["date"] == (datetime.fromisoformat(captured.replace("Z", "+00:00")).astimezone(
-                        ZoneInfo(record["timezone"])).date() + timedelta(days=offset)).isoformat() for record in adopted):
-                    raise ValueError("实际forecast日期不符合本版本任务的当地目标日。")
-        for clause in re.split(r"[，,。；;\n]", body):
-            official_name = re.search(r"官方|官网|法国气象局|Météo[- ]?France", clause, re.I)
-            # A separate sentence may explicitly attribute the preceding
-            # temperatures, but merely saying a page was consulted is not
-            # a temperature attribution.
-            attribution = re.search(r"^(?:该)?(?:数字|数据|温度|气温|预报)?(?:来自|出自|来源(?:于|为|是)?)", clause.strip())
-            if (claims and official_name and (_temperature_claims(clause)[1] or attribution)
-                    and not _official_limit(clause) and not re.search(r"并非|不是|非官方|不属于", clause)):
-                raise ValueError("实际Open-Meteo温度不能标为气象局官方数值；官网读取不等于核实该温度。")
-            if re.search(r"open[- ]?meteo", clause, re.I) and re.search(r"官方|法国气象局|Météo[- ]?France", clause, re.I):
-                if not _official_limit(clause) and not re.search(r"并非|不是|非官方|不属于", clause):
-                    raise ValueError("Open-Meteo不是法国气象局官网预报，不能标为官方来源。")
-    for domain in set(domains):
-        official = [source for source in sources.values() if source.get("extracted") is True and
-                    ((urlparse(source.get("url", "")).hostname or "") == domain or
-                     (urlparse(source.get("url", "")).hostname or "").endswith("." + domain))]
-        if not official and not all(_official_limit(body) for body in bodies):
-            raise ValueError("未真实读取任务要求的官方域名页面；请在预算内核实，或在完整报告和口语中明确官方来源未完整核实，不得称已查询确认。")
+    adopted = []
+    for claim in args.get("forecast_claims") or []:
+        match = next((record for record in records if record["date"] == claim["date"]
+                      and record["source_url"] == claim["source_url"]
+                      and abs(record["temperature_min"] - claim["temperature_min"]) < 1e-6
+                      and abs(record["temperature_max"] - claim["temperature_max"]) < 1e-6), None)
+        if match is None:
+            raise ValueError("forecast_claims必须与本版本get_weather_forecast实际返回的日期、来源和最低/最高温度完全一致。")
+        adopted.append(match)
+    domains = _required_source_domains(task)
+    status = args.get("official_source_status")
+    if domains and status not in {"verified", "not_verified"}:
+        raise ValueError("任务指定了官方来源，finish_task须填写official_source_status。")
+    if status == "verified" and not any(source.get("extracted") is True and _source_in_domains(source.get("url", ""), domains)
+                                        for source in sources.values()):
+        raise ValueError("official_source_status=verified需要本任务真实读取到指定官方域名的页面；未读到请填not_verified。")
+    return adopted
+
+
+def _forecast_sentence(records, official_status):
+    parts = [f"{(record.get('location') or {}).get('name', '')}{record['date']}最低{spoken_number(record['temperature_min'])}度，"
+             f"最高{spoken_number(record['temperature_max'])}度" for record in records]
+    sentence = "；".join(parts) + "，数据来自Open-Meteo预报。" if parts else ""
+    if official_status == "not_verified":
+        sentence += "指定的官方来源没能核实。"
+    return sentence
+
+
+# JSON Schema format constraint only (AGENTS.md §3 allows pattern for YYYY-MM-DD).
+DATE_PATTERN = r"^\d{4}-\d{2}-\d{2}$"
 
 
 def _object(properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
@@ -242,15 +146,23 @@ THINKER_TOOLS = [
     _tool("finish_task", "同时提交完整报告summary与简短口语spoken_summary，不增加润色步骤。只能引用本任务真实搜索/读取过的来源。",
           _object({"summary": {"type": "string", "minLength": 1, "maxLength": 12000},
                    "spoken_summary": {"type": "string", "minLength": 1, "maxLength": 2000,
-                                      "pattern": r"[\s\S]*\S[\s\S]*",
                                       "description": "中性自然口语，先说最有用的结论，通常30至100字、1至3句。不要Markdown、列表、表格、URL、引用标记、JSON或任务/工具编号。保留必要的未核实、尚未执行等限制。"},
                    "reuse_prior_evidence": {"type": "boolean", "description": "仅在核对已有真实资料仍完整支持本次补充条件后为true；否则必须补查。"},
+                   "forecast_claims": {"type": "array", "maxItems": 7, "description": "天气任务采用的预报数值，逐项照抄get_weather_forecast返回的date、source_url、temperature_min、temperature_max。系统据此播报温度，summary与spoken_summary不要再写温度数字。",
+                                       "items": {"type": "object", "additionalProperties": False,
+                                                 "required": ["date", "source_url", "temperature_min", "temperature_max"],
+                                                 "properties": {"date": {"type": "string", "pattern": DATE_PATTERN},
+                                                                "source_url": {"type": "string", "minLength": 8},
+                                                                "temperature_min": {"type": "number"},
+                                                                "temperature_max": {"type": "number"}}}},
+                   "official_source_status": {"type": "string", "enum": ["verified", "not_verified"],
+                                              "description": "任务指定官方来源时必填：真实读到官方页面且含答案为verified，否则not_verified。"},
                    "source_urls": {"type": "array", "items": {"type": "string"}, "maxItems": 20,
                                    "uniqueItems": True}}, ["summary"])),
 ]
 FORECAST_TOOL = _tool("get_weather_forecast", "查询明确城市和日期的真实结构化天气预报（Open-Meteo），只提供日最低/最高气温，不提供雨晴、降水或风力，不得由温度推断这些现象。未来温度优先此工具，历史记录或气候平均值不能当未来预报。城市不明确需澄清；本工具不能冒充用户指定的气象局官网。",
     _object({"city": {"type": "string", "minLength": 1, "maxLength": 120},
-             "date": {"type": "string", "pattern": r"^\d{4}-\d{2}-\d{2}$", "description": "目标城市当地日期YYYY-MM-DD；按当前时间与用户所指日期填写"},
+             "date": {"type": "string", "pattern": DATE_PATTERN, "description": "目标城市当地日期YYYY-MM-DD；按当前时间与用户所指日期填写"},
              "country_code": {"type": "string", "pattern": r"^[A-Za-z]{2}$", "description": "用户已明确的ISO两字母国家代码，用于区分同名城市；不猜测"}}, ["city", "date"]))
 THINKER_TOOLS.append(FORECAST_TOOL)
 TOOL_SCHEMAS = {tool["function"]["name"]: tool["function"]["parameters"] for tool in THINKER_TOOLS}
@@ -275,13 +187,7 @@ class TaskCancelled(Exception):
 
 def _safe_error(exc: BaseException, max_length: int | None = 500) -> str:
     """Never let provider diagnostics disclose credentials in cards or logs."""
-    value = str(exc)
-    for variable in ("ARK_API_KEY", "TAVILY_API_KEY", "OPENAI_API_KEY"):
-        secret = os.getenv(variable)
-        if secret:
-            value = value.replace(secret, "[redacted]")
-    value = re.sub(r"(?i)bearer\s+[^\s,;]+", "Bearer [redacted]", value)
-    value = re.sub(r"\b(?:sk|tvly)-[A-Za-z0-9_-]{10,}", "[redacted]", value)
+    value = redact(str(exc))
     return f"{type(exc).__name__}: {value if max_length is None else value[:max_length]}"
 
 
@@ -573,7 +479,7 @@ class ThinkerWorker:
                                result=None, sources=[], transcript=messages, question=None)
                     return
                 self._save(task_id, revision, status="running", steps=step, error=None,
-                           summary=f"正在推理，第 {step} 步。", question=None)
+                           summary=step_summary(step), question=None)
                 self._trace(current, "step.started", {}, revision=revision, step=step, status="running")
                 phase = "model"
                 model_call_id = uuid4().hex
@@ -651,18 +557,15 @@ class ThinkerWorker:
                                 operation = self._quick_lookup(arguments, sources, suggestions, observations,
                                     current, revision, step, model_call_id, call_id)
                             else:
-                                if name == "ask_clarification":
-                                    domains = _redundant_source_url_question(current, arguments["question"])
-                                    if domains:
-                                        raise RedundantSourceURL(domains)
                                 if (mode == "quick" and name == "finish_task" and not self._has_current_attempt(observations)
                                         and not (arguments.get("reuse_prior_evidence") is True and sources
                                                  and any(source.get("extracted") or source.get("verified") for source in sources.values()))):
                                     raise ValueError("当前版本须先lookup_web或get_weather_forecast真实核实；旧版本查询不能完成新条件。必要条件不足请ask_clarification。")
-                                if name == "finish_task":
-                                    _weather_finish_guard(arguments, current, sources, observations)
+                                adopted = (_weather_finish_guard(arguments, current, sources, observations)
+                                           if name == "finish_task" else [])
                                 operation = self._execute_tool(name, arguments, sources, suggestions, observations,
-                                                               source_domains=_required_source_domains(current))
+                                                               source_domains=_required_source_domains(current),
+                                                               adopted_forecasts=adopted)
                             actual_attempt = True
                             result = await asyncio.wait_for(
                                 operation,
@@ -693,8 +596,6 @@ class ThinkerWorker:
                         raise
                     except Exception as exc:
                         result = {"ok": False, "error": _safe_error(exc)}
-                        if isinstance(exc, RedundantSourceURL):
-                            result.update(code="known_source_url", required_source_domains=exc.domains)
                         if name == "finish_task":
                             result["citable_source_urls"] = list(sources)
                             result["forecast_records"] = deepcopy(_verified_forecast_records(observations))
@@ -809,7 +710,7 @@ class ThinkerWorker:
 
     async def _execute_tool(self, name: str, args: dict[str, Any], sources: dict[str, Any],
                             suggestions: list[dict[str, Any]], observations: list[dict[str, Any]], *,
-                            source_domains=None) -> dict[str, Any]:
+                            source_domains=None, adopted_forecasts=()) -> dict[str, Any]:
         if name == "get_weather_forecast":
             if self.weather is None:
                 from .weather import WeatherClient
@@ -890,8 +791,7 @@ class ThinkerWorker:
             # Apply the same ledger constraint to prose/Markdown citations. A
             # correct structured list must not hide an invented URL in summary.
             inline_urls = [url.rstrip(".,;:，。；：！？!?）】》*`")
-                           for url in re.findall(r"https?://[^\s<>\"\]\)）】》」』，。；！？]+",
-                                                 args["summary"] + "\n" + args.get("spoken_summary", ""))]
+                           for url in find_urls(args["summary"] + "\n" + args.get("spoken_summary", ""))]
             unknown += [url for url in inline_urls if url not in sources]
             if unknown:
                 raise ValueError("无法引用未经本任务真实工具查询的来源 URL。")
@@ -923,12 +823,17 @@ class ThinkerWorker:
             spoken_summary = brief_result(args.get("spoken_summary") or args["summary"])
             if not spoken_summary:
                 spoken_summary = brief_result(args["summary"])
-            if evidence == "search_only" and not re.search(r"未核实|还没核实|尚未确认|无法确认", spoken_summary):
+            # Limits come from the evidence ledger, not from reading the prose;
+            # a repeated caveat is cheaper than a dropped one.
+            forecast = _forecast_sentence(list(adopted_forecasts), args.get("official_source_status"))
+            if forecast:
+                summary = forecast + "\n" + summary
+                spoken_summary = forecast + spoken_summary
+            if evidence == "search_only":
                 spoken_summary += "部分内容仅有搜索摘要，尚未核实。"
-            elif not used_sources and web_attempts and not re.search(
-                    r"未核实|无法确认|不能确认|没有.*(?:信息|来源|结果)|没(?:有)?查到|未(?:取得|找到)", spoken_summary):
+            elif not used_sources and web_attempts:
                 spoken_summary += "没有查到可核实来源，无法确认实时信息。"
-            if suggestions and not re.search(r"未执行|尚未(?:实际)?执行|还没(?:有)?执行|没有执行", spoken_summary):
+            if suggestions:
                 spoken_summary += "这些是动作建议，尚未执行。"
             queried = [source.get("queried_at") for source in used_sources if source.get("queried_at")]
             return {"ok": True, "result": {"summary": summary, "spoken_summary": spoken_summary,

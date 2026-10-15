@@ -1,4 +1,5 @@
 import type { AudioMeasurement, SpeechMetrics, TaskCardData } from './types';
+import { isHex } from './text';
 
 interface AudioStarted { type: string; turn_id: string; playback_id: string; client_request_id?: string; sample_rate: number; format: string; channels: number; [key: string]: unknown }
 interface Callbacks { send: (value: Record<string, unknown>) => void; phase: (value: 'idle' | 'synthesizing' | 'playing') => void; metrics: (turn: string, metrics: SpeechMetrics) => void; records: (records: AudioMeasurement[]) => void; error: (message: string) => void; allowed: (turn: string) => boolean }
@@ -134,7 +135,7 @@ export class StreamingSpeech {
       const started = message as AudioStarted;
       const query = started.client_request_id ? this.queries.get(started.client_request_id) : undefined;
       if (!this.enabled || this.closed || !this.node || this.rejected.has(id) || this.rejectedTurns.has(turn) || !this.callbacks.allowed(turn) || query?.superseded) return;
-      if (!/^[a-fA-F0-9]{32}$/.test(id) || started.format !== 'pcm_s16le' || started.sample_rate !== 24000 || started.channels !== 1) { this.callbacks.error('音频格式不符合 PCM s16le / mono / 24kHz 约定。'); return; }
+      if (!isHex(id, 32) || started.format !== 'pcm_s16le' || started.sample_rate !== 24000 || started.channels !== 1) { this.callbacks.error('音频格式不符合 PCM s16le / mono / 24kHz 约定。'); return; }
       if (this.current?.id === id) return;
       if (this.current) this.cancel('replaced');
       if (started.client_request_id) this.turnStarted(turn, started.client_request_id);

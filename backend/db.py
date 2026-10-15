@@ -1,7 +1,6 @@
 """SQLite WAL task ledger. Every operation owns a short connection/transaction."""
 import json
 import os
-import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
@@ -9,9 +8,15 @@ from pathlib import Path
 from uuid import uuid4
 from backend.settings import DATABASE_PATH
 from backend.models import utcnow
+from backend.textutil import redact_bearer, redact_known_secrets
 
 JSON_FIELDS = {'constraints', 'result', 'sources', 'transcript', 'context', 'checkpoint'}
 TERMINAL = {'completed', 'failed', 'cancelled'}
+
+
+def step_summary(step):
+    """Generic per-step progress text; the actor recognises it by equality, not parsing."""
+    return f'正在推理，第 {step} 步。'
 
 
 def _trace_data(value):
@@ -19,17 +24,12 @@ def _trace_data(value):
     secret_fields = {'authorization', 'proxyauthorization', 'apikey', 'accesskey',
                      'accesstoken', 'appsecret', 'clientsecret', 'xapikey', 'xapiaccesskey', 'xgoogapikey', 'googlemapsapikey'}
     if isinstance(value, dict):
-        return {key: ('[redacted]' if re.sub(r'[-_\s]', '', str(key)).lower() in secret_fields
+        return {key: ('[redacted]' if ''.join(c for c in str(key) if c not in '-_' and not c.isspace()).lower() in secret_fields
                       else _trace_data(item)) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_trace_data(item) for item in value]
     if isinstance(value, str):
-        for name in ('ARK_API_KEY', 'TAVILY_API_KEY', 'OPENAI_API_KEY', 'GOOGLE_MAPS_API_KEY',
-                     'VOLCENGINE_SPEECH_API_KEY', 'VOLCENGINE_SPEECH_ACCESS_TOKEN'):
-            secret = os.getenv(name)
-            if secret:
-                value = value.replace(secret, '[redacted]')
-        return re.sub(r'(?i)bearer\s+[^\s,;]+', 'Bearer [redacted]', value)
+        return redact_bearer(redact_known_secrets(value))
     return value
 
 

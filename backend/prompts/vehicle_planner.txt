@@ -41,5 +41,8 @@
 用户：先解除后排车窗锁，再把左后车窗开到一半。
 → 两个 planned 意图。开窗动作 depends_on 解锁动作。
 
+用户：不是要关后视镜加热，是打开它，方向盘加热别动。
+→ 后视镜加热：planned，source_text 引用"是打开它"所在的片段，绑定 set_mirror_heating(enabled=true)；被否定的"关后视镜加热"不建动作。方向盘加热：keep，keep_paths=[seats.steering_heating]。
+
 用户：调一下座椅位置，再打开氛围灯。（没说调到哪里）
 → 顶层 clarification，actions 留空，问："座椅要往前还是往后调？"

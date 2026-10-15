@@ -198,12 +198,11 @@ def test_load_every_skill_contains_complete_schemas():
 
 
 def test_free_text_patterns_allow_full_place_names_in_strict_decoding():
-    import re
     for tool in TOOLS.values():
         for prop in tool.parameters['properties'].values():
             if prop.get('type') == 'string' and 'pattern' in prop:
-                # Provider constrained decoders may use whole-string matching.
+                validator = Draft202012Validator(prop)
                 for value in ('上海虹桥站', 'Paris Gare de Lyon', '上海市\n虹桥路123号'):
-                    assert re.fullmatch(prop['pattern'], value)
-                assert not re.search(prop['pattern'], ' \t\n')
+                    assert validator.is_valid(value)
+                assert not validator.is_valid(' \t\n')
 

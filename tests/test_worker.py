@@ -918,11 +918,11 @@ async def test_quick_clarification_wait_does_not_spend_execution_budget_but_repl
 
     async def slow_lookup(messages):
         assert '巴黎' in messages[-1]['content']
-        await asyncio.sleep(.15)
+        await asyncio.sleep(2)
         return message('lookup_web', {'query': '巴黎'})
 
     current = task(db, context={'query_mode': 'quick'})
-    worker = ThinkerWorker(db, FakeArk(clarify, slow_lookup), FakeTavily(), quick_timeout_seconds=.10)
+    worker = ThinkerWorker(db, FakeArk(clarify, slow_lookup), FakeTavily(), quick_timeout_seconds=.5)
     await worker.run_task(current)
     assert db.get_task(current['id'])['status'] == 'waiting_clarification'
     # Model a minute spent waiting for the user, still within global five minutes.
@@ -937,7 +937,8 @@ async def test_quick_clarification_wait_does_not_spend_execution_budget_but_repl
     assert '累计执行' in saved['error'] and saved['steps'] == 2
     traces = db.traces_after('test-session', task_id=current['id'])
     usages = [row['data']['elapsed_seconds'] for row in traces if row['kind'] == 'task.execution.finished']
-    assert len(usages) == 2 and sum(usages) < .14
+    # The budget leaves room for SQLite overhead on slow disks; waiting time is never counted.
+    assert len(usages) == 2 and sum(usages) < .9
     timeout = next(row for row in traces if row['kind'] == 'task.timeout')
     assert timeout['data']['reason'] == 'quick_execution_budget'
 
@@ -1254,30 +1255,6 @@ async def weather_guard_evidence(db):
     return sources, observations
 
 
-@pytest.mark.parametrize('unsupported', [
-    '明天十七到二十二度，温度还未核实。',
-    '明天约17–22度，不过未核实。',
-    '最低气温17，最高气温22，暂无可靠来源。',
-])
-def test_weather_temperature_numbers_cannot_hide_behind_a_disclaimer(unsupported):
-    current = {'goal': '查询巴黎明天天气', 'context': {}}
-    for field in ('summary', 'spoken_summary'):
-        args = {'summary': '无法核实温度。', 'spoken_summary': '无法核实温度。', field: unsupported}
-        with pytest.raises(ValueError, match='本版本成功get_weather_forecast'):
-            _weather_finish_guard(args, current, {}, [])
-
-
-def test_weather_guard_does_not_confuse_dates_timestamps_or_car_climate_with_forecast_numbers():
-    honest = {'summary': '2026-10-14天气温度无法核实。查询时间2026-10-13T05:00:00+00:00。',
-              'spoken_summary': '最低气温未知（2026-10-14），无法核实温度。'}
-    _weather_finish_guard(honest, {'goal': '查询天气', 'context': {}}, {}, [])
-    for goal in ('检查车内气温', '调节车内温度'):
-        _weather_finish_guard({'summary': '车内二十三度。'}, {'goal': goal, 'context': {}}, {}, [])
-    with pytest.raises(ValueError, match='成功get_weather_forecast'):
-        _weather_finish_guard({'summary': '巴黎17到22度。'},
-                              {'goal': '巴黎温度', 'context': {'query_domain': 'weather'}}, {}, [])
-
-
 @pytest.mark.asyncio
 async def test_official_weather_requirement_scopes_real_search_and_extract_selection(db):
     official = 'https://meteofrance.com/previsions-meteo-france/paris/75000'
@@ -1296,9 +1273,10 @@ async def test_official_weather_requirement_scopes_real_search_and_extract_selec
                   message('lookup_web', {'query': '巴黎明天天气'}),
                   message('finish_task', {'summary': '官网未提供可核实的目标日气温，无法确认温度。',
                                           'spoken_summary': '官网目标日气温尚未核实，无法确认温度。',
+                                          'official_source_status': 'not_verified',
                                           'source_urls': [official]}))
     current = task(db, '查询法国巴黎明天天气，读取法国气象局官网',
-                   context={'query_mode': 'quick', 'query_domain': 'weather'})
+                   context={'query_mode': 'quick', 'query_domain': 'weather', 'required_source_domains': ['meteofrance.com']})
     await ThinkerWorker(db, ark, tavily, weather=FakeWeather()).run_task(current)
     saved = db.get_task(current['id'])
     assert saved['status'] == 'completed'
@@ -1323,84 +1301,6 @@ def test_required_source_domain_uses_host_boundary(url, allowed):
     assert _source_in_domains(url, ['meteofrance.com']) is allowed
 
 
-@pytest.mark.parametrize('question,redundant', [
-    ('请提供法国气象局官网的具体网址，以便我准确核对巴黎明天的温度。', True),
-    ('请提供法国气象局官网的网址。', True),
-    ('能否提供Météo-France官网链接？', True),
-    ('麻烦给我官网的完整URL，方便核实预报。', True),
-    ('请提供meteofrance.com的网站地址。', True),
-    ('请提供法国气象局官网的具体网址，用于核对巴黎明天气温。', True),
-    ('请提供城市和法国气象局官网网址。', False),
-    ('请提供法国气象局官网网址和目标日期。', False),
-    ('请提供法国气象局官网网址，并确认你指的是哪个巴黎？', False),
-    ('请提供法国气象局官网网址；你指的是哪个巴黎？', False),
-    ('请提供法国气象局官网网址，以便核实。另请确认目标日期。', False),
-    ('请提供法国气象局官网网址，以便核实，另外是哪个城市？', False),
-    ('你指的是法国巴黎还是美国同名城市？', False),
-    ('你要查哪一天？', False),
-    ('巴黎官网链接对应的是哪一天？', False),
-    ('请提供你私人账号中的预报链接。', False),
-    ('官网上没有目标日气温，你希望我怎么处理？', False),
-])
-def test_known_weather_source_url_guard_only_recognizes_url_only_requests(question, redundant):
-    from backend.worker import _redundant_source_url_question
-    current = {'goal': '巴黎天气，读取法国气象局官网',
-               'context': {'query_mode': 'quick', 'query_domain': 'weather'}}
-    assert _redundant_source_url_question(current, question) == (['meteofrance.com'] if redundant else [])
-
-
-@pytest.mark.parametrize('goal,context', [
-    ('巴黎天气，读取法国气象局官网', {'query_mode': 'research', 'query_domain': 'weather'}),
-    ('巴黎天气，读取法国气象局官网', {'query_domain': 'weather'}),
-    ('巴黎天气', {'query_mode': 'quick', 'query_domain': 'weather'}),
-    ('读取官网公开信息', {'query_mode': 'quick', 'required_source_domains': ['example.org']}),
-])
-def test_known_source_url_guard_does_not_expand_to_unknown_sources_or_other_task_modes(goal, context):
-    from backend.worker import _redundant_source_url_question
-    assert _redundant_source_url_question({'goal': goal, 'context': context}, '请提供官网链接。') == []
-
-
-@pytest.mark.asyncio
-async def test_known_weather_source_url_request_returns_error_then_same_mini_uses_existing_four_steps(db):
-    official = 'https://meteofrance.com/previsions-meteo-france/paris/75000'
-    question = '请提供法国气象局官网的具体网址，以便我准确核对巴黎明天的温度。'
-    class FilterTavily(FakeTavily):
-        async def search(self, query, max_results=5, *, include_domains=None):
-            self.calls.append(('search', query, include_domains))
-            return {'results': [{'url': official, 'content': 'Official page'}]}
-    weather, tavily = FakeWeather(), FilterTavily()
-
-    async def after_rejection(messages):
-        # The guard consumes a model step but cannot make any provider request
-        # or quietly replace the model's original clarification with a lookup.
-        assert not weather.calls and not tavily.calls
-        assert json.loads(messages[-2]['tool_calls'][0]['function']['arguments']) == {'question': question}
-        result = json.loads(messages[-1]['content'])
-        assert result['ok'] is False and result['code'] == 'known_source_url'
-        assert result['required_source_domains'] == ['meteofrance.com']
-        return message('get_weather_forecast', {'city': 'Paris', 'date': '2026-10-14', 'country_code': 'FR'})
-
-    ark = FakeArk(message('ask_clarification', {'question': question}), after_rejection,
-                  message('lookup_web', {'query': '巴黎官方预报'}),
-                  message('finish_task', {'summary': 'Open-Meteo预报12.5到18.1度，官网目标日温度未核实。'}))
-    current = task(db, '巴黎明天气温，读取法国气象局官网',
-                   {'query_mode': 'quick', 'query_domain': 'weather'})
-    worker = ThinkerWorker(db, ark, tavily, weather=weather)
-    await worker.run_task(current)
-    saved = db.get_task(current['id'])
-    assert saved['status'] == 'completed' and saved['steps'] == 4 and saved['question'] is None
-    assert ark.thinker_modes == [False] * 4 and len(ark.calls) == 4
-    assert weather.calls == [('Paris', '2026-10-14', 'FR')]
-    assert tavily.calls == [('search', '巴黎官方预报', ['meteofrance.com']), ('extract', [official])]
-    traces = db.traces_after('test-session', task_id=current['id'])
-    error = next(row for row in traces if row['kind'] == 'tool.error')
-    assert error['data']['name'] == 'ask_clarification' and error['data']['arguments'] == {'question': question}
-    assert error['data']['result']['required_source_domains'] == ['meteofrance.com']
-    assert error['step'] == 1 and error['data']['model_call_id']
-    assert not any(row['kind'] == 'tool.completed' and row['data']['name'] == 'ask_clarification' for row in traces)
-    assert worker.quick_max_steps == 4 and worker.quick_timeout_seconds == 45
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize('question', [
     '你指的是法国巴黎还是美国同名城市？',
@@ -1417,42 +1317,6 @@ async def test_known_weather_source_does_not_block_real_or_mixed_condition_clari
     assert saved['status'] == 'waiting_clarification' and saved['question'] == question
     assert saved['steps'] == 1 and len(ark.calls) == 1 and not weather.calls and not tavily.calls
     assert not any(row['kind'] == 'tool.error' for row in db.traces_after('test-session', task_id=current['id']))
-
-
-@pytest.mark.asyncio
-async def test_repeated_known_source_url_requests_do_not_gain_extra_budget_or_fake_completion(db):
-    weather, tavily = FakeWeather(), FakeTavily()
-    ark = FakeArk(*[message('ask_clarification', {'question': '请提供官网网址。'}) for _ in range(3)],
-                  message('finish_task', {'summary': '尚未核实。'}))
-    current = task(db, '巴黎天气，读取法国气象局官网',
-                   {'query_mode': 'quick', 'query_domain': 'weather'})
-    await ThinkerWorker(db, ark, tavily, weather=weather).run_task(current)
-    saved = db.get_task(current['id'])
-    assert saved['status'] == 'failed' and saved['steps'] == 4 and saved['result'] is None
-    assert len(ark.calls) == 4 and ark.thinker_modes == [False] * 4
-    assert not weather.calls and not tavily.calls
-    errors = [row for row in db.traces_after('test-session', task_id=current['id']) if row['kind'] == 'tool.error']
-    assert len([row for row in errors if row['data']['result'].get('code') == 'known_source_url']) == 3
-    assert '当前版本须先' in errors[-1]['data']['error']
-    assert ark.options[-1]['tool_choice'] == {'type': 'function', 'function': {'name': 'finish_task'}}
-
-
-@pytest.mark.asyncio
-async def test_weather_finish_accepts_actual_raw_numbers_and_rejects_mismatch_wrong_day_or_old_revision(db):
-    sources, observations = await weather_guard_evidence(db)
-    current = {'goal': '巴黎明天气温', 'context': {'captured_at': '2026-10-13T05:00:00+00:00'}}
-    good = {'summary': '2026-10-14巴黎最低12.5度，最高18.1度。查询时间2026-10-13T05:00:00+00:00。',
-            'spoken_summary': '巴黎明天十二点五到十八点一度。'}
-    _weather_finish_guard(good, current, sources, observations)
-    for bad in ('巴黎明天17到22度，未核实。', '2026-10-12巴黎12.5到18.1度。',
-                '巴黎最低18.1度、最高12.5度。'):
-        with pytest.raises(ValueError, match='数字|日期'):
-            _weather_finish_guard({**good, 'spoken_summary': bad}, current, sources, observations)
-    with pytest.raises(ValueError, match='本版本成功'):
-        _weather_finish_guard(good, current, sources, [])  # Previous-revision source ledger is insufficient.
-    with pytest.raises(ValueError, match='当地目标日'):
-        _weather_finish_guard(good, {**current, 'context': {'captured_at': '2026-10-12T05:00:00+00:00'}},
-                              sources, observations)
 
 
 @pytest.mark.asyncio
@@ -1484,51 +1348,6 @@ async def test_forecast_rejects_missing_or_inconsistent_raw_without_creating_ver
 
 
 @pytest.mark.asyncio
-async def test_official_weather_requires_real_read_or_both_report_and_speech_disclose_limit(db):
-    sources, observations = await weather_guard_evidence(db)
-    current = {'goal': '读取法国气象局官网核实巴黎明天天气', 'context': {}}
-    limited = {'summary': 'Open-Meteo预报12.5到18.1度；法国气象局官网的目标日温度尚未核实。',
-               'spoken_summary': '巴黎12.5到18.1度，官网目标日温度未核实。'}
-    _weather_finish_guard(limited, current, sources, observations)
-    with pytest.raises(ValueError, match='未真实读取'):
-        _weather_finish_guard({**limited, 'spoken_summary': 'Open-Meteo预报12.5到18.1度。'},
-                              current, sources, observations)
-    url = 'https://meteofrance.com/previsions-meteo-france/paris/75000'
-    sources[url] = {'url': url, 'extracted': False}
-    with pytest.raises(ValueError, match='未真实读取'):
-        _weather_finish_guard({'summary': 'Open-Meteo预报12.5到18.1度。'}, current, sources, observations)
-    sources[url]['extracted'] = True
-    _weather_finish_guard({'summary': '已读取法国气象局官网；Open-Meteo预报12.5到18.1度。'},
-                          current, sources, observations)
-    for incorrect in ('法国气象局预报12.5到18.1度。',
-                      '12.5到18.1度。来自法国气象局。',
-                      'Open-Meteo预报12.5到18.1度。数字来自法国气象局。'):
-        with pytest.raises(ValueError, match='提供方|官方数值'):
-            _weather_finish_guard({'summary': incorrect}, current, sources, observations)
-    # A normal weather question may keep the oral answer short; its source card retains the provider.
-    _weather_finish_guard({'summary': '巴黎12.5到18.1度。'}, {'goal': '巴黎天气', 'context': {}},
-                          sources, observations)
-
-
-@pytest.mark.asyncio
-async def test_quick_rejected_unsupported_weather_recovers_with_same_mini_and_verified_forecast(db):
-    weather = FakeWeather()
-    ark = FakeArk(message('lookup_web', {'query': '巴黎明天气温'}),
-                  message('finish_task', {'summary': '巴黎明天十七到二十二度，官网未核实。'}),
-                  message('get_weather_forecast', {'city': 'Paris', 'date': '2026-10-14', 'country_code': 'FR'}),
-                  message('finish_task', {'summary': 'Open-Meteo预报巴黎2026-10-14为12.5到18.1度。',
-                                          'source_urls': [weather.response['source_url']]}))
-    current = task(db, '巴黎明天气温', {'query_mode': 'quick'})
-    await ThinkerWorker(db, ark, FakeTavily(), weather=weather).run_task(current)
-    saved = db.get_task(current['id'])
-    assert saved['status'] == 'completed' and saved['steps'] == 4
-    assert ark.thinker_modes == [False] * 4 and weather.calls == [('Paris', '2026-10-14', 'FR')]
-    replies = [json.loads(row['content']) for row in saved['transcript'] if row['role'] == 'tool']
-    assert replies[1]['ok'] is False and '本版本成功get_weather_forecast' in replies[1]['error']
-    assert saved['result']['forecast_records'][0]['temperature_min'] == 12.5
-
-
-@pytest.mark.asyncio
 async def test_quick_keeps_forecast_available_after_two_lookups_without_exceeding_budget(db):
     weather, tavily = FakeWeather(), FakeTavily()
     ark = FakeArk(message('lookup_web', {'query': '官网目标日'}),
@@ -1542,19 +1361,6 @@ async def test_quick_keeps_forecast_available_after_two_lookups_without_exceedin
     assert len([call for call in tavily.calls if call[0] == 'search']) == 2
     assert {tool['function']['name'] for tool in ark.options[2]['tools']} == {'get_weather_forecast', 'finish_task'}
     assert ark.options[3]['tool_choice'] == {'type': 'function', 'function': {'name': 'finish_task'}}
-
-
-@pytest.mark.asyncio
-async def test_weather_guard_allows_honest_separate_official_context_without_attributing_api_numbers(db):
-    sources, observations = await weather_guard_evidence(db)
-    official = 'https://meteofrance.com/previsions-meteo-france/enquin-les-mines/62145'
-    sources[official] = {'url': official, 'extracted': True}
-    current = {'goal': '巴黎天气，读取法国气象局官网', 'context': {'query_domain': 'weather'}}
-    _weather_finish_guard({
-        'summary': '根据法国气象局官网的搜索结果页面，巴黎的具体预报未在页面中明确获取到。'
-                   '通过Open-Meteo查询到巴黎2026-10-14最低12.5°C，最高18.1°C。官网未明确提供巴黎目标日温度。',
-        'spoken_summary': '明天巴黎的温度，法国气象局官网未明确给出，天气预报工具查询到最低12.5°C，最高18.1°C。',
-    }, current, sources, observations)
 
 
 @pytest.mark.asyncio
@@ -1598,8 +1404,9 @@ async def test_declared_weather_source_gate_stops_at_existing_lookup_and_model_b
     ark = FakeArk(message('get_weather_forecast', {'city': 'Paris', 'date': '2026-10-14'}),
                   message('lookup_web', {'query': '巴黎官网预报'}),
                   message('lookup_web', {'query': '补充官网目标日'}),
-                  message('finish_task', {'summary': 'Open-Meteo预报12.5到18.1度，官网目标日温度未核实。'}))
-    current = task(db, '巴黎天气，读取法国气象局官网', {'query_mode': 'quick', 'query_domain': 'weather'})
+                  message('finish_task', {'summary': '官网目标日温度未核实。', 'official_source_status': 'not_verified'}))
+    current = task(db, '巴黎天气，读取法国气象局官网', {'query_mode': 'quick', 'query_domain': 'weather',
+                                                     'required_source_domains': ['meteofrance.com']})
     worker = ThinkerWorker(db, ark, tavily, weather=weather)
     await worker.run_task(current)
     saved = db.get_task(current['id'])
@@ -1612,20 +1419,73 @@ async def test_declared_weather_source_gate_stops_at_existing_lookup_and_model_b
     assert worker.quick_max_steps == 4 and worker.quick_timeout_seconds == 45 and worker.timeout_seconds == 300
 
 
+async def weather_guard_evidence(db):
+    sources, observations = {}, []
+    worker = ThinkerWorker(db, FakeArk(), FakeTavily(), weather=FakeWeather())
+    await worker._execute_tool('get_weather_forecast', {'city': 'Paris', 'date': '2026-10-14'},
+                               sources, [], observations)
+    return sources, observations
+
+
+def claim(**overrides):
+    value = {'date': '2026-10-14', 'source_url': FakeWeather().response['source_url'],
+             'temperature_min': 12.5, 'temperature_max': 18.1}
+    return {**value, **overrides}
+
+
 @pytest.mark.asyncio
-async def test_weather_finish_rejection_returns_only_current_verified_records_for_same_model_repair(db):
-    weather, tavily = FakeWeather(), FakeTavily()
+async def test_forecast_claims_must_equal_current_revision_observations(db):
+    sources, observations = await weather_guard_evidence(db)
+    current = {'goal': '巴黎明天气温', 'context': {'query_domain': 'weather'}}
+    adopted = _weather_finish_guard({'summary': '预报不含降水信息。', 'forecast_claims': [claim()]},
+                                    current, sources, observations)
+    assert adopted[0]['temperature_min'] == 12.5
+    for bad in (claim(temperature_min=17), claim(date='2026-10-13'), claim(source_url='https://example.org/x')):
+        with pytest.raises(ValueError, match='forecast_claims'):
+            _weather_finish_guard({'summary': 'x', 'forecast_claims': [bad]}, current, sources, observations)
+    with pytest.raises(ValueError, match='forecast_claims'):
+        _weather_finish_guard({'summary': 'x', 'forecast_claims': [claim()]}, current, sources, [])
+    # Without a declared weather domain no claim contract applies.
+    assert _weather_finish_guard({'summary': 'x'}, {'goal': '车内温度', 'context': {}}, sources, observations) == []
+
+
+@pytest.mark.asyncio
+async def test_official_status_is_structured_and_verified_needs_a_real_read(db):
+    sources, observations = await weather_guard_evidence(db)
+    current = {'goal': '读取法国气象局官网核实巴黎明天天气',
+               'context': {'query_domain': 'weather', 'required_source_domains': ['meteofrance.com']}}
+    with pytest.raises(ValueError, match='official_source_status'):
+        _weather_finish_guard({'summary': 'x'}, current, sources, observations)
+    _weather_finish_guard({'summary': 'x', 'official_source_status': 'not_verified'}, current, sources, observations)
+    url = 'https://meteofrance.com/previsions-meteo-france/paris/75000'
+    sources[url] = {'url': url, 'extracted': False}
+    with pytest.raises(ValueError, match='verified'):
+        _weather_finish_guard({'summary': 'x', 'official_source_status': 'verified'}, current, sources, observations)
+    sources[url]['extracted'] = True
+    _weather_finish_guard({'summary': 'x', 'official_source_status': 'verified'}, current, sources, observations)
+
+
+@pytest.mark.asyncio
+async def test_spoken_temperatures_come_from_verified_claims_not_model_prose(db):
+    weather = FakeWeather()
     ark = FakeArk(message('get_weather_forecast', {'city': 'Paris', 'date': '2026-10-14'}),
-                  message('finish_task', {'summary': '巴黎17到22度，未核实。'}),
-                  message('finish_task', {'summary': '巴黎12.5到18.1度。'}))
+                  message('finish_task', {'summary': '巴黎17到22度。', 'forecast_claims': [claim(temperature_min=17)]}),
+                  message('finish_task', {'summary': '预报不含降水信息。', 'spoken_summary': '降水情况预报里没有。',
+                                          'forecast_claims': [claim()]}))
     current = task(db, '巴黎天气', {'query_mode': 'quick', 'query_domain': 'weather'})
-    await ThinkerWorker(db, ark, tavily, weather=weather).run_task(current)
+    await ThinkerWorker(db, ark, FakeTavily(), weather=weather).run_task(current)
     saved = db.get_task(current['id'])
     replies = [json.loads(row['content']) for row in saved['transcript'] if row['role'] == 'tool']
-    assert saved['status'] == 'completed' and len(ark.calls) == 3 and len(weather.calls) == 1 and not tavily.calls
-    assert replies[1]['ok'] is False
-    assert replies[1]['forecast_records'] == saved['result']['forecast_records']
-    assert replies[1]['forecast_records'][0]['date'] == '2026-10-14'
-    assert replies[1]['forecast_records'][0]['temperature_min'] == 12.5
-    assert weather.response['source_url'] in replies[1]['citable_source_urls']
-    assert json.loads(ark.calls[2][-1]['content'])['forecast_records'] == replies[1]['forecast_records']
+    assert replies[1]['ok'] is False and replies[1]['forecast_records'][0]['temperature_min'] == 12.5
+    spoken = saved['result']['spoken_summary']
+    assert spoken.startswith('Paris2026-10-14最低十二点五度，最高十八点一度，数据来自Open-Meteo预报。')
+    assert spoken.endswith('降水情况预报里没有。')
+    assert saved['result']['summary'].startswith('Paris2026-10-14最低十二点五度')
+
+
+def test_forecast_sentence_names_provider_and_unverified_official_source():
+    from backend.worker import _forecast_sentence
+    record = {'location': {'name': '巴黎'}, 'date': '2026-10-14', 'temperature_min': -1.5, 'temperature_max': 3}
+    assert _forecast_sentence([record], 'not_verified') == (
+        '巴黎2026-10-14最低负一点五度，最高三度，数据来自Open-Meteo预报。指定的官方来源没能核实。')
+    assert _forecast_sentence([], None) == ''

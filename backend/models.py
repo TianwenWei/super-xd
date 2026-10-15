@@ -2,13 +2,13 @@
 import asyncio
 import json
 import os
-import re
 import time
 from copy import deepcopy
 from datetime import datetime, timezone
 import httpx
 from backend.prompt_templates import render_prompt
 from backend.settings import TALKER_MODEL, THINKER_MODEL, MODEL_TIMEOUT
+from backend.textutil import is_domain
 
 
 def utcnow():
@@ -212,12 +212,9 @@ class TavilyClient:
         invalid = 'include_domains 必须是1至10个有效域名组成的列表，不含协议、路径、端口或空元素。'
         if not isinstance(include_domains, list) or not 1 <= len(include_domains) <= 10:
             raise ValueError(invalid)
-        label = r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?'
         domains = []
         for domain in include_domains:
-            if (not isinstance(domain, str) or len(domain) > 253 or
-                    not re.fullmatch(rf'{label}(?:\.{label})+', domain.lower()) or
-                    domain.rsplit('.', 1)[-1].isdigit()):
+            if not is_domain(domain):
                 raise ValueError(invalid)
             domains.append(domain.lower())
         body.update(include_domains=domains, include_domains_mode='restrict')

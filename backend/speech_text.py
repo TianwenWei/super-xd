@@ -1,6 +1,17 @@
-"""A display-syntax guard for real speech, never a canned response generator."""
+"""A display-syntax guard for real speech, never a canned response generator.
+
+Markdown is parsed with markdown-it-py and rendered to plain sentences; the
+statements themselves (facts, negation, conditions) are never edited.
+"""
 import json
-import re
+
+from markdown_it import MarkdownIt
+
+from backend.textutil import collapse_ws, remove_urls
+
+_MARKDOWN = MarkdownIt('commonmark').enable('table').enable('strikethrough')
+_LABELS = {'结论', '调研结果', '查询结果', '详细报告', '来源', '参考来源', '回答', '建议', '核查结果', '结果'}
+_NUMBER_CHARS = frozenset('0123456789.')
 
 
 def spoken_number(value):
@@ -32,47 +43,21 @@ def _json_words(value):
     return str(value)
 
 
-def _table_words(lines):
-    result, index = [], 0
-    while index < len(lines):
-        line = lines[index]
-        if '|' not in line or index + 1 >= len(lines) or not re.fullmatch(r'[\s|:\-]+', lines[index + 1]):
-            result.append(line)
-            index += 1
-            continue
-        headers = [v.strip() for v in line.strip().strip('|').split('|')]
-        index += 2
-        while index < len(lines) and '|' in lines[index]:
-            cells = [v.strip() for v in lines[index].strip().strip('|').split('|')]
-            result.append('，'.join(f'{headers[i]}是{cell}' if i < len(headers) else cell
-                                   for i, cell in enumerate(cells) if cell) + '。')
-            index += 1
-    return result
-
-
-def speech_text(text: str) -> str:
-    """Remove markup while preserving statements, negation and conditions.
-
-    Called only on complete eligible text, so split URL/Markdown deltas, numbers
-    and units cannot leak through an incremental boundary. No semantic length
-    cutoff is applied here; the model/receipt/result contract controls length.
-    """
-    text = str(text or '').strip()
-    text = re.sub(r'^```[^\n]*\n?', '', text)
-    text = re.sub(r'```\s*$', '', text)
+def _inline_json(text):
+    """Speak embedded JSON objects; a bare ``[1]`` stays for citation removal."""
     try:
         parsed = json.loads(text)
     except (ValueError, TypeError):
         pass
     else:
         if isinstance(parsed, (dict, list)):
-            text = _json_words(parsed)
-    decoder = json.JSONDecoder()
-    offset = 0
+            return _json_words(parsed)
+    decoder, offset = json.JSONDecoder(), 0
     while True:
-        match = re.search(r'[\{\[]', text[offset:])
-        if not match: break
-        start = offset + match.start()
+        candidates = [i for i in (text.find('{', offset), text.find('[', offset)) if i >= 0]
+        if not candidates:
+            return text
+        start = min(candidates)
         if text[start] == '[' and text[:start].rstrip()[-1:] not in {':', '：', '='}:
             offset = start + 1
             continue
@@ -87,33 +72,163 @@ def speech_text(text: str) -> str:
             offset = start + len(words)
         else:
             offset = start + length
-    text = re.sub(r'!\[([^\]]*)\]\([^)]*\)', r'\1', text)
-    text = re.sub(r'\[([^\]]+)\]\(https?://[^\s)]+\)', r'\1', text)
-    had_url = bool(re.search(r'https?://|www\.', text))
-    text = re.sub(r'(?:https?://|www\.)[^\s<>，。！？；）)\]]+', '', text)
-    text = re.sub(r'[^]*|【[^】]*†[^】]*】|\[(?:\d+(?:\s*[,，-]\s*\d+)*|cite:[^\]]*|turn\d+[^\]]*)\]', '', text)
-    text = re.sub(r'(?m)^\s*\[\d+\]:.*$', '', text)
-    lines = _table_words(text.splitlines())
+
+
+def _is_citation(inner):
+    if inner.startswith(('cite:', 'turn')):
+        return True
+    compact = inner.replace(' ', '')
+    return bool(compact) and compact[0].isdigit() and all(c.isdigit() or c in ',，-' for c in compact)
+
+
+def _remove_citations(text):
+    """Drop provider citation markers: private-use spans, 【…†…】, [1], [cite:…]."""
+    output, index = [], 0
+    while index < len(text):
+        character = text[index]
+        if character == '':
+            end = text.find('', index + 1)
+            if end >= 0:
+                index = end + 1
+                continue
+        if character in '【[':
+            close = '】' if character == '【' else ']'
+            end = text.find(close, index + 1)
+            if end >= 0:
+                inner = text[index + 1:end]
+                if (character == '【' and '†' in inner and '】' not in inner) or (
+                        character == '[' and '[' not in inner and _is_citation(inner)):
+                    index = end + 1
+                    continue
+        output.append(character)
+        index += 1
+    return ''.join(output)
+
+
+def _inline_text(token):
+    """Plain text of an inline token; soft/hard breaks start new lines."""
+    parts = []
+    for child in token.children or []:
+        if child.type in {'text', 'code_inline'}:
+            parts.append(child.content)
+        elif child.type == 'image':
+            parts.append(child.content)
+        elif child.type in {'softbreak', 'hardbreak'}:
+            parts.append('\n')
+    return ''.join(parts)
+
+
+def _blocks(text):
+    """Render Markdown block tokens into plain lines, tables as spoken rows."""
+    lines, table, row, cell = [], None, None, None
+    for token in _MARKDOWN.parse(text):
+        if token.type == 'table_open':
+            table = {'head': [], 'body': []}
+        elif token.type == 'table_close':
+            headers = table['head'][0] if table['head'] else []
+            for cells in table['body']:
+                lines.append('，'.join(f'{headers[i]}是{value}' if i < len(headers) and headers[i] else value
+                                      for i, value in enumerate(cells) if value) + '。')
+            table = None
+        elif token.type == 'thead_open':
+            cell = 'head'
+        elif token.type == 'tbody_open':
+            cell = 'body'
+        elif token.type == 'tr_open':
+            row = []
+        elif token.type == 'tr_close' and table is not None:
+            table[cell].append(row)
+        elif token.type == 'inline':
+            content = _inline_text(token)
+            if table is not None:
+                row.append(collapse_ws(content))
+            else:
+                lines.extend(content.split('\n'))
+        elif token.type in {'fence', 'code_block'}:
+            lines.extend(token.content.split('\n'))
+    return lines
+
+
+def _strip_list_marker(line):
+    """Plain-text list markers that Markdown does not parse (• and 1、)."""
+    line = line.lstrip()
+    if line.startswith('•'):
+        return line[1:].lstrip()
+    digits = len(line) - len(line.lstrip('0123456789'))
+    if digits and line[digits:digits + 1] == '、':
+        return line[digits + 1:].lstrip()
+    return line
+
+
+def _number_before(text, end):
+    """Start index of a decimal number ending at ``end`` (spaces skipped), or None."""
+    position = end
+    while position > 0 and text[position - 1] == ' ':
+        position -= 1
+    start = position
+    while start > 0 and text[start - 1] in _NUMBER_CHARS:
+        start -= 1
+    if start > 0 and text[start - 1] == '-':
+        start -= 1
+    number = text[start:position]
+    return (start, position) if any(c.isdigit() for c in number) else None
+
+
+def _spoken_units(text):
+    """``3.5℃`` → ``3.5度`` and ``50%`` → ``百分之50`` for TTS."""
+    output, index = [], 0
+    while index < len(text):
+        unit = '℃' if text[index] == '℃' else '°C' if text.startswith('°C', index) else '%' if text[index] == '%' else None
+        if unit:
+            joined = ''.join(output)
+            span = _number_before(joined, len(joined))
+            if span:
+                start, end = span
+                number = joined[start:end]
+                output = [joined[:start] + (number + '度' if unit != '%' else '百分之' + number)]
+                index += len(unit)
+                continue
+        output.append(text[index])
+        index += 1
+    return ''.join(output)
+
+
+def _collapse_stops(text):
     output = []
+    for character in text:
+        if character in '。；' and output and output[-1] in '。；':
+            output[-1] = '。'
+            continue
+        output.append(character)
+    return ''.join(output).strip(' 。；')
+
+
+def speech_text(text: str) -> str:
+    """Remove markup while preserving statements, negation and conditions.
+
+    Called only on complete eligible text, so split URL/Markdown deltas, numbers
+    and units cannot leak through an incremental boundary. No semantic length
+    cutoff is applied here; the model/receipt/result contract controls length.
+    """
+    text = _inline_json(str(text or '').strip())
+    lines = _blocks(text)
+    output, had_url = [], False
     for line in lines:
-        line = re.sub(r'^\s*(?:#{1,6}\s*|>\s*|[-*+•]\s+|\d+(?:[.)]\s+|、\s*))', '', line)
-        line = re.sub(r'[`*_~]+', '', line)
-        line = re.sub(r'<[^>]+>', '', line)
-        line = re.sub(r'\[([^\]]+)\]', r'\1', line)
-        line = line.replace('|', '，')
-        line = re.sub(r'\s+', ' ', line).strip(' |\t')
-        if not line or re.fullmatch(r'[-:|\s]+', line): continue
-        if line.strip('：:。') in {'结论', '调研结果', '查询结果', '详细报告', '来源', '参考来源', '回答', '建议', '核查结果', '结果'}:
+        line, found = remove_urls(_remove_citations(line))
+        had_url = had_url or found
+        line = _strip_list_marker(line)
+        for marker in '`*_~[]|':
+            line = line.replace(marker, '' if marker != '|' else '，')
+        line = collapse_ws(line).strip(' ，\t')
+        if not line or all(c in '-:，' for c in line):
+            continue
+        if line.strip('：:。') in _LABELS:
             continue
         if line.endswith(('：', ':')):
             line = line[:-1]
         if line:
             output.append(line if line[-1] in '。！？!?；;' else line + '。')
-    text = ''.join(output)
-    text = re.sub(r'(-?\d+(?:\.\d+)?)\s*(?:℃|°C)', r'\1度', text)
-    text = re.sub(r'(-?\d+(?:\.\d+)?)\s*%', r'百分之\1', text)
-    text = re.sub(r'[。；]{2,}', '。', text).strip(' 。；')
-    text = re.sub(r'^(?:(?:好的|好呀|收到)[，。！\s]*|(?:以下是结果|以下为你整理|查询结果)[：:。\s]*)+', '', text)
+    text = _collapse_stops(_spoken_units(''.join(output)))
     if text: return text + ('' if text[-1] in '。！？!?' else '。')
     return '相关链接在详情里。' if had_url else ''
 
@@ -121,9 +236,7 @@ def speech_text(text: str) -> str:
 def brief_result(text: str, max_chars: int = 120, max_sentences: int = 3) -> str:
     """Compatibility guard; length budgets belong to the generation contract.
 
-    A deterministic guard cannot know which later facts qualify an earlier
-    recommendation. Preserve all statements when a legacy report lacks its
-    own generated spoken summary. The old budget arguments remain accepted
-    for callers, but never cause sentence or character truncation.
+    The old budget arguments remain accepted but never truncate: a
+    deterministic cut cannot know which later facts qualify earlier ones.
     """
     return speech_text(text)

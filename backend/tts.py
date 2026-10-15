@@ -12,12 +12,13 @@ import asyncio
 import json
 import os
 from pathlib import Path
-import re
 import time
 from typing import Any, AsyncIterator
 from uuid import uuid4
 
 import httpx
+
+from backend.textutil import is_placeholder
 
 TTS_URL = "https://openspeech.bytedance.com/api/v3/tts/unidirectional"
 TTS_RESOURCE_ID = "seed-tts-2.0"
@@ -41,7 +42,9 @@ def _read_speech_config(path: str) -> str:
         raise RuntimeError(f"Speech 凭证文件不可读取，请检查 {CONFIG_FILE_FIELD} 的路径与权限。") from None
     # xcconfig comments are ignored, while values are never evaluated. Other
     # fields and #include directives do not participate in this adapter.
-    content = re.sub(r"/\*.*?\*/", "", content, flags=re.DOTALL)
+    while (start := content.find("/*")) >= 0:
+        end = content.find("*/", start + 2)
+        content = content[:start] + ("" if end < 0 else content[end + 2:])
     fields: dict[str, str] = {}
     for line in content.splitlines():
         # Strip // comments outside literal quotes without decoding escapes.
@@ -55,10 +58,10 @@ def _read_speech_config(path: str) -> str:
             if quote is None and line[index:index + 2] == "//":
                 line = line[:index]
                 break
-        match = re.fullmatch(r"\s*(TTS_API_KEY|TTS_RESOURCE_ID)\s*=\s*(.*?)\s*;?\s*", line)
-        if not match:
+        name, separator, value = line.partition("=")
+        name = name.strip()
+        if not separator or name not in ("TTS_API_KEY", "TTS_RESOURCE_ID"):
             continue
-        name, value = match.groups()
         if name in fields:
             raise RuntimeError(f"Speech xcconfig 中 {name} 重复，未使用不明确的凭证。")
         value = value.strip().removesuffix(";").strip()
@@ -68,8 +71,7 @@ def _read_speech_config(path: str) -> str:
             value = value[1:-1].strip()
         if not value:
             raise RuntimeError(f"Speech xcconfig 缺少有效 {name}。")
-        if re.search(r"\$\(|\$\{", value) or re.fullmatch(
-                r"(?i)(?:x{3,}|\*{3,}|your(?:[-_ ].*)?|replace(?:[-_ ].*)?|changeme|placeholder|todo|<.*>)", value):
+        if is_placeholder(value):
             raise RuntimeError(f"Speech xcconfig 中 {name} 是占位符或动态引用，需要真实静态值。")
         fields[name] = value
     for name in ("TTS_API_KEY", "TTS_RESOURCE_ID"):

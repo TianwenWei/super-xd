@@ -10,17 +10,12 @@ from copy import deepcopy
 import json
 import math
 import logging
-import re
 import unicodedata
 from uuid import uuid4
 
 from jsonschema import Draft202012Validator, ValidationError
 
-from backend.authorization import (validate_literal_authorization,
-                                   validate_literal_feature_target,
-                                   validate_literal_window_hold)
 from backend.catalog import HOT_TOOL_NAMES, SKILLS, TOOLS, execute_tool, load_skill
-from backend.conditions import validate_required_origin
 from backend.models import sanitized_error, utcnow
 from backend.prompt_templates import render_prompt
 from backend.settings import VEHICLE_CONTROL_MODEL
@@ -247,12 +242,15 @@ def _user_history(history, request_text):
     return values
 
 
-def _navigation_literal(source_text, destination):
-    match = re.search(r'(?:目的地\s*(?:设置|设|更改|修改|改|切换)(?:成|为|到)|导航(?:到|去))\s*(.+?)\s*[。！？!?]*$', source_text)
-    if match:
-        target = match[1].strip().strip('“”"「」『』')
-        if destination != target:
-            raise ValueError('navigation_literal_mismatch')
+def destination_grounded(destination, sources):
+    """A destination must be copied from what the user (or a result) actually said.
+
+    This is a provenance check on a structured argument, not place recognition:
+    the model resolves references; code only refuses a name that appears in
+    none of the supplied texts (whitespace ignored, as ASR may insert spaces).
+    """
+    compact = ''.join(str(destination or '').split())
+    return bool(compact) and any(compact in ''.join(str(text or '').split()) for text in sources)
 
 
 def validate_vehicle_plan(plan, request_text, vehicle, allowed_tools=None, completed_operations=None, history=None):
@@ -336,10 +334,6 @@ def validate_vehicle_plan(plan, request_text, vehicle, allowed_tools=None, compl
                 raise ValueError('completed_intent_has_no_real_receipt')
             if set(ids) & used_completed:
                 raise ValueError('completed_operation_reused')
-            for identity in ids:
-                operation = completed[identity]
-                if validate_literal_feature_target(intent['source_text'], operation['name'], operation['arguments'], vehicle):
-                    raise ValueError('completed_receipt_target_mismatch')
             used_completed.update(ids)
         elif intent['completed_operation_ids']:
             raise ValueError('completed_receipt_bound_to_wrong_status')
@@ -367,15 +361,9 @@ def validate_vehicle_plan(plan, request_text, vehicle, allowed_tools=None, compl
     for action in ordered:
         name, arguments = action['name'], action['arguments']
         validate_vehicle_action_keep(name, arguments, candidate, declared_keep)
-        guard = (validate_required_origin(request_text, name, arguments, _user_history(history, request_text))
-                 or validate_literal_feature_target(by_intent[action['intent_id']]['source_text'], name, arguments, candidate)
-                 or validate_literal_feature_target(request_text, name, arguments, candidate)
-                 or validate_literal_window_hold(request_text, name, arguments, candidate)
-                 or validate_literal_authorization(request_text, name, arguments, candidate))
-        if guard:
-            raise ValueError(f'literal_guard:{guard["kind"]}: {guard["reason"]}')
-        if name == 'set_navigation_destination':
-            _navigation_literal(by_intent[action['intent_id']]['source_text'], arguments['destination'])
+        if name == 'set_navigation_destination' and not destination_grounded(
+                arguments['destination'], [request_text, *_user_history(history, request_text)]):
+            raise ValueError('destination_not_in_request: 目的地须逐字取自用户原话，不能改写或补全')
         outcome = execute_tool(name, arguments, candidate)
         if not outcome['ok']:
             raise ValueError(f'simulation_refused: {action["id"]}: {outcome.get("reason")}')

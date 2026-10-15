@@ -7,11 +7,12 @@ from __future__ import annotations
 
 from datetime import date as Date, datetime, timezone
 import math
-import re
 import unicodedata
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
+
+from backend.textutil import has_cjk, is_alpha2
 
 
 GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
@@ -78,7 +79,7 @@ class WeatherClient:
         except (ZoneInfoNotFoundError, ValueError):
             raise RuntimeError("城市地理编码缺少有效IANA时区。") from None
         country_code = item.get("country_code")
-        if not isinstance(country_code, str) or not re.fullmatch(r"[A-Za-z]{2}", country_code):
+        if not is_alpha2(country_code):
             raise RuntimeError("城市地理编码国家代码无效。")
         result = {"id": item.get("id"), "name": item["name"], "latitude": latitude,
                   "longitude": longitude, "timezone": city_timezone, "country_code": country_code.upper()}
@@ -95,18 +96,18 @@ class WeatherClient:
         if not isinstance(city, str) or not 1 <= len(city.strip()) <= 200:
             raise RuntimeError("请提供有效城市名称。")
         city = city.strip()
-        if not isinstance(date, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+        if not isinstance(date, str) or len(date) != 10:
             raise RuntimeError("天气日期必须为YYYY-MM-DD。")
         try:
             requested = Date.fromisoformat(date)
         except ValueError:
             raise RuntimeError("天气日期无效。") from None
         if country_code is not None:
-            if not isinstance(country_code, str) or not re.fullmatch(r"[A-Za-z]{2}", country_code):
+            if not is_alpha2(country_code):
                 raise RuntimeError("国家代码必须为两个字母。")
             country_code = country_code.upper()
         params = {"name": city, "count": 10, "format": "json",
-                  "language": "zh" if re.search(r"[\u3400-\u9fff]", city) else "en"}
+                  "language": "zh" if has_cjk(city) else "en"}
         if country_code is not None:
             params["countryCode"] = country_code
         geocoding, geocoding_source_url = await self._json(GEOCODING_URL, params)

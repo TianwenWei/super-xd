@@ -1,8 +1,8 @@
 """Persona only affects presentation; tool policies and schemas are shared."""
 import json
-import re
 from backend.types import PersonaConfig
 from backend.prompt_templates import render_prompt
+from backend.textutil import collapse_ws
 
 PERSONAS = {
     'professional': PersonaConfig(id='professional', name='简洁专业', tone='准确、克制、直达重点', sentence_length='short', catchphrase_frequency='never'),
@@ -16,8 +16,18 @@ def style_prompt(persona):
 
 
 def _sentence(text):
-    text = re.sub(r'\s+', ' ', str(text or '')).strip()
+    text = collapse_ws(text)
     return text if not text or text[-1] in '。！？.!?' else text + '。'
+
+
+def _question_particle(text, particle):
+    """Add a tone particle before the first question mark of a clause."""
+    for index, character in enumerate(text):
+        if character in '？?' and index and text[index - 1] not in '。！？.!?':
+            if text[index - 1] in '吗呢呀吧':
+                return text
+            return text[:index] + particle + text[index:]
+    return text
 
 
 def _soften_success(text, particle):
@@ -36,7 +46,7 @@ def _soften_success(text, particle):
 
 def render(persona, kind, detail=''):
     style = persona.id if persona.id in PERSONAS else ('professional' if persona.catchphrase_frequency == 'never' else 'playful' if persona.catchphrase_frequency == 'normal' else 'warm')
-    detail = re.sub(r'\s+', ' ', str(detail or '')).strip()
+    detail = collapse_ws(detail)
     if kind == 'success':
         return _sentence(detail) if style == 'professional' else _soften_success(detail, '啦' if style == 'playful' else '了')
     if kind == 'delegated':
@@ -49,9 +59,7 @@ def render(persona, kind, detail=''):
         detail = detail.replace('可以在对应的任务卡里补充。', '').strip()
         if style != 'professional':
             particle = '呀' if style == 'playful' else '呢'
-            detail = re.sub(r'([^。！？.!?])([？?])',
-                            lambda match: match[1] + ('' if match[1] in '吗呢呀吧' else particle) + match[2],
-                            detail, count=1)
+            detail = _question_particle(detail, particle)
         return _sentence(detail)
     if kind in {'refused', 'error'}:
         start = ({'professional': '未执行，', 'warm': '这次没能执行，', 'playful': '这次没做成，'}

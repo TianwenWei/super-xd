@@ -14,7 +14,6 @@ import json
 import math
 import os
 from pathlib import Path
-import re
 import struct
 import time
 from typing import Any, AsyncIterator
@@ -22,6 +21,8 @@ from uuid import uuid4
 import zlib
 
 from dotenv import dotenv_values
+
+from backend.textutil import is_identifier, is_placeholder, redact_bearer, redact_header_values
 
 ASR_URL = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async"
 ASR_RESOURCE_ID = "volc.seedasr.sauc.duration"
@@ -48,9 +49,7 @@ _FILE_FIELDS = {
 
 
 def _literal(value: str) -> bool:
-    return not re.search(r"\$\(|\$\{", value) and not re.fullmatch(
-        r"(?i)(?:x{3,}|\*{3,}|your(?:[-_ ].*)?|replace(?:[-_ ].*)?|changeme|placeholder|todo|<.*>)",
-        value)
+    return not is_placeholder(value)
 
 
 def _file_config(path: str) -> dict[str, str]:
@@ -277,9 +276,8 @@ class VolcanoASR:
             os.getenv("VOLCENGINE_SPEECH_ACCESS_TOKEN"))))
         for secret in sorted(secrets, key=len, reverse=True):
             message = message.replace(secret, "[redacted]")
-        message = re.sub(r"(?i)(?:bearer\s+)[^\s,;]+", "Bearer [redacted]", message)
-        message = re.sub(r"(?i)([\"']?(?:x-api-(?:key|access-key|app-key)|authorization)[\"']?\s*[:=]\s*)[^\r\n,}]+",
-                         r"\1[redacted]", message)
+        message = redact_header_values(redact_bearer(message),
+                                       ("x-api-key", "x-api-access-key", "x-api-app-key", "authorization"))
         return message[:320]
 
     def _headers(self, request_id: str) -> dict[str, str]:
@@ -302,7 +300,7 @@ class VolcanoASR:
     async def open(self, request_id: str) -> ASRConnection:
         if self._closing:
             raise RuntimeError("ASR 适配器已关闭。")
-        if not isinstance(request_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", request_id):
+        if not isinstance(request_id, str) or not is_identifier(request_id, max_length=128, extra="_.:-", alnum_first=True):
             raise ValueError("ASR request_id 必须是 1 至 128 位安全标识符。")
         headers = self._headers(request_id)
         connect = self._ws_connect

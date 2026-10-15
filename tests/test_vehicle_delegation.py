@@ -275,7 +275,9 @@ async def test_completed_hot_operation_is_bound_to_real_receipt_and_not_reexecut
         ])
     planner.responses = [complete_remaining]
     actor, q, ark = await make_actor([
-        {'tool_calls': [call('set_ambient_light', {'enabled': True}, 'ambient-first')]},
+        # A retryable sibling error returns control to the Talker after the hot receipt.
+        {'tool_calls': [call('set_ambient_light', {'enabled': True}, 'ambient-first'),
+                        call('manage_task', {'action': 'get'}, 'no-task')]},
         {'tool_calls': [delegate(['locks'], 'remaining')]},
     ], planner)
     await actor.post({'type': 'input', 'text': original})

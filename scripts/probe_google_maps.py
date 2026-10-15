@@ -8,8 +8,6 @@ from datetime import datetime, timedelta, date
 import json
 import os
 from pathlib import Path
-import re
-import shlex
 import time
 from zoneinfo import ZoneInfo
 
@@ -22,15 +20,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def read_key():
-    # Read only the named assignment; do not execute unrelated shell startup code.
-    config = Path.home() / '.zshrc'
-    if config.exists():
-        for line in reversed(config.read_text().splitlines()):
-            match = re.match(r'^\s*(?:export\s+)?GOOGLE_MAPS_API_KEY\s*=\s*(.*)$', line)
-            if match:
-                parts = shlex.split(match.group(1), comments=True)
-                if len(parts) == 1 and '$' not in parts[0] and '`' not in parts[0]:
-                    return parts[0]
+    # .env is loaded by backend.settings; shell startup files are not credentials sources.
+    from backend import settings  # noqa: F401
     return os.environ.get('GOOGLE_MAPS_API_KEY', '')
 
 

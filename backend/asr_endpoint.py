@@ -1,11 +1,12 @@
 """One explicit microphone capture per socket; recognition never executes a query."""
 import asyncio
 import json
-import re
 import time
 
 from fastapi import WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
+
+from backend.textutil import is_identifier
 
 MAX_PCM_BYTES = 16000 * 2 * 60
 MAX_FRAME_BYTES = 6400
@@ -146,7 +147,7 @@ async def recognize_socket(ws: WebSocket, actor, asr):
         body = control_message(event)
         capture_id = body.get('capture_id')
         if (body.get('type') != 'asr.start' or not isinstance(capture_id, str)
-                or not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', capture_id)):
+                or not is_identifier(capture_id, max_length=80)):
             capture_id = None
             raise ASRInputError('请先发送有效的语音开始消息。')
         if (body.get('format') != 'pcm_s16le' or type(body.get('sample_rate')) is not int
