@@ -1,0 +1,19 @@
+[
+  {"id": "destination_kept_verbatim", "tags": ["navigation"],
+   "turns": [{"input": "导航去北京首都国际机场T3航站楼",
+              "expect": {"commands": [{"name": "set_navigation_destination", "arguments": {"destination": "北京首都国际机场T3航站楼"}}],
+                         "commands_exact": true}}]},
+  {"id": "nearest_without_origin_asks", "tags": ["navigation", "origin"],
+   "turns": [{"input": "导航去最近的机场",
+              "expect": {"no_commands": true, "tasks_created": 0,
+                         "forbid_talker_calls": ["set_navigation_destination", "search_places", "delegate_task", "start_poi_navigation"]}}]},
+  {"id": "nearby_without_origin_asks", "tags": ["navigation", "origin"],
+   "turns": [{"input": "找一下附近的充电站",
+              "expect": {"no_commands": true, "tasks_created": 0,
+                         "forbid_talker_calls": ["search_places", "delegate_task"]}}]},
+  {"id": "nearest_with_stated_origin", "tags": ["navigation", "origin", "maps"],
+   "turns": [{"input": "我现在在上海人民广场",
+              "expect": {"no_commands": true}},
+             {"input": "导航去最近的机场",
+              "expect": {"forbid_talker_calls": ["delegate_task"], "allow_error": true}}]}
+]

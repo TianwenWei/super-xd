@@ -1,0 +1,20 @@
+[
+  {"id": "chat_no_tools", "tags": ["routing"], "personas": ["professional", "warm", "playful"],
+   "turns": [{"input": "今天好累啊",
+              "expect": {"no_talker_calls": true, "no_commands": true, "tasks_created": 0}}]},
+  {"id": "weather_direct_lookup", "tags": ["routing", "maps"],
+   "turns": [{"input": "明天成都天气怎么样？",
+              "expect": {"talker_calls": [{"name": "get_weather", "arguments": {"date": "tomorrow"}}],
+                         "forbid_talker_calls": ["delegate_task"], "tasks_created": 0, "allow_error": true}}]},
+  {"id": "weather_official_source_delegated", "tags": ["routing", "task"],
+   "turns": [{"input": "核实英国气象局官网上伦敦后天的天气，给我来源",
+              "expect": {"talker_calls": [{"name": "delegate_task", "arguments": {"query_domain": "weather", "query_mode": "quick"}}],
+                         "tasks_created": 1}}]},
+  {"id": "research_delegated", "tags": ["routing", "task"],
+   "turns": [{"input": "帮我比较一下杭州西湖附近三家适合带孩子住的酒店",
+              "expect": {"talker_calls": [{"name": "delegate_task"}], "tasks_created": 1, "no_commands": true}}]},
+  {"id": "cabin_temperature_is_not_weather", "tags": ["routing"],
+   "turns": [{"input": "车里温度调到24度",
+              "expect": {"commands": [{"name": "set_temperature", "arguments": {"temperature": 24}}],
+                         "forbid_talker_calls": ["get_weather", "delegate_task"]}}]}
+]

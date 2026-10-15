@@ -1,0 +1,23 @@
+[
+  {"id": "cold_mixed_delegated_once", "tags": ["planner"], "personas": ["professional", "warm", "playful"],
+   "turns": [{"input": "打开主驾按摩，再把后视镜折起来",
+              "expect": {"talker_calls": [{"name": "delegate_vehicle_control"}],
+                         "commands": [{"name": "set_seat_massage", "arguments": {"seat": "driver"}},
+                                      {"name": "set_mirror_fold", "arguments": {"folded": true}}],
+                         "state": {"mirrors.folded": true}}}]},
+  {"id": "cold_single_mirror_heating", "tags": ["planner"],
+   "turns": [{"input": "打开后视镜加热",
+              "expect": {"talker_calls": [{"name": "delegate_vehicle_control"}],
+                         "commands": [{"name": "set_mirror_heating", "arguments": {"enabled": true}}],
+                         "state": {"mirrors.heating": true}}}]},
+  {"id": "planner_hold_kept", "tags": ["planner", "hold"],
+   "turns": [{"input": "打开后视镜加热，方向盘加热别动",
+              "expect": {"commands": [{"name": "set_mirror_heating", "arguments": {"enabled": true}}],
+                         "forbid_commands": [{"name": "set_steering_heating"}],
+                         "unchanged": ["seats.steering_heating"]}}],
+   "vehicle": {"seats.steering_heating": true}},
+  {"id": "planner_dependency_order", "tags": ["planner"],
+   "turns": [{"input": "先解锁全部车门，再打开尾门",
+              "expect": {"talker_calls": [{"name": "delegate_vehicle_control"}],
+                         "commands": [{"name": "unlock_all_doors"}, {"name": "set_tailgate_open", "arguments": {"open": true}}]}}]}
+]
