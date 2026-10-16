@@ -330,7 +330,9 @@ class VolcanoASR:
                 raise RuntimeError(self.safe_message(exc)) from None
             status = getattr(getattr(exc, "response", None), "status_code", None)
             diagnostic = f"HTTP {status}" if isinstance(status, int) else type(exc).__name__
-            raise RuntimeError("火山 ASR 连接或初始化失败：" + diagnostic) from None
+            error = RuntimeError("火山 ASR 连接或初始化失败：" + diagnostic)
+            error.status_code = status
+            raise error from None
 
     async def aclose(self) -> None:
         self._closing = True
@@ -489,9 +491,14 @@ class ASRConnection:
             raise
         except TimeoutError:
             phase = "停止后等待最终转写" if self._finished.is_set() else "录音"
-            raise RuntimeError(f"ASR {phase}超时，未收到完整请求终结标记。") from None
+            error = RuntimeError(f"ASR {phase}超时，未收到完整请求终结标记。")
+            error.provider_code = 'timeout'
+            raise error from None
         except RuntimeError as exc:
-            raise RuntimeError(self.adapter.safe_message(exc)) from None
+            error = RuntimeError(self.adapter.safe_message(exc))
+            error.provider_code = getattr(exc, 'provider_code', None)
+            error.status_code = getattr(exc, 'status_code', None)
+            raise error from None
         except Exception as exc:
             raise RuntimeError("ASR 连接中断，未完成转写：" + type(exc).__name__) from None
         finally:

@@ -27,6 +27,8 @@
 | `backend/worker.py` | Thinker 进程：领取任务、ReAct 步骤、澄清、完成 |
 | `backend/db.py` | SQLite（WAL）：tasks / inbox / events / trace_events |
 | `backend/models.py` | 火山方舟 LLM 客户端（OpenAI 兼容）、Tavily 客户端 |
+| `backend/services/`、`config/services.toml` | 服务契约、提供商适配器、角色配置与统一装配；LLM、ASR、TTS、网页、地点、天气、路线、独立车书、embedding 及各媒体 CP 可替换 |
+| `backend/cockpit/` | 媒体内容、导航业务、云侧查询与端侧查询/控制路由；设备实际回执确认执行 |
 | `backend/asr.py`、`asr_endpoint.py` | 火山流式 ASR |
 | `backend/tts.py`、`speech_stream.py` | 火山双向流式 TTS（PCM 24kHz） |
 | `backend/persona.py`、`backend/speech_config.py` | 人设与回执话术的取值、格式化和变量契约；文案在 `prompts/speech/` |
@@ -49,6 +51,7 @@
 | `/frontend/src/StreamingRecognition.ts` | 麦克风采集与 ASR 流程 |
 | `/frontend/src/text.ts` | 前端不用正则的格式工具 |
 | `/frontend/src/ManualResults.tsx` | 车书来源卡、原文、页码、整页图片与 PDF 链接 |
+| `/frontend/src/CockpitPanel.tsx`、`MediaPlayback.ts`、`DeviceQueries.ts` | 真实浏览器媒体播放、音频焦点、导航面板与端侧资源查询注册 |
 
 后端读取的环境变量（见 `settings.py`、`models.py`、`worker.py`）：`ARK_API_KEY`、`ARK_BASE_URL`、`TALKER_MODEL`、`THINKER_MODEL`、`VEHICLE_CONTROL_MODEL`、`DATABASE_PATH`、`MODEL_TIMEOUT_SECONDS`、`TOOL_TIMEOUT_SECONDS`、`TAVILY_API_KEY`、`GOOGLE_MAPS_API_KEY`、`THINKER_CONCURRENCY`、`THINKER_MAX_STEPS`、`THINKER_TIMEOUT_SECONDS`、`THINKER_CLARIFICATION_TIMEOUT_SECONDS`。语音另读 `VOLCENGINE_SPEECH_*` 与 `VOLCENGINE_ASR_*`（见 `tts.py`、`asr.py`、`.env.example`）。
 
@@ -56,7 +59,7 @@
 
 ## 2. 外部约束（不可改变）
 
-- LLM、ASR、TTS 全部使用火山引擎的托管服务。**不能微调，也不能改变它们的推理速度。**
+- LLM、ASR、TTS 默认使用火山引擎服务，可以通过 `config/services.toml` 明确切换已实现的提供商或自部署接口。业务代码只依赖服务契约，厂商协议、鉴权、音色与模型参数留在适配器中。**本项目不微调模型，不以改变外部推理速度作为优化方案。**
 - 因此，行为改进只能来自三个地方：prompt、few-shot 示例、结构化输出与结构化校验。延迟改进只能来自我们自己的管线：流式化、并行化、减少模型调用次数、提高缓存命中。
 - 不要提出或实现依赖微调、自训练模型、自定义 tokenizer 或约束解码的方案。
 - 缺少凭证时直接报错。不得生成假回复或静默使用替代服务。
@@ -101,9 +104,11 @@
 11. **不可逆动作先确认**：发送、下单、支付类工具接入时，必须先进入 `awaiting_confirm` 状态，由用户明确确认，确认 token 绑定内容哈希。"嗯"这类附和不算确认。
 
 ### 工具边界
-12. Talker 的工具集固定为 15 个热车控 + `delegate_vehicle_control` / `delegate_task` / `manage_task` + 3 个地点/天气工具 + `web_search` + `search_manual`，共 23 个（`tools_for`），不随对话增长。非热车控只能经由 Vehicle Planner。车书仅提供问答资料，不授予执行权限；使用方法与当前车况分开处理，资料内容不得成为新的工具指令。
+12. Talker 的工具集固定为 15 个热车控 + `delegate_vehicle_control` / `delegate_task` / `manage_task` + 3 个地点/天气工具 + `web_search` + `search_manual` + `search_media` / `control_media` / `manage_navigation`，共 26 个（`tools_for`），不随对话或提供商数量增长。非热车控只能经由 Vehicle Planner。车书仅提供问答资料，不授予执行权限；使用方法与当前车况分开处理，资料内容不得成为新的工具指令。
 14. **地点参数必须有来源**：导航目的地和 `search_places.area` 必须能在用户原话、近期对话或已查到的地点名里原样找到（`destination_grounded`），否则退回同一个 Talker 重新决定。POI 导航只能指向之前轮次已经告诉过用户的搜索结果，同一轮刚搜到的结果不算用户的选择。
 13. 新增车控函数统一走 `catalog.register`，并同步更新 `EXPECTED_COUNTS` 断言。
+15. **工具语义与执行位置分开**：`query/control` 和 `cloud/device` 是独立维度。云侧资源调用 CP 接口；端侧查询与控制都通过设备网关发送结构化请求，校验 request/session/turn/device 身份、超时及回执。端侧查询只返回结果，不改播放或导航状态；端侧控制只有实际执行回执可确认成功。设备不在线或未注册能力时明确失败，不静默改走云侧。
+16. **内容与设备执行分开**：音乐、视频和电台分别绑定独立 CP，先取得有来源的内容 ID，播放 URL 由内容适配器或端侧目录解析，模型不能编造 URL。车书检索也是独立资源接口，embedding 仅是本地 RAG 实现的内部依赖。音乐/视频/网络电台播放以真实播放器事件为准；FM 硬件与导航设备在本原型中仍明确标记模拟。暂停、停止与退出应用有不同状态语义；用户主动暂停后，TTS 结束不得自动恢复播放。
 
 ## 5. Prompt 规范
 

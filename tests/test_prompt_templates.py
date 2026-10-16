@@ -116,7 +116,7 @@ async def test_dynamic_state_does_not_change_stable_prefix_or_tools(monkeypatch)
     after = await capture_case(runtime, second, '2026-10-15T12:00:00+00:00')
     assert before['messages'][:1] == after['messages'][:1]
     assert before['tools'] == after['tools']
-    assert len(before['tools']) == 23
+    assert len(before['tools']) == 26
     assert before['messages'] != after['messages']
 
 
@@ -126,7 +126,7 @@ async def test_voice_and_text_send_the_same_single_request_shape(monkeypatch, mo
     monkeypatch.setattr(runtime.session, 'utcnow', runtime.session.utcnow)
     case = {'id': 'speech-contract', 'role': 'talker', 'text': '简单介绍秋天。', 'speech_mode': mode}
     request = await capture_case(runtime, case, '2026-10-14T12:00:00+00:00')
-    assert len(request['tools']) == 23
+    assert len(request['tools']) == 26
     assert request['messages'][0]['content'].startswith(prompt_templates.load_prompt('talker').split('{{hot_tool_names}}', 1)[0])
     assert not any('response_mode' in (m.get('content') or '') for m in request['messages'])
 

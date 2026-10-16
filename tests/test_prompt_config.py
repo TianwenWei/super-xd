@@ -64,7 +64,7 @@ def test_config_paths_are_restricted(path):
 def test_production_inventory_and_contracts():
     summary = config.validate_all()
     assert summary['templates'] == 18
-    assert summary['text_files'] == 9
+    assert summary['text_files'] == 11
     assert summary['text_entries'] > 500
 
 

@@ -1,0 +1,6 @@
+[search_media]
+description = "搜索配置好的音乐、视频或网络电台内容，返回真实内容ID与来源；不能编造内容或播放URL。播放指定歌名/歌手、视频或电台时先搜索，多个候选先让用户选。对应内容服务未配置时明确不可用，不回退假内容。"
+[control_media]
+description = "控制真实前端播放器：play须填写已搜索到的content_id；pause暂停并保留当前进度、resume从暂停进度恢复、stop停止并回到开头但保留已选内容和应用、exit退出应用并释放/清空播放器、next/previous播放已知队列相邻内容、seek须position_seconds、volume须0至100、get_status读取状态。音乐、视频、网络电台共用此工具；不调用模拟play_media或control_playback代替真实播放。执行以播放器实际回执为准，只能说正在做。"
+[manage_navigation]
+description = "对本会话已向用户展示且已由用户选定的place_ref进行模拟导航：start设置目的地，add_waypoint增加POI途经点，remove_waypoint须waypoint_ref，cancel取消，get_status读状态，set_origin设置已确认地点为起点，route只查真实配置路线提供商，可用origin_ref指定已确认起点；没有已知起点就先询问，不能猜测GPS。不得编造地点引用；同轮刚搜到且用户未选择的候选不能启动或添加。路线查询成功不等于导航已执行；无真实路线服务时明确不可用，不编造距离或时间。"

@@ -1,0 +1,22 @@
+not_configured = "媒体内容服务还没有配置，暂时无法查询或播放。"
+unknown_content = "这个内容还没有查到，请先搜索并选择要播放的内容。"
+unknown_place = "这个地点不在当前会话的已知结果里，请先搜索并选择。"
+place_not_confirmed = "请先选定一个已展示的地点，再开始导航或添加途经点。"
+no_content = "播放器里还没有内容，请先选择要播放的音乐、视频或电台。"
+queue_boundary = "当前队列里没有相邻的可播放内容。"
+invalid_action = "这项播放器或导航操作缺少有效参数，暂时没有执行。"
+device_failed = "设备没有完成这次操作，请查看对应面板后重试。"
+device_timeout = "还没有收到设备的实际回执，暂时无法确认操作完成。"
+stale_receipt = "这次操作已过期，结果没有应用。"
+video_driving = "行驶中暂时不能在主驾屏幕播放视频。"
+media_done = "播放器已确认这次操作。"
+navigation_done = "模拟导航面板已更新。"
+route_not_configured = "真实路线服务还没有配置，暂时不能给出路线、距离或到达时间。"
+
+origin_required = "还没有导航起点，请先搜索并设定你的出发地点。"
+unsupported_coordinate_system = "这个地点的坐标系与路线服务不兼容，暂时不能计算真实路线。"
+
+navigation_failed = "导航设备没有完成这次操作，请查看导航面板后重试。"
+route_failed = "这次没有查到可用的真实路线，请稍后重试；当前没有距离或到达时间。"
+
+unsupported_capability = "这台设备还没有提供这项能力，暂时无法完成这次查询或操作。"

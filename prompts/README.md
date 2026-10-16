@@ -17,6 +17,8 @@
 | 人设名字、语气和固定开头 | [speech/persona.toml](speech/persona.toml) |
 | 后台结果的来源、限制说明和固定天气播报 | [speech/thinker.toml](speech/thinker.toml) |
 | 模拟车端的拒绝原因和状态说明 | [speech/vehicle.toml](speech/vehicle.toml) |
+| 音乐、视频、电台与导航的模型工具说明 | [cockpit/tools.toml](cockpit/tools.toml) |
+| 播放器、导航与路线查询的固定反馈 | [cockpit/feedback.toml](cockpit/feedback.toml) |
 
 ## 文件索引
 
@@ -66,6 +68,15 @@
 | [manual/embedding_query.md](manual/embedding_query.md) | 用户问题检索时，作为 Query embedding 请求指令 | 无；问题文字由调用方独立提供 |
 
 这两份指令与索引里的模型、维度、Corpus/Query 配置绑定。**修改任意一份后都必须重建车书索引**；现有索引与新指令不一致时会明确报错，不能继续混用旧向量。使用新的索引文件完成建库，再将 `MANUAL_INDEX_PATH` 指向它。具体步骤与凭证要求见 [车书检索文档](../docs/MANUAL_RAG.md)。
+
+### 媒体与导航
+
+| 文件 | 使用时机 | 可用变量 |
+|---|---|---|
+| [cockpit/tools.toml](cockpit/tools.toml) | 构造固定的 `search_media`、`control_media`、`manage_navigation` 工具说明 | 无 |
+| [cockpit/feedback.toml](cockpit/feedback.toml) | 根据真实内容查询、设备执行或路线失败生成固定反馈 | 无 |
+
+内容提供商及端侧查询的选择不在本目录修改，见 [运行服务配置](../docs/SERVICE_PROVIDERS.md)。
 
 ### 固定话术
 

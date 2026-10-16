@@ -81,6 +81,8 @@ def matches(spec, call):
 def grade(expect, observed):
     """Return a list of failure strings; empty means the turn passed."""
     failures = []
+    if 'model_calls' in expect and observed.get('model_calls') != expect['model_calls']:
+        failures.append(f'expected {expect["model_calls"]} model calls, got {observed.get("model_calls")}')
     commands, talker = observed['commands'], observed['talker_calls']
     for spec in expect.get('commands', []):
         if not any(matches(spec, item) for item in commands):
@@ -99,6 +101,14 @@ def grade(expect, observed):
     for options in expect.get('talker_call_options', []):
         if not any(matches(spec, item) for spec in options for item in talker):
             failures.append(f'missing talker call from accepted structured options {options}')
+    for spec in expect.get('cockpit_commands', []):
+        if not any(subset(spec,item) for item in observed.get('cockpit_commands', [])):
+            failures.append(f'missing cockpit command {spec}')
+    if expect.get('cockpit_commands_exact') and len(observed.get('cockpit_commands', [])) != len(expect.get('cockpit_commands', [])):
+        failures.append('unexpected cockpit command count')
+    for path,value in expect.get('cockpit_state', {}).items():
+        if not subset(value,state_value(observed['cockpit'],path)):
+            failures.append(f'cockpit state mismatch: {path}')
     for name in expect.get('forbid_lookups', []):
         if name in observed.get('lookups', []):
             failures.append(f'forbidden lookup executed: {name}')
@@ -138,6 +148,7 @@ async def _drive_turn(actor, outgoing, text):
     before = copy.deepcopy(actor.vehicle)
     await actor.post({'type': 'input', 'text': text})
     commands, cards, turn_id, receipts, lookups, lookup_results = [], [], None, [], [], []
+    cockpit_commands, device_queries = [], []
 
     async def execute(event):
         receipt = await actor.simulator.execute(event['command_id'])
@@ -154,6 +165,19 @@ async def _drive_turn(actor, outgoing, text):
                 commands.append({'name': event['name'], 'arguments': event['arguments'],
                                  'source': event.get('source', 'talker')})
                 receipts.append(asyncio.create_task(execute(event)))
+            elif kind == 'cockpit.command' and event.get('turn_id') == turn_id:
+                # Explicit eval device fixtures; this is not browser playback verification.
+                envelope = {key:event[key] for key in ('command_id','request_id','session_id','turn_id','target_device','kind')}
+                if event['kind'] == 'control':
+                    cockpit_commands.append({'domain':event['domain'],'action':event['action'],'arguments':copy.deepcopy(event['arguments'])})
+                    pending = actor.pending_cockpit[event['command_id']]
+                    await actor.post({'type':'cockpit.receipt',**envelope,'ok':True,
+                        'state_version':event['expected_state_version']+1,'state':copy.deepcopy(pending['expected'])})
+                else:
+                    device_queries.append({'domain':event['domain'],'action':event['action']})
+                    state = actor.cockpit_state['media']
+                    await actor.post({'type':'cockpit.receipt',**envelope,'ok':True,
+                        'result':{'ok':True,'state':copy.deepcopy(state),'state_version':state['version']}})
             elif kind == 'lookup.result' and event.get('turn_id') == turn_id:
                 lookups.append(event['tool'])
                 lookup_results.append({'tool': event['tool'], 'result': copy.deepcopy(event['result'])})
@@ -172,7 +196,9 @@ async def _drive_turn(actor, outgoing, text):
             except ValueError:
                 arguments = {'_raw': call['function'].get('arguments')}
             talker.append({'name': call['function']['name'], 'arguments': arguments})
-    return {'commands': commands, 'talker_calls': talker, 'lookups': lookups, 'lookup_results': lookup_results, 'vehicle': copy.deepcopy(actor.vehicle),
+    return {'cockpit_commands':cockpit_commands,'device_queries':device_queries,
+            'cockpit':copy.deepcopy(actor.cockpit_state),'cockpit_device_mode':'explicit_eval_fixture' if actor.cockpit else None,
+            'commands': commands, 'talker_calls': talker, 'lookups': lookups, 'lookup_results': lookup_results, 'vehicle': copy.deepcopy(actor.vehicle),
             'vehicle_before': before, 'tasks_created': len(cards), 'route': done['metrics'].get('route'),
             'error': done['metrics'].get('error'), 'text': done['text'], 'preface': done['metrics'].get('preface'),
             'model_calls': done['metrics'].get('model_calls'), 'total_ms': done['metrics'].get('total_ms'),
@@ -182,7 +208,11 @@ async def _drive_turn(actor, outgoing, text):
 async def run_case(case, ark, *, persona='warm', planner=None, maps=None, repeat=0):
     with tempfile.TemporaryDirectory() as directory:
         db = Database(Path(directory) / 'eval.sqlite3')
-        actor = SessionActor(f"eval-{case['id']}", db, ark, vehicle_planner=planner, maps=maps)
+        cockpit = None
+        if 'cockpit' in case:
+            from backend.cockpit import CockpitServices, LocalMediaCatalog
+            cockpit = CockpitServices(LocalMediaCatalog(case['cockpit'].get('items', [])))
+        actor = SessionActor(f"eval-{case['id']}", db, ark, vehicle_planner=planner, maps=maps, cockpit=cockpit)
         try:
             outgoing = await actor.attach()
             await outgoing.get()
@@ -190,6 +220,11 @@ async def run_case(case, ark, *, persona='warm', planner=None, maps=None, repeat
             for path, value in case.get('vehicle', {}).items():
                 set_state_value(actor.vehicle, path, value)
                 set_state_value(actor.simulator.state, path, value)
+            if 'cockpit' in case:
+                from backend.cockpit.media import media_item
+                actor.media_choices = {item['content_id']:media_item(item) for item in case['cockpit'].get('items', [])}
+                for path,value in case['cockpit'].get('state', {}).items():
+                    set_state_value(actor.cockpit_state,path,value)
             for task in case.get('tasks', []):
                 created = await asyncio.to_thread(db.create_task, actor.id, task['goal'], task.get('context', {}))
                 if task.get('state'):
@@ -233,9 +268,10 @@ def free_text_fields():
     from backend.maps_tools import MAPS_TOOLS
     from backend.web_search import WEB_TOOLS
     from backend.manual_search import MANUAL_TOOLS
+    from backend.cockpit.tools import COCKPIT_TOOLS
     schemas = {name: spec.parameters for name, spec in TOOLS.items()}
     schemas.update({t['function']['name']: t['function']['parameters']
-                    for t in CONTROL_TOOLS + MAPS_TOOLS + WEB_TOOLS + MANUAL_TOOLS})
+                    for t in CONTROL_TOOLS + MAPS_TOOLS + WEB_TOOLS + MANUAL_TOOLS + COCKPIT_TOOLS})
     return {name: {key for key, prop in schema.get('properties', {}).items()
                    if prop.get('type') == 'string' and 'enum' not in prop}
             for name, schema in schemas.items()}

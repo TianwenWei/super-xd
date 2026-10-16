@@ -11,6 +11,8 @@
 
 提示词、模型工具说明和固定播报话术统一在根目录 [prompts/](prompts/README.md)，按 Talker、Planner、Thinker、车控和语音分组。修改入口、模板变量、校验及重启方法见 [配置索引](prompts/README.md)。
 
+可替换服务集中在 [config/services.toml](config/services.toml)：LLM、ASR、TTS、网页、地点、天气、路线、车书和 embedding 分别配置；音乐、视频、电台各自绑定独立 CP。内容查询与端侧播放/导航/车控分开，支持端侧只读查询。接入方式与当前支持范围见 [服务配置](docs/SERVICE_PROVIDERS.md)。
+
 ## 准备
 
 需要 Python 3.12、Node.js 22+，推荐安装 [uv](https://github.com/astral-sh/uv)。
@@ -45,7 +47,7 @@ VOLCENGINE_ASR_API_KEY=xxxxxxxxxxxxxxxx
 
 细节：[TTS 配置](docs/TTS.md)、[ASR 配置](docs/ASR.md)。
 
-Talker 固定提供 23 个工具，其中 `web_search(query, max_results?, include_domains?)` 使用 Tavily 直接搜索网页，在当前轮回答简单实时事实或明确的搜索请求。结果卡显示真实搜索摘要、来源链接与查询时间；摘要不代表已读取或核实页面全文。复杂比较、多步调研及指定来源深入核验仍走 Thinker；天气和地点仍分别使用 `get_weather`、`search_places`。
+Talker 固定提供 26 个工具，其中 `web_search(query, max_results?, include_domains?)` 通过配置的搜索服务（默认 Tavily）直接搜索网页，在当前轮回答简单实时事实或明确的搜索请求。结果卡显示真实搜索摘要、来源链接与查询时间；摘要不代表已读取或核实页面全文。复杂比较、多步调研及指定来源深入核验仍走 Thinker；天气和地点仍分别使用 `get_weather`、`search_places`。新增 `search_media`、`control_media` 和 `manage_navigation` 用于媒体搜索、实际浏览器播放、导航与途经点；导航设备仍标记为模拟。
 
 `search_manual(query, max_results?)` 支持车书问答：使用已下载的腾势 D9 中文右舵版说明书，298 页切成 385 个文字片段。火山方舟仅生成文字向量，SQLite 保存原文与向量，NumPy 在本地排序；同一个 Talker 根据检索资料回答。结果卡展示原文、页码、对应 PDF 整页图片及原始 PDF 链接。此工具不执行车控，当前车况仍来自模拟器；手册版本和文字提取限制随来源展示。配置与重建见 [车书问答](docs/MANUAL_RAG.md)。
 
@@ -103,6 +105,7 @@ cd frontend && npm run dev -- --host 127.0.0.1
 - [接口（WebSocket / HTTP）](docs/INTERFACES.md)
 - [100 个车控函数与 10 个 skill](docs/TOOLS.md)
 - [Thinker 设计](docs/THINKER.md)
+- [可替换服务与 CP 配置](docs/SERVICE_PROVIDERS.md)、[本轮验证记录](docs/PLUGGABLE_SERVICES_VALIDATION.md)
 - [轨迹记录](docs/TRACE_VALIDATION.md)、[音频验收](docs/AUDIO_VALIDATION.md)
 - [历史状态与验证记录](docs/HISTORY.md)（重构前的 README，含历次测量）
 

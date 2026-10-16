@@ -1,0 +1,180 @@
+# Runtime services, separate from prompt wording. Credentials stay in environment variables.
+version = 1
+
+[llm.profiles.ark]
+provider = "ark"
+base_url_env = "ARK_BASE_URL"
+key_env = "ARK_API_KEY"
+timeout_seconds = 45
+
+[llm.profiles.compatible]
+provider = "openai_compatible"
+base_url_env = "LLM_BASE_URL"
+key_env = "LLM_API_KEY"
+require_api_key = true
+timeout_seconds = 45
+supports_tools = true
+supports_tool_choice = true
+
+[llm.roles.talker]
+profile = "ark"
+model_env = "TALKER_MODEL"
+max_tokens = 900
+reasoning = false
+
+[llm.roles.planner]
+profile = "ark"
+model_env = "VEHICLE_CONTROL_MODEL"
+max_tokens = 2000
+reasoning = false
+
+[llm.roles.thinker]
+profile = "ark"
+model_env = "THINKER_MODEL"
+max_tokens = 6000
+reasoning = true
+
+[llm.roles.finalizer]
+profile = "ark"
+model_env = "TALKER_MODEL"
+max_tokens = 2500
+reasoning = false
+
+[asr]
+profile = "volcengine"
+[asr.profiles.volcengine]
+provider = "volcengine"
+[asr.profiles.vllm]
+provider = "vllm"
+base_url_env = "ASR_BASE_URL"
+model_env = "ASR_MODEL"
+key_env = "ASR_API_KEY"
+require_api_key = false
+language = "zh"
+timeout_seconds = 30
+
+[tts]
+profile = "volcengine"
+[tts.profiles.volcengine]
+provider = "volcengine"
+[tts.profiles.volcengine.voices]
+default = "zh_female_xiaohe_uranus_bigtts"
+assistant = "zh_female_xiaohe_uranus_bigtts"
+
+[web_search]
+profile = "tavily"
+[web_search.profiles.tavily]
+provider = "tavily"
+key_env = "TAVILY_API_KEY"
+[web_search.profiles.gateway]
+provider = "http_gateway"
+base_url_env = "WEB_SEARCH_GATEWAY_URL"
+key_env = "WEB_SEARCH_GATEWAY_KEY"
+timeout_seconds = 12
+
+[web_content]
+profile = "tavily"
+[web_content.profiles.tavily]
+provider = "tavily"
+key_env = "TAVILY_API_KEY"
+[web_content.profiles.gateway]
+provider = "http_gateway"
+base_url_env = "WEB_CONTENT_GATEWAY_URL"
+key_env = "WEB_CONTENT_GATEWAY_KEY"
+timeout_seconds = 12
+
+[places]
+profile = "google"
+[places.profiles.google]
+provider = "google"
+key_env = "GOOGLE_MAPS_API_KEY"
+[places.profiles.gateway]
+provider = "http_gateway"
+base_url_env = "PLACES_GATEWAY_URL"
+key_env = "PLACES_GATEWAY_KEY"
+coordinate_system = "WGS84"
+timeout_seconds = 12
+[places.profiles.device]
+provider = "device_gateway"
+
+[weather]
+profile = "google"
+[weather.profiles.google]
+provider = "google"
+key_env = "GOOGLE_MAPS_API_KEY"
+coverage_fallback = "open_meteo"
+[weather.profiles.open_meteo]
+provider = "open_meteo"
+[weather.profiles.gateway]
+provider = "http_gateway"
+base_url_env = "WEATHER_GATEWAY_URL"
+key_env = "WEATHER_GATEWAY_KEY"
+timeout_seconds = 12
+
+[embedding]
+profile = "ark"
+[embedding.profiles.ark]
+provider = "ark"
+base_url_env = "ARK_EMBEDDING_BASE_URL"
+key_env = "ARK_EMBEDDING_API_KEY"
+model_env = "ARK_EMBEDDING_MODEL"
+dimensions = 1024
+[embedding.profiles.compatible]
+provider = "openai_compatible"
+base_url_env = "EMBEDDING_BASE_URL"
+key_env = "EMBEDDING_API_KEY"
+model_env = "EMBEDDING_MODEL"
+dimensions = 1024
+require_api_key = true
+timeout_seconds = 45
+
+[manual]
+profile = "local_rag"
+[manual.profiles.local_rag]
+provider = "local_rag"
+index_path_env = "MANUAL_INDEX_PATH"
+[manual.profiles.gateway]
+provider = "http_gateway"
+base_url_env = "MANUAL_GATEWAY_URL"
+key_env = "MANUAL_GATEWAY_KEY"
+timeout_seconds = 12
+
+[media.bindings]
+music = "tencent"
+video = "video_gateway"
+radio = "radio_gateway"
+[media.profiles.tencent]
+provider = "tencent_gateway"
+base_url_env = "TENCENT_MUSIC_GATEWAY_URL"
+key_env = "TENCENT_MUSIC_GATEWAY_KEY"
+[media.profiles.video_gateway]
+provider = "media_gateway"
+provider_name = "video_cp"
+base_url_env = "VIDEO_CP_URL"
+key_env = "VIDEO_CP_KEY"
+[media.profiles.radio_gateway]
+provider = "media_gateway"
+provider_name = "radio_cp"
+base_url_env = "RADIO_CP_URL"
+key_env = "RADIO_CP_KEY"
+[media.profiles.local]
+provider = "local_catalog"
+catalog_path = "data/media/catalog.json"
+[media.profiles.device]
+provider = "device_catalog"
+catalog_path = "data/media/catalog.json"
+
+[routes]
+profile = "google"
+[routes.profiles.google]
+provider = "google"
+key_env = "GOOGLE_MAPS_API_KEY"
+timeout_seconds = 12
+[routes.profiles.disabled]
+provider = "none"
+[routes.profiles.gateway]
+provider = "http_gateway"
+base_url_env = "ROUTES_GATEWAY_URL"
+key_env = "ROUTES_GATEWAY_KEY"
+coordinate_system = "WGS84"
+timeout_seconds = 12

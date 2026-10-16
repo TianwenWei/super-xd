@@ -1,18 +1,18 @@
-type Place = { place_id: string; name: string; address: string; maps_url?: string;
+type Place = { place_id: string; place_ref?: string; name: string; address: string; maps_url?: string;
   attributions?: Array<{ provider?: string; providerUri?: string }> };
 
 export type ManualImage = { url: string; caption?: string; page?: number };
 export type ManualHit = { chunk_id: number; page: number; section: string; text: string;
-  score?: number; images?: ManualImage[] };
+  score?: number; source_url?: string; images?: ManualImage[] };
 export type LookupResult = {
-  ok: boolean; kind?: string; provider?: string; places?: Place[]; place?: Place;
+  ok: boolean; kind?: string; items?: import('./cockpitTypes').MediaItem[]; provider?: string; places?: Place[]; place?: Place;
   query?: string; results?: Array<{ title?: string; url?: string; content?: string }>;
   date?: string; timezone?: string; notice?: string; reason?: string; queried_at?: string;
   mode?: string; source_url?: string;
   details?: { weatherCondition?: { iconBaseUri?: string }; daytimeForecast?: { weatherCondition?: { iconBaseUri?: string } } };
   summary?: { temperature_c?: number; min_c?: number; max_c?: number; condition?: string;
     day_condition?: string; night_condition?: string; rain_probability_percent?: number; weather_code?: number };
-  manual?: { id: string; title: string; pages: number; pdf_url: string };
+  manual?: { id: string; title: string; pages: number; pdf_url?: string; source_url?: string };
   hits?: ManualHit[];
   image_notice?: string;
 };
@@ -24,11 +24,17 @@ export function safeLink(value?: string): string | undefined {
 }
 
 export function manualLink(value?: string): string | undefined {
-  if (!value?.startsWith('/api/manual/')) return undefined;
+  if (!value) return undefined;
   try {
-    const url = new URL(value, 'https://manual.local');
-    return url.origin === 'https://manual.local' && url.pathname.startsWith('/api/manual/')
-      ? url.pathname + url.search + url.hash : undefined;
+    if (value.startsWith('/api/manual/')) {
+      const url = new URL(value, 'https://manual.local');
+      return url.origin === 'https://manual.local' && url.pathname.startsWith('/api/manual/')
+        ? url.pathname + url.search + url.hash : undefined;
+    }
+    const url = new URL(value);
+    if (url.username || url.password) return undefined;
+    if (url.protocol === 'https:') return url.href;
+    return url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) ? url.href : undefined;
   } catch { return undefined; }
 }
 

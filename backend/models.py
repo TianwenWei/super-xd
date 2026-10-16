@@ -15,7 +15,7 @@ def utcnow():
     return datetime.now(timezone.utc).isoformat()
 
 
-def sanitized_error(exc):
+def sanitized_error(exc, secrets=()):
     if isinstance(exc, httpx.HTTPStatusError):
         code = ''
         try:
@@ -33,21 +33,26 @@ def sanitized_error(exc):
         secret = os.getenv(key)
         if secret:
             value = value.replace(secret, '[redacted]')
+    for secret in secrets:
+        if secret:
+            value = value.replace(secret, '[redacted]')
     return value[:240] or type(exc).__name__
 
 
 class ArkClient:
-    def __init__(self, client=None):
+    def __init__(self, client=None, *, key_env='ARK_API_KEY', request_timeout=None):
+        self.key_env = key_env
+        self.request_timeout = request_timeout
         self.client = client or httpx.AsyncClient(
             base_url=os.getenv('ARK_BASE_URL', 'https://ark.cn-beijing.volces.com/api/v3').rstrip('/') + '/',
-            headers={'Authorization': f'Bearer {os.getenv("ARK_API_KEY", "")}'},
+            headers={'Authorization': f'Bearer {os.getenv(key_env, "")}'},
             timeout=httpx.Timeout(MODEL_TIMEOUT, connect=10),
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10, keepalive_expiry=120),
         )
 
     def payload(self, messages, tools, thinker=False, stream=False, *, tool_choice=None, max_tokens=None,
                 model=None, thinking=None):
-        if not os.getenv('ARK_API_KEY'):
+        if not os.getenv(self.key_env):
             raise RuntimeError('ARK_API_KEY 未配置；没有调用模型，也不会使用假回复。')
         if model is not None and (not isinstance(model, str) or not model.strip()):
             raise ValueError('model must be a nonblank model identifier')
@@ -73,10 +78,13 @@ class ArkClient:
     async def complete(self, messages, tools=None, thinker=False, *, tool_choice=None, max_tokens=None,
                        model=None, thinking=None):
         started = time.perf_counter()
+        body = None
+        payload = None
         try:
-            async with self.client.stream('POST', 'chat/completions', json=self.payload(messages, tools, thinker,
-                                          tool_choice=tool_choice, max_tokens=max_tokens, model=model, thinking=thinking),
-                                          timeout=150 if thinker else MODEL_TIMEOUT) as response:
+            payload = self.payload(messages, tools, thinker, tool_choice=tool_choice,
+                                   max_tokens=max_tokens, model=model, thinking=thinking)
+            async with self.client.stream('POST', 'chat/completions', json=payload,
+                                          timeout=self.request_timeout if self.request_timeout is not None else 150 if thinker else MODEL_TIMEOUT) as response:
                 # Includes pool/connect/HTTP wait; this does not isolate server
                 # inference or TCP/TLS timing, which we have not observed here.
                 response_headers_ms = (time.perf_counter() - started) * 1000
@@ -91,12 +99,19 @@ class ArkClient:
                                 'first_tool_delta_ms': None,
                                 'service_tier': body.get('service_tier'),
                                 'elapsed_ms': (time.perf_counter() - started) * 1000,
-                                'raw_response': body}
+                                'raw_response': body, 'actual_request': deepcopy(payload)}
             return message
-        except (httpx.HTTPError, KeyError, ValueError) as exc:
-            raise RuntimeError(f'Ark 调用失败：{sanitized_error(exc)}') from None
+        except (httpx.HTTPError, KeyError, ValueError, IndexError, TypeError, AttributeError) as exc:
+            error = RuntimeError(f'Ark 调用失败：{sanitized_error(exc, (os.getenv(self.key_env, ""),))}')
+            error.status_code = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+            error.provider_code = 'timeout' if isinstance(exc, httpx.TimeoutException) else 'unavailable' if isinstance(exc, httpx.TransportError) else 'invalid_response' if not isinstance(exc, httpx.HTTPError) else None
+            error.full_diagnostic = str(exc)
+            if payload is not None:
+                error.trace_partial = {'message': None, 'meta': {'raw_response': body,
+                    'actual_request': deepcopy(payload), 'elapsed_ms': (time.perf_counter() - started) * 1000}}
+            raise error from None
 
-    async def stream(self, messages, tools=None):
+    async def stream(self, messages, tools=None, **options):
         """Stream one completion; retry once if the provider fails before any output.
 
         Ark intermittently answers 502/503/504. Nothing has been shown or spoken
@@ -105,7 +120,7 @@ class ArkClient:
         for attempt in (1, 2):
             produced = False
             try:
-                async for item in self._stream_once(messages, tools):
+                async for item in self._stream_once(messages, tools, **options):
                     produced = True
                     yield item
                 return
@@ -113,13 +128,13 @@ class ArkClient:
                 if produced or attempt == 2 or not getattr(exc, 'retryable', False):
                     raise
 
-    async def _stream_once(self, messages, tools=None):
+    async def _stream_once(self, messages, tools=None, **options):
         started = time.perf_counter()
         content, reasoning, calls, raw_chunks, extra = '', '', {}, [], {}
         meta = {'provider_id': None, 'model': None, 'created': None, 'finish_reason': None,
                 'usage': None, 'service_tier': None, 'response_headers_ms': None,
                 'first_delta_ms': None, 'first_tool_delta_ms': None,
-                'first_chunk_ms': None, 'done_received': False}
+                'first_chunk_ms': None, 'done_received': False, 'actual_request': None}
         def observed():
             message = {'role': 'assistant', 'content': content or None, **extra}
             if reasoning:
@@ -129,7 +144,9 @@ class ArkClient:
             return {'message': message, 'meta': {**meta, 'received_at': utcnow(),
                     'elapsed_ms': (time.perf_counter() - started) * 1000, 'raw_chunks': deepcopy(raw_chunks)}}
         try:
-            async with self.client.stream('POST', 'chat/completions', json=self.payload(messages, tools, stream=True)) as response:
+            payload = self.payload(messages, tools, stream=True, **options)
+            meta['actual_request'] = deepcopy(payload)
+            async with self.client.stream('POST', 'chat/completions', json=payload) as response:
                 meta['response_headers_ms'] = (time.perf_counter() - started) * 1000
                 response.raise_for_status()
                 async for line in response.aiter_lines():
@@ -150,6 +167,12 @@ class ArkClient:
                         raw_chunks.append({'unparsed_data': data})
                         raise
                     raw_chunks.append(item)
+                    if isinstance(item, dict) and isinstance(item.get('error'), dict):
+                        error = RuntimeError('Model provider returned a structured stream error')
+                        error.provider_code = 'upstream_error'
+                        error.full_diagnostic = json.dumps(item['error'], ensure_ascii=False)
+                        error.trace_partial = observed()
+                        raise error
                     if meta['first_chunk_ms'] is None:
                         meta['first_chunk_ms'] = (time.perf_counter() - started) * 1000
                     for source, target in (('id','provider_id'), ('model','model'), ('created','created'),
@@ -182,12 +205,17 @@ class ArkClient:
                         fn = part.get('function', {})
                         call['function']['name'] += fn.get('name', '')
                         call['function']['arguments'] += fn.get('arguments', '')
+            if not meta['done_received'] and meta['finish_reason'] is None:
+                raise ValueError('Model stream ended without a terminal marker or finish reason')
             yield {'type': 'message', **observed()}
         except asyncio.CancelledError as exc:
             exc.trace_partial = observed()
             raise
-        except (httpx.HTTPError, KeyError, ValueError) as exc:
-            error = RuntimeError(f'Ark 流式调用失败：{sanitized_error(exc)}')
+        except (httpx.HTTPError, KeyError, ValueError, IndexError, TypeError, AttributeError) as exc:
+            error = RuntimeError(f'Ark 流式调用失败：{sanitized_error(exc, (os.getenv(self.key_env, ""),))}')
+            error.status_code = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+            error.provider_code = 'timeout' if isinstance(exc, httpx.TimeoutException) else 'unavailable' if isinstance(exc, httpx.TransportError) else 'invalid_response' if not isinstance(exc, httpx.HTTPError) else None
+            error.full_diagnostic = str(exc)
             error.trace_partial = observed()
             error.retryable = not raw_chunks and (
                 isinstance(exc, httpx.TransportError) or
@@ -207,11 +235,12 @@ class ArkClient:
 
 
 class TavilyClient:
-    def __init__(self, client=None):
-        self.client = client or httpx.AsyncClient(base_url='https://api.tavily.com/', timeout=35)
+    def __init__(self, client=None, *, key_env='TAVILY_API_KEY', timeout_seconds=35):
+        self.key_env = key_env
+        self.client = client or httpx.AsyncClient(base_url='https://api.tavily.com/', timeout=timeout_seconds)
 
     async def _request(self, endpoint, body):
-        key = os.getenv('TAVILY_API_KEY')
+        key = os.getenv(self.key_env)
         if not key:
             raise RuntimeError('TAVILY_API_KEY 未配置，无法查询实时信息。')
         at = utcnow()
@@ -222,7 +251,11 @@ class TavilyClient:
             data['queried_at'] = at
             return data
         except (httpx.HTTPError, ValueError) as exc:
-            raise RuntimeError(f'Tavily {endpoint} 失败：{sanitized_error(exc)}') from None
+            error = RuntimeError(f'Tavily {endpoint} 失败：{sanitized_error(exc, (key,))}')
+            error.status_code = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+            error.provider_code = 'timeout' if isinstance(exc, httpx.TimeoutException) else 'unavailable' if isinstance(exc, httpx.TransportError) else None
+            error.full_diagnostic = str(exc).replace(key, '[redacted]')
+            raise error from None
 
     async def search(self, query, max_results=5, *, include_domains=None):
         body = {'query': query, 'max_results': max_results, 'search_depth': 'basic',

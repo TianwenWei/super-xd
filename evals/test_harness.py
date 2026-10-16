@@ -20,7 +20,7 @@ def test_persona_signature_uses_number_value_but_keeps_boolean_and_strings_disti
 
 def test_cases_load_with_unique_ids_and_known_expectations():
     known = {'commands', 'commands_exact', 'no_commands', 'forbid_commands', 'talker_calls', 'talker_call_options',
-             'forbid_talker_calls', 'forbid_lookups', 'no_talker_calls', 'state', 'unchanged', 'tasks_created', 'route', 'allow_error', 'manual_pages_any'}
+             'forbid_talker_calls', 'forbid_lookups', 'no_talker_calls', 'state', 'unchanged', 'tasks_created', 'route', 'allow_error', 'manual_pages_any', 'cockpit_commands', 'cockpit_commands_exact', 'cockpit_state', 'model_calls'}
     cases = load_cases()
     assert len(cases) >= 20
     for case in cases:
@@ -91,3 +91,18 @@ def test_persona_signature_ignores_free_text_but_not_structured_arguments():
     d = run([{'name': 'set_temperature', 'arguments': {'zone': 'all', 'temperature': 23}}])
     assert persona_signature(a) == persona_signature(b)
     assert persona_signature(c) != persona_signature(d)
+
+
+async def test_mixed_vehicle_and_real_player_fixture_keeps_three_actions_and_one_decision():
+    case=next(case for case in load_cases() if case['id']=='multi_three_hot_actions')
+    model=FakeArk([{'content':'这就调整。','tool_calls':[
+        call('control_media',{'action':'pause'},id='media'),
+        call('set_temperature',{'zone':'rear','temperature':25},id='temperature'),
+        call('set_seat_heating',{'seat':'driver','level':1},id='seat')]}])
+    result=(await run_all([case],model,concurrency=1,planner=FakeVehiclePlanner()))[0]
+    assert result['passed'] is True
+    turn=result['turns'][0]
+    assert len(turn['commands'])==2 and len(turn['cockpit_commands'])==1
+    assert turn['model_calls']==1 and len(model.requests)==1
+    assert turn['cockpit_device_mode']=='explicit_eval_fixture'
+    assert grade({'model_calls':1},observed(model_calls=2))

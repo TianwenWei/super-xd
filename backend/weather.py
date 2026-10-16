@@ -6,7 +6,7 @@ browser geolocation and user GPS are not used as fallback data sources.
 from __future__ import annotations
 
 from backend.speech_config import feedback_text
-from datetime import date as Date, datetime, timezone
+from datetime import date as Date, datetime, timedelta, timezone
 import math
 import unicodedata
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -50,11 +50,17 @@ class WeatherClient:
             response = await self.client.get(url, params=params)
             response.raise_for_status()
         except httpx.TimeoutException:
-            raise RuntimeError("天气服务请求超时。") from None
+            error = RuntimeError("天气服务请求超时。")
+            error.provider_code = 'timeout'
+            raise error from None
         except httpx.HTTPStatusError as error:
-            raise RuntimeError(f"天气服务请求失败（HTTP {error.response.status_code}）。") from None
+            failure = RuntimeError(f"天气服务请求失败（HTTP {error.response.status_code}）。")
+            failure.status_code = error.response.status_code
+            raise failure from None
         except httpx.RequestError:
-            raise RuntimeError("天气服务连接失败。") from None
+            error = RuntimeError("天气服务连接失败。")
+            error.provider_code = 'unavailable'
+            raise error from None
         try:
             body = response.json()
         except ValueError:
@@ -91,18 +97,21 @@ class WeatherClient:
             result[key] = value
         return result
 
-    async def forecast(self, city: str, date: str, country_code: str | None = None) -> dict:
+    async def forecast(self, city: str, date: str, country_code: str | None = None, *, relative=False) -> dict:
         if self._closed:
             raise RuntimeError("天气客户端已关闭。")
         if not isinstance(city, str) or not 1 <= len(city.strip()) <= 200:
             raise RuntimeError("请提供有效城市名称。")
         city = city.strip()
-        if not isinstance(date, str) or len(date) != 10:
-            raise RuntimeError("天气日期必须为YYYY-MM-DD。")
-        try:
-            requested = Date.fromisoformat(date)
-        except ValueError:
-            raise RuntimeError("天气日期无效。") from None
+        offsets = {'today': 0, 'tomorrow': 1, 'day_after_tomorrow': 2}
+        relative_date = relative and isinstance(date, str) and date in offsets
+        if not relative_date:
+            if not isinstance(date, str) or len(date) != 10:
+                raise RuntimeError("天气日期必须为YYYY-MM-DD。")
+            try:
+                requested = Date.fromisoformat(date)
+            except ValueError:
+                raise RuntimeError("天气日期无效。") from None
         if country_code is not None:
             if not is_alpha2(country_code):
                 raise RuntimeError("国家代码必须为两个字母。")
@@ -137,6 +146,9 @@ class WeatherClient:
                     "source_url": geocoding_source_url, "geocoding_source_url": geocoding_source_url, "raw": raw}
         location = candidates[0]
         today = self._now().astimezone(ZoneInfo(location["timezone"])).date()
+        if relative_date:
+            requested = today + timedelta(days=offsets[date])
+            date = requested.isoformat()
         if not 0 <= (requested - today).days <= MAX_FORECAST_DAY_OFFSET:
             raise RuntimeError("仅支持城市当地今天至未来十五天的预报，不使用历史或均温替代。")
         forecast, source_url = await self._json(FORECAST_URL, {
