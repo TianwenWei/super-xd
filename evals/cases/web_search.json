@@ -1,0 +1,23 @@
+[
+  {
+    "id": "web_search_current_fact",
+    "tags": ["routing", "web"],
+    "personas": ["professional", "warm", "playful"],
+    "turns": [{"input": "帮我上网查一下现在最新的 Python 正式版是多少，简单告诉我就行", "expect": {"talker_calls": [{"name": "web_search"}], "forbid_talker_calls": ["delegate_task", "search_places", "get_weather"], "tasks_created": 0, "no_commands": true}}]
+  },
+  {
+    "id": "web_search_explicit_lookup",
+    "tags": ["routing", "web"],
+    "turns": [{"input": "搜一下 USB-C 接口是不是都能输出视频，一句话说明", "expect": {"talker_calls": [{"name": "web_search"}], "forbid_talker_calls": ["delegate_task"], "tasks_created": 0, "no_commands": true}}]
+  },
+  {
+    "id": "web_search_with_hot_control",
+    "tags": ["routing", "web"],
+    "turns": [{"input": "音量调到18，再帮我上网查一下最新的 Node.js 长期支持版本", "expect": {"talker_calls": [{"name": "web_search"}], "commands": [{"name": "set_volume", "arguments": {"volume": 18}}], "commands_exact": true, "forbid_talker_calls": ["delegate_task", "delegate_vehicle_control"], "tasks_created": 0}}]
+  },
+  {
+    "id": "web_search_not_for_vehicle_state",
+    "tags": ["routing", "web"],
+    "turns": [{"input": "现在主驾车窗开了多少", "expect": {"no_talker_calls": true, "no_commands": true, "tasks_created": 0}}]
+  }
+]

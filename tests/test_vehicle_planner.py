@@ -109,7 +109,7 @@ async def test_initial_tools_are_hot15_plus_only_requested_skills_and_submit_sch
     result = await VehicleControlPlanner(ark).plan(query, initial_vehicle_state(), ['mirrors'])
     assert result['ok']
     request = ark.requests[0]
-    payload=json.loads(request['messages'][1]['content'])
+    payload=json.loads(request['messages'][2]['content'])
     assert payload['loaded_skills']==['mirrors']
     assert set(payload['available_action_names'])==set(HOT_TOOL_NAMES)|set(SKILLS['mirrors'].tool_names)
     actual = action_names(request)
@@ -131,8 +131,8 @@ async def test_pro_load_skill_expands_only_future_pro_tools_and_preserves_load_e
     result = await VehicleControlPlanner(ark).plan(query, initial_vehicle_state(), [])
     assert result['ok'] and result['loaded_skills'] == ['locks'] and result['model_calls'] == 2
     assert 'set_child_lock' not in action_names(ark.requests[0]) and 'set_child_lock' in action_names(ark.requests[1])
-    assert json.loads(ark.requests[1]['messages'][1]['content'])['loaded_skills']==['locks']
-    assert 'set_child_lock' in json.loads(ark.requests[1]['messages'][1]['content'])['available_action_names']
+    assert json.loads(ark.requests[1]['messages'][2]['content'])['loaded_skills']==['locks']
+    assert 'set_child_lock' in json.loads(ark.requests[1]['messages'][2]['content'])['available_action_names']
     assert HOT_TOOL_NAMES == hot_before and result['load_evidence'][0]['result']['ok']
     assert {t['name'] for t in result['load_evidence'][0]['result']['tools']} == set(SKILLS['locks'].tool_names)
 
@@ -431,7 +431,7 @@ async def test_current_pronoun_action_retains_real_history_for_reference_without
     good=plan([intent('tailgate',query,actions=['open'])],[action('open','tailgate','set_tailgate_open',{'open':True})])
     ark=FakeArk([response(good)])
     result=await VehicleControlPlanner(ark).plan(query,state,['tailgate'],history=history)
-    payload=json.loads(ark.requests[0]['messages'][1]['content'])
+    payload=json.loads(ark.requests[0]['messages'][2]['content'])
     assert payload['history_reference_only']==history and payload['request_text']==query
     from backend.prompt_templates import load_prompt
     assert ark.requests[0]['messages'][0]['content'] == load_prompt('vehicle_planner')

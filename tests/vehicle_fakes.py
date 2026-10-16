@@ -11,10 +11,11 @@ class FakeVehiclePlanner:
         self.requests = []
 
     async def plan(self, request_text, vehicle, skill_ids, history=None,
-                   completed_operations=None, trace=None):
+                   completed_operations=None, trace=None, speaker_seat='driver'):
         self.requests.append(deepcopy({
             "request_text": request_text, "vehicle": vehicle, "skill_ids": skill_ids,
             "history": history, "completed_operations": completed_operations,
+            "speaker_seat": speaker_seat,
         }))
         if not self.responses:
             raise AssertionError("Unscripted test vehicle-planner request")
@@ -65,8 +66,7 @@ def plan_response(*operations, keep_paths=(), keep_text=None):
 
 
 def expected_talker_tool_names():
-    # Maps belongs to a concurrent authorized change; vehicle boundaries stay exact.
-    from backend.session import CONTROL_TOOLS, MAPS_TOOLS
+    from backend.session import CONTROL_TOOLS, MAPS_TOOLS, WEB_TOOLS, MANUAL_TOOLS
     from backend.catalog import HOT_TOOL_NAMES
-    return [*HOT_TOOL_NAMES, *[t["function"]["name"] for t in CONTROL_TOOLS + MAPS_TOOLS]]
+    return [*HOT_TOOL_NAMES, *[t["function"]["name"] for t in CONTROL_TOOLS + MAPS_TOOLS + WEB_TOOLS + MANUAL_TOOLS]]
 

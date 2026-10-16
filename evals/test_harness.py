@@ -1,5 +1,5 @@
 """Offline checks for the eval runner itself; live cases need a real model."""
-from evals.harness import grade, load_cases, run_all, subset, summarize
+from evals.harness import grade, load_cases, run_all, subset, summarize, persona_signature
 from test_session import FakeArk, call
 from vehicle_fakes import FakeVehiclePlanner
 
@@ -10,9 +10,17 @@ def observed(**overrides):
     return {**base, **overrides}
 
 
+def test_persona_signature_uses_number_value_but_keeps_boolean_and_strings_distinct():
+    def signature(value):
+        return persona_signature({'turns': [{'talker_calls': [{'name': 'set', 'arguments': {'value': value}}]}]})
+    assert signature(24) == signature(24.0)
+    assert signature(True) != signature(1)
+    assert signature('24') != signature(24)
+
+
 def test_cases_load_with_unique_ids_and_known_expectations():
-    known = {'commands', 'commands_exact', 'no_commands', 'forbid_commands', 'talker_calls',
-             'forbid_talker_calls', 'forbid_lookups', 'no_talker_calls', 'state', 'unchanged', 'tasks_created', 'route', 'allow_error'}
+    known = {'commands', 'commands_exact', 'no_commands', 'forbid_commands', 'talker_calls', 'talker_call_options',
+             'forbid_talker_calls', 'forbid_lookups', 'no_talker_calls', 'state', 'unchanged', 'tasks_created', 'route', 'allow_error', 'manual_pages_any'}
     cases = load_cases()
     assert len(cases) >= 20
     for case in cases:
@@ -25,6 +33,21 @@ def test_subset_compares_structure_not_text():
     assert subset(23, 23.0)
     assert not subset(True, 1)
     assert not subset({'zone': 'all'}, {'zone': 'driver'})
+
+
+def test_accepted_tool_options_still_require_the_expected_city_date_and_tool():
+    expect = {'talker_call_options': [[
+        {'name': 'get_weather', 'arguments': {'location': 'Paris France', 'date': 'today'}},
+        {'name': 'get_weather', 'arguments': {'location': 'Paris 法国', 'date': 'today'}},
+    ]]}
+    assert grade(expect, observed(talker_calls=[{'name': 'get_weather', 'arguments': {'location': 'Paris 法国', 'date': 'today'}}])) == []
+    for item in [
+        {'name': 'get_weather', 'arguments': {'location': 'Lyon France', 'date': 'today'}},
+        {'name': 'get_weather', 'arguments': {'location': 'Paris France', 'date': 'tomorrow'}},
+        {'name': 'web_search', 'arguments': {'location': 'Paris France', 'date': 'today'}},
+    ]:
+        assert grade(expect, observed(talker_calls=[item]))
+    assert grade(expect, observed())
 
 
 def test_grade_reports_missing_forbidden_and_state():

@@ -1,0 +1,7 @@
+[
+  {"id": "fridge_temperature", "query": "车载冰箱的制冷温度可以调到多少度？", "expected_pages": [238]},
+  {"id": "wireless_charging", "query": "手机无线充电怎么开启和关闭？", "expected_pages": [231]},
+  {"id": "nfc_unlock", "query": "用手机 NFC 解锁车门，要把手机贴在哪里？", "expected_pages": [221]},
+  {"id": "auto_hold_conditions", "query": "自动驻车启用需要满足哪些条件，安全带和车门有什么要求？", "expected_pages": [150, 151]},
+  {"id": "low_tire_pressure", "query": "胎压低于标准值多少时会报警？", "expected_pages": [181]}
+]

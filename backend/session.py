@@ -22,11 +22,16 @@ from backend.models import utcnow, sanitized_error
 from backend.model_context import compact_message, compact_tool_result
 from backend.speech_text import speech_text, brief_result, spoken_number
 from backend.google_maps import GoogleMapsClient, MapsError
+from backend.web_search import WebSearchClient, WEB_TOOLS, WEB_BY_NAME
+from backend.manual_search import ManualSearchClient, MANUAL_TOOLS, MANUAL_BY_NAME
 from backend.vehicle_simulator import VehicleSimulator
 from backend.vehicle_feedback import dispatch_feedback
 from backend.maps_tools import MAPS_TOOLS, MAPS_BY_NAME, READ_TOOLS
 from backend.textutil import halfwidth_alnum, is_domain, is_identifier, is_snake_code
-from backend.db import TERMINAL as TERMINAL_TASK, step_summary, task_card
+from backend.db import TERMINAL as TERMINAL_TASK, task_card
+from backend.task_feedback import task_user_detail
+from backend.speaker import DEFAULT_SPEAKER_SEAT, speaker_context
+from backend.environment_context import environment_context
 
 
 def function(name, description, properties=None, required=None):
@@ -36,11 +41,11 @@ def function(name, description, properties=None, required=None):
 STR = {'type': 'string', 'minLength': 1, 'maxLength': 4000}
 TASK_ID = {'type': 'string', 'minLength': 1, 'pattern': r'[\s\S]*\S[\s\S]*', 'description': '明确任务id；仅有一个活跃任务可省略'}
 CONTROL_TOOLS = [
-    function('delegate_vehicle_control', '交给车控规划层：本轮有不在常驻工具里的车控，或者某个动作必须等另一个动作完成才能做。整句只交一次，同一次调用里不能再有任何车控函数。系统会把用户本轮原话传过去，不要在参数里改写需求。结果以车辆回执为准。',
+    function('delegate_vehicle_control', '交给车控规划层：本轮有不在常驻工具里的车控，或者某个动作必须等另一个动作完成才能做。整句只交一次，同一次调用里不能再有任何车控函数。系统会把用户本轮原话和音区传过去，不要在参数里改写需求。结果以车辆回执为准。',
              {'skill_ids': {'type': 'array', 'items': {'type': 'string', 'enum': list(SKILLS)},
                             'maxItems': 10, 'uniqueItems': True,
                             'description': '涉及的车辆子系统；不能确定时传空数组，由车控规划层选择。'}}, ['skill_ids']),
-    function('delegate_task', '交给后台任务：需要联网的实时事实（天气除外）、多步调研、按多个条件比较后推荐，或者核实指定来源。goal 写全用户的所有条件。',
+    function('delegate_task', '交给后台任务：多步调研、按多个条件比较后推荐，或者深入核实指定来源。简单实时事实和明确网页搜索用web_search；天气用get_weather，地点用search_places。goal 写全用户的所有条件。',
              {'goal': STR,
               'spoken_goal': {'type': 'string', 'maxLength': 80, 'description': '一个动宾短语，8到15字，能接在"我帮你"后面，比如"挑能停车的火锅店"。不写来源要求，完整条件写在goal里。'},
               'read_details': {'type': 'boolean', 'description': '仅用户明确要求详细朗读最终报告时为true，默认false'},
@@ -225,6 +230,7 @@ class Turn:
     task_id: str | None = None
     interrupted: bool = False
     client_request_id: str | None = None
+    speaker_seat: str | None = None
     playback_id: str | None = None
     audio_queue: object = None
     audio_task: object = None
@@ -249,13 +255,17 @@ class Turn:
 
 
 class SessionActor:
-    def __init__(self, session_id, db, ark, tts=None, vehicle_planner=None, maps=None):
+    def __init__(self, session_id, db, ark, tts=None, vehicle_planner=None, maps=None, web=None, manual=None):
         self.id, self.db, self.ark = session_id, db, ark
         self.tts = tts
         self.vehicle_planner = vehicle_planner or VehicleControlPlanner(ark)
         self.vehicle_planning_timeout = max(TOOL_TIMEOUT, 45)
         self.maps = maps or GoogleMapsClient()
         self.owns_maps = maps is None
+        self.web = web or WebSearchClient()
+        self.owns_web = web is None
+        self.manual = manual or ManualSearchClient()
+        self.owns_manual = manual is None
         self.lookup_timeout = 25
         self.places = {}  # Session-local identities from successful, adopted search results.
         self.place_turns = {}  # place_id -> turn whose search surfaced it
@@ -266,6 +276,7 @@ class SessionActor:
         self.clients = set()
         self.persona = PERSONAS['warm'].model_copy(deep=True)
         self.persona_version = 1
+        self.speaker_seat = DEFAULT_SPEAKER_SEAT
         self.vehicle = initial_vehicle_state()
         self.simulator = VehicleSimulator(self.vehicle)
         self.vehicle_version = 0
@@ -429,6 +440,7 @@ class SessionActor:
     def snapshot(self):
         result = SessionSnapshot(session_id=self.id, persona=self.persona, persona_version=self.persona_version,
                                  vehicle=self.vehicle, tasks=self.task_list(), history=self.history()).model_dump()
+        result['speaker'] = speaker_context(self.speaker_seat)
         result['turns'] = [{'turn_id': turn.id, 'text': turn.text, 'output': turn.output,
                             'finished': turn.finished, 'proactive': turn.proactive, 'task_id': turn.task_id,
                             'state': 'interrupted' if turn.interrupted else 'done' if turn.finished else 'streaming',
@@ -517,8 +529,14 @@ class SessionActor:
             text = str(e.get('text', '')).strip()
             if not text or len(text) > 4000:
                 raise ValueError('输入需为1–4000字')
+            seat = e.get('speaker_seat', self.speaker_seat)
+            speaker_context(seat)
             self.asr_capture_id = None
-            self.start_turn(text, str(e.get('client_request_id', ''))[:80] or None)
+            self.start_turn(text, str(e.get('client_request_id', ''))[:80] or None, speaker_seat=seat)
+        elif kind == 'speaker.set':
+            speaker = speaker_context(e.get('seat'))
+            self.speaker_seat = speaker['seat']
+            self.emit('speaker.changed', speaker=speaker)
         elif kind == 'asr.capture':
             capture_id = e.get('capture_id')
             if not is_identifier(capture_id, max_length=80):
@@ -527,6 +545,8 @@ class SessionActor:
                 if self.asr_capture_id == capture_id:
                     return
                 self.asr_capture_id = capture_id
+                if e.get('interrupt') is True:
+                    self.interrupt_current('voice_activity')
                 if self.current:
                     self.cancel_audio(self.current, 'asr_capture')
                 self.speaking = False
@@ -730,11 +750,11 @@ class SessionActor:
     def is_current(self, turn):
         return self.current is turn and not turn.finished
 
-    def start_turn(self, text, client_request_id=None):
+    def interrupt_current(self, reason):
         if self.current:
             old = self.current
             self.simulator.invalidate(old.id)
-            self.cancel_audio(old, 'new_input')
+            self.cancel_audio(old, reason)
             if old.model_task and not old.model_task.done():
                 old.model_task.cancel()
             for planning in old.vehicle_plan_tasks.values():
@@ -750,19 +770,25 @@ class SessionActor:
             if not old.finished:
                 old.finished = True
                 old.interrupted = True
-                self.trace('turn.interrupted', {'output': old.output, 'reason': 'new_input'}, old, status='interrupted')
+                self.trace('turn.interrupted', {'output': old.output, 'reason': reason}, old, status='interrupted')
                 self.emit('stream.interrupted', turn_id=old.id)
             # Interrupted partial text belongs to that turn; pending tool records stay intact.
             if old.output and not old.group and not any(m.get('role') == 'assistant' for m in old.messages):
                 old.messages.append({'role': 'assistant', 'content': old.output + ' [用户打断]'})
         self.speaking = False
+        self.generating = False
+
+    def start_turn(self, text, client_request_id=None, *, speaker_seat=None):
+        self.interrupt_current('new_input')
         turn = Turn(uuid4().hex[:12], text, self.persona.model_copy(deep=True), self.persona_version)
         turn.loaded = list(self.loaded_tools)
         turn.client_request_id = client_request_id
+        turn.speaker_seat = speaker_seat or self.speaker_seat
         turn.messages.append({'role': 'user', 'content': text})
         self.turns.append(turn)
         self.current, self.generating = turn, True
-        self.trace('turn.started', {'input': text, 'persona_version': turn.persona_version}, turn, status='running')
+        self.trace('turn.started', {'input': text, 'persona_version': turn.persona_version,
+                   'speaker': speaker_context(turn.speaker_seat)}, turn, status='running')
         self.emit('turn.started', turn_id=turn.id, text=text, persona_version=turn.persona_version,
                   client_request_id=client_request_id)
         self.start_audio(turn)
@@ -777,14 +803,22 @@ class SessionActor:
         vehicle = {skill_id: {key: copy.deepcopy(value) for key, value in values.items() if key != 'memories'}
                    for skill_id, values in self.vehicle.items()}
         context = {'vehicle': vehicle, 'background_tasks_reference_only': tasks,
+                   'speaker': speaker_context(turn.speaker_seat or self.speaker_seat),
                    'recent_places': self.recent_places,
-                   'current_utc': utcnow(), 'timezone': self.vehicle['_meta']['timezone'],
+                   **environment_context(self.vehicle, utcnow()),
                    'capabilities': {'gps': False, 'browser_geolocation': False, 'task_priority_change': False}}
+        context['interrupted_playback'] = [
+            {'turn_id': previous.id, 'heard_text': previous.played_text or '', 'status': 'interrupted'}
+            for previous in self.turns[-4:] if previous.playback_id and previous.audio_cancelled.is_set()]
+        previous_user = next((previous for previous in reversed(self.turns[-4:]) if previous is not turn and not previous.proactive), None)
+        context['speaker_changed_since_previous_turn'] = bool(previous_user and previous_user.speaker_seat and
+            previous_user.speaker_seat != context['speaker']['seat'])
         messages = [{'role': 'system', 'content': CORE_PROMPT},
                     {'role': 'system', 'content': style_prompt(turn.persona)}]
         for previous in [*self.turns[-4:], *([] if turn in self.turns[-4:] else [turn])]:
             if previous is turn:
                 messages.append({'role': 'system', 'content': render_prompt('session_snapshot',
+                    speaker_name=context['speaker']['display_name'],
                     snapshot_json=json.dumps(context, ensure_ascii=False, separators=(',', ':')))})
                 messages.append({'role': 'system', 'content': CURRENT_TURN_PROMPT})
             # Keep protocol-valid complete tool groups even when newer user input arrives before a receipt.
@@ -795,7 +829,7 @@ class SessionActor:
                 # makes no claim that unrendered speech reached the listener.
                 for record in segment:
                     if record.get('role') == 'assistant' and not record.get('tool_calls'):
-                        record['content'] = (previous.played_text or '（未确认有完整句子播放）') + ' [朗读已打断]'
+                        record['content'] = previous.played_text or ''
 
             if pending:
                 cutoff = next((i for i, m in reversed(list(enumerate(segment))) if m.get('tool_calls')), len(segment))
@@ -816,7 +850,7 @@ class SessionActor:
 
     def tools_for(self, turn):
         # This bounded interface never grows after delegation or prior turns.
-        return [TOOLS[name].openai_tool() for name in HOT_TOOL_NAMES] + CONTROL_TOOLS + MAPS_TOOLS
+        return [TOOLS[name].openai_tool() for name in HOT_TOOL_NAMES] + CONTROL_TOOLS + MAPS_TOOLS + WEB_TOOLS + MANUAL_TOOLS
 
     def launch_model(self, turn):
         if turn.model_calls >= 5:
@@ -949,8 +983,9 @@ class SessionActor:
                 if name == 'set_navigation_destination' and not destination_grounded(
                         arguments['destination'], self.destination_sources(turn)):
                     return name, arguments, dict(DESTINATION_NOT_GROUNDED)
-            elif name in MAPS_BY_NAME:
-                validate(arguments, MAPS_BY_NAME[name]['function']['parameters'])
+            elif name in MAPS_BY_NAME or name in WEB_BY_NAME or name in MANUAL_BY_NAME:
+                schema = (MAPS_BY_NAME | WEB_BY_NAME | MANUAL_BY_NAME)[name]
+                validate(arguments, schema['function']['parameters'])
                 if name == 'search_places':
                     # Provenance of the search area, like destinations: no GPS,
                     # so "nearest X" needs a place the user actually said.
@@ -988,7 +1023,7 @@ class SessionActor:
                 turn.has_reads = True
                 turn.needs_model = True  # Reading must answer the returned facts, not a generic success template.
             self.send_command(turn, call, name, arguments)
-        elif name in READ_TOOLS:
+        elif name in READ_TOOLS or name in WEB_BY_NAME or name in MANUAL_BY_NAME:
             turn.has_reads = turn.needs_model = True
             turn.route = 'lookup'
             self.launch_lookup(turn, call, name, arguments)
@@ -1009,6 +1044,10 @@ class SessionActor:
     def destination_sources(self, turn):
         """Texts a destination may be copied from: this request, recent dialogue, found places."""
         sources = [turn.text]
+        # The configured location is supplied by the user, just like a location stated in chat.
+        meta = self.vehicle['_meta']
+        if meta.get('location'):
+            sources.extend([meta['location'], meta.get('location_country', '')])
         for previous in self.turns[-5:]:
             if previous is not turn:
                 sources.extend(m['content'] for m in previous.messages
@@ -1021,7 +1060,8 @@ class SessionActor:
             started = time.perf_counter()
             try:
                 async with asyncio.timeout(self.lookup_timeout):
-                    result = await getattr(self.maps, name)(**arguments)
+                    client = self.manual if name in MANUAL_BY_NAME else self.web if name in WEB_BY_NAME else self.maps
+                    result = await getattr(client, name)(**arguments)
             except asyncio.CancelledError:
                 self.trace('tool.cancelled', {'name': name, 'model_call_id': turn.tool_model_calls.get(call['id'])},
                            turn, call_id=call['id'], status='cancelled')
@@ -1030,6 +1070,8 @@ class SessionActor:
                 result = {'ok': False, 'code': exc.code, 'reason': str(exc)}
             except TimeoutError:
                 result = {'ok': False, 'code': 'timeout', 'reason': '查询超时，未取得结果。'}
+            except RuntimeError as exc:
+                result = {'ok': False, 'code': 'lookup_error', 'reason': sanitized_error(exc)}
             except Exception:
                 result = {'ok': False, 'code': 'lookup_error', 'reason': '查询服务返回异常，未取得结果。'}
             result['elapsed_ms'] = round((time.perf_counter() - started) * 1000, 1)
@@ -1037,6 +1079,10 @@ class SessionActor:
         turn.lookup_tasks[call['id']] = self.spawn(lookup())
 
     def accept_lookup(self, turn, call, result):
+        embedding_trace = result.pop('_embedding_trace', None)
+        if embedding_trace is not None:
+            self.trace('embedding.completed', embedding_trace, turn, call_id=call['id'],
+                       status='ok' if self.is_current(turn) else 'stale')
         if self.is_current(turn):
             if call['function']['name'] == 'search_places' and result.get('ok'):
                 self.recent_places = copy.deepcopy(result.get('places', []))
@@ -1097,6 +1143,7 @@ class SessionActor:
         self.trace('vehicle.plan.started', {'agent': 'vehicle_planner', 'source': 'vehicle_planner',
                    'request_text': turn.text, 'skill_ids': arguments['skill_ids'],
                    'parent_call_id': call['id'], 'vehicle': snapshot,
+                   'speaker': speaker_context(turn.speaker_seat or self.speaker_seat),
                    'completed_operations': completed}, turn, call_id=call['id'], status='running')
 
         def trace(kind, data, *, call_id=None, status=None):
@@ -1109,7 +1156,8 @@ class SessionActor:
             try:
                 planned = await asyncio.wait_for(self.vehicle_planner.plan(
                     turn.text, snapshot, copy.deepcopy(arguments['skill_ids']), history=history,
-                    completed_operations=completed, trace=trace), self.vehicle_planning_timeout)
+                    completed_operations=completed, trace=trace,
+                    speaker_seat=turn.speaker_seat or self.speaker_seat), self.vehicle_planning_timeout)
                 await self.post({'type': '_vehicle_plan_done', 'turn': turn, 'call': call, 'plan': planned})
             except asyncio.CancelledError:
                 trace('vehicle.plan.cancelled', {'executed': False}, call_id=call['id'], status='cancelled')
@@ -1417,7 +1465,9 @@ class SessionActor:
         recent = [{'role': message['role'], 'content': message['content']}
                   for turn in self.turns[-4:] for message in turn.messages
                   if message.get('role') in {'user', 'assistant'} and message.get('content') and not message.get('tool_calls')]
+        origin = next((turn for turn in self.turns if turn.id == origin_turn_id), None)
         return {'vehicle': copy.deepcopy(self.vehicle), 'recent_history': recent,
+                'speaker': speaker_context((origin.speaker_seat if origin else None) or self.speaker_seat),
                 'origin_turn_id': origin_turn_id, 'query_mode': query_mode, 'spoken_goal': spoken_goal,
                 'query_domain': query_domain,
                 'required_source_domains': [d.lower() for d in required_source_domains if is_domain(d)],
@@ -1425,6 +1475,7 @@ class SessionActor:
                 'active_tasks': [{k:t[k] for k in ('id','goal','status','summary')} for t in self.task_list()
                                  if t['status'] not in {'completed','failed','cancelled'}],
                 'captured_at': utcnow(), 'timezone': self.vehicle['_meta']['timezone'],
+                'current_location': environment_context(self.vehicle, utcnow())['current_location'],
                 'notice': TASK_SNAPSHOT_NOTICE}
 
     def task_precheck(self, name, args):
@@ -1491,10 +1542,10 @@ class SessionActor:
             result = task.get('result')
             if task['status'] == 'completed' and isinstance(result, dict):
                 detail = result.get('summary', '') if args.get('read_details') is True else result.get('spoken_summary') or brief_result(result.get('summary', ''))
+                if result.get('partial') is True:
+                    detail = '先给你部分结果，完整需求还没有全部核实。' + detail
             else:
-                detail = task.get('question') or task['summary']
-                if detail == step_summary(task.get('steps')):
-                    detail = '还在分析，结果出来就告诉你。'
+                detail = task_user_detail(task)
             return {'ok': True, 'task': task, 'feedback_kind': 'progress', 'detail': detail}
         action = args['action']
         self.launch_task_write(self.db.mutate_task, (task['id'], action, args.get('text', ''), args.get('expected_revision')),
@@ -1810,7 +1861,16 @@ class SessionActor:
             return
         self.emit('task.event', task=task, event_id=event['event_id'], revision=event['revision'])
         key = (task['id'], task['revision'], task['status'])
-        if task['status'] in {'completed', 'failed', 'waiting_clarification', 'cancelled'} and key not in self.announced_keys:
+        if event['kind'] == 'progress_notice' and task['status'] in {'queued', 'running'}:
+            key = (task['id'], task['revision'], 'progress_notice')
+            if key not in self.announced_keys:
+                self.announcements[task['id']] = {**task, '_progress_notice': True}
+                self.schedule_announce()
+        elif (task['status'] in {'queued', 'running'} and
+              self.announcements.get(task['id'], {}).get('_progress_notice')):
+            self.announcements[task['id']] = {**task, '_progress_notice': True}
+            self.schedule_announce()
+        elif task['status'] in {'completed', 'failed', 'waiting_clarification', 'cancelled'} and key not in self.announced_keys:
             self.announcements[task['id']] = task
             self.schedule_announce()
 
@@ -1826,17 +1886,22 @@ class SessionActor:
         task_id = next(iter(self.announcements))
         task = self.announcements.pop(task_id)
         latest = self.tasks.get(task_id)
-        if not latest or latest['revision'] != task['revision'] or latest['status'] != task['status']:
+        progress_notice = task.get('_progress_notice') is True
+        if (not latest or latest['revision'] != task['revision'] or
+                (latest['status'] not in {'queued', 'running'} if progress_notice else latest['status'] != task['status'])):
             return
-        self.announced_keys.add((task['id'], task['revision'], task['status']))
-        kind = 'clarify' if task['status'] == 'waiting_clarification' else 'error' if task['status'] == 'failed' else 'result'
+        task = latest
+        self.announced_keys.add((task['id'], task['revision'], 'progress_notice' if progress_notice else task['status']))
+        kind = 'progress' if progress_notice else 'clarify' if task['status'] == 'waiting_clarification' else 'error' if task['status'] == 'failed' else 'result'
         result = task.get('result')
         full_report = (result.get('summary') or result.get('answer') or json.dumps(result, ensure_ascii=False) if isinstance(result, dict) else result) or task['summary']
         read_details = task.get('context', {}).get('read_details') is True
         selected = full_report if read_details else (result.get('spoken_summary') if isinstance(result, dict) else None) or brief_result(str(full_report))
-        detail = task.get('question') or (spoken_reason(task['error']) if task.get('error') else None) or selected
+        detail = task_user_detail(task) if progress_notice or task['status'] != 'completed' else selected
+        if task['status'] == 'completed' and isinstance(result, dict) and result.get('partial') is True:
+            detail = '先给你部分结果，完整需求还没有全部核实。' + detail
         # Suggestions are validated against the latest state. They are not auto-applied based on old context.
-        suggestions = result.get('actions', result.get('suggested_actions', [])) if isinstance(result, dict) else []
+        suggestions = result.get('actions', result.get('suggested_actions', [])) if isinstance(result, dict) and task['status'] == 'completed' else []
         if suggestions:
             checks = []
             for action in suggestions:
@@ -1880,3 +1945,7 @@ class SessionActor:
         await asyncio.gather(self.trace_writer, return_exceptions=True)
         if self.owns_maps:
             await self.maps.aclose()
+        if self.owns_web:
+            await self.web.aclose()
+        if self.owns_manual:
+            await self.manual.aclose()

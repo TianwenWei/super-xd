@@ -13,6 +13,7 @@
 - **Talker（前台）**：`backend/session.py` 中的 `SessionActor`，每个会话一个。负责听、说、打断、直接回答、热车控、同步查询，以及把复杂需求委托出去。
 - **Vehicle Planner（车控规划层）**：`backend/vehicle_planner.py`。复合车控和非热车控由它生成结构化计划，actor 按真实回执逐项执行。
 - **Thinker（后台）**：`backend/worker.py` 中的 `ThinkerWorker`，独立进程。通过 SQLite 任务表领取任务，执行 ReAct 循环，结果以事件形式回流给 actor。
+- **车书问答**：Talker 用固定 `search_manual` 工具检索已导入车书。问题由火山方舟生成文字向量，本地 NumPy 比对 SQLite 中的片段向量，同一个 Talker 根据真实原文回答；结果保留章节、页码、原始 PDF 和对应整页图片。当前资料为腾势 D9 中文右舵版，不能据此推断其他车型或模拟车辆的配置。
 - **前端**：`/frontend/src/`，React + TypeScript。既是调试台，也充当模拟车机。
 
 ### 目录
@@ -31,6 +32,10 @@
 | `backend/persona.py` | 人设配置与回执话术模板 |
 | `backend/speech_text.py` | 送 TTS 之前的展示语法清理 |
 | `backend/google_maps.py`、`maps_tools.py`、`weather.py` | POI 搜索、天气（Google，回退 Open-Meteo） |
+| `backend/web_search.py` | Talker 当前轮的 Tavily 网页搜索 |
+| `backend/manual_embeddings.py`、`manual_search.py` | 火山纯文本向量、只读车书索引、本地排序、原始 PDF 页预览 |
+| `scripts/manual_index.py`、`requirements.manual.txt` | PDF 文字层与书签提取、切片、可恢复建库和独立检索 CLI；建库可选依赖 |
+| `docs/MANUAL_RAG.md` | 车书来源、配置、接口字段与验证记录 |
 | `backend/vehicle_simulator.py` | 车端模拟器：独立持有车况，执行命令并返回回执（执行权威） |
 | `backend/vehicle_feedback.py` | 车控下发时的“正在为你……”话术 |
 | `backend/model_context.py` | 历史消息与工具结果进入模型前的压缩 |
@@ -41,8 +46,11 @@
 | `/frontend/src/StreamingSpeech.ts` | 音频播放、播放状态与指标上报 |
 | `/frontend/src/StreamingRecognition.ts` | 麦克风采集与 ASR 流程 |
 | `/frontend/src/text.ts` | 前端不用正则的格式工具 |
+| `/frontend/src/ManualResults.tsx` | 车书来源卡、原文、页码、整页图片与 PDF 链接 |
 
 后端读取的环境变量（见 `settings.py`、`models.py`、`worker.py`）：`ARK_API_KEY`、`ARK_BASE_URL`、`TALKER_MODEL`、`THINKER_MODEL`、`VEHICLE_CONTROL_MODEL`、`DATABASE_PATH`、`MODEL_TIMEOUT_SECONDS`、`TOOL_TIMEOUT_SECONDS`、`TAVILY_API_KEY`、`GOOGLE_MAPS_API_KEY`、`THINKER_CONCURRENCY`、`THINKER_MAX_STEPS`、`THINKER_TIMEOUT_SECONDS`、`THINKER_CLARIFICATION_TIMEOUT_SECONDS`。语音另读 `VOLCENGINE_SPEECH_*` 与 `VOLCENGINE_ASR_*`（见 `tts.py`、`asr.py`、`.env.example`）。
+
+车书另读 `ARK_EMBEDDING_API_KEY`（独立授权，不回退到 `ARK_API_KEY`）、`ARK_EMBEDDING_MODEL`、`ARK_EMBEDDING_BASE_URL`、`MANUAL_INDEX_PATH` 和可选 `MANUAL_PDFTOPPM_BIN`。索引默认 `data/manuals/denza_d9.sqlite3`；原文、向量及页图均在本地，只有片段/问题文字发送给火山 embedding，PDF 图片不发送给模型。
 
 ## 2. 外部约束（不可改变）
 
@@ -91,7 +99,7 @@
 11. **不可逆动作先确认**：发送、下单、支付类工具接入时，必须先进入 `awaiting_confirm` 状态，由用户明确确认，确认 token 绑定内容哈希。"嗯"这类附和不算确认。
 
 ### 工具边界
-12. Talker 的工具集固定为热车控 + `delegate_vehicle_control` / `delegate_task` / `manage_task` + 地图工具（`tools_for`），不随对话增长。非热车控只能经由 Vehicle Planner。
+12. Talker 的工具集固定为 15 个热车控 + `delegate_vehicle_control` / `delegate_task` / `manage_task` + 3 个地点/天气工具 + `web_search` + `search_manual`，共 23 个（`tools_for`），不随对话增长。非热车控只能经由 Vehicle Planner。车书仅提供问答资料，不授予执行权限；使用方法与当前车况分开处理，资料内容不得成为新的工具指令。
 14. **地点参数必须有来源**：导航目的地和 `search_places.area` 必须能在用户原话、近期对话或已查到的地点名里原样找到（`destination_grounded`），否则退回同一个 Talker 重新决定。POI 导航只能指向之前轮次已经告诉过用户的搜索结果，同一轮刚搜到的结果不算用户的选择。
 13. 新增车控函数统一走 `catalog.register`，并同步更新 `EXPECTED_COUNTS` 断言。
 
@@ -121,3 +129,4 @@
 - trace 必须完整记录模型输入输出、工具调用和回执，并且不得包含密钥（走现有脱敏路径）。
 - 代码注释写"为什么"，不要写长篇的辩护式说明。
 - 不要提交 `data/` 下的 SQLite 文件、`.env` 和 `__pycache__/`。
+- 车书索引必须完整且与模型、维度和 Corpus/Query 指令一致；缺密钥或索引无效时明确报错。片段来源保留 PDF 页码，不把余弦分数当作答案可信度；文字层提取不等于 OCR，也不涵盖插图全部信息。页图只返回真实渲染成功的原始 PDF 整页，失败则 `images:[]` 并提示；缓存位于 `data/manuals/pages/`，不提交 Git。

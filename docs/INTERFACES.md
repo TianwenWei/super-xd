@@ -1,6 +1,6 @@
 # 原型接口
 
-最新范围：不实现车控目录 embedding/语义检索；Thinker 的真实 Tavily 网页搜索保留。Talker固定15个热车控、3个调度和3个地点/天气schema。其余85个车控函数只经Pro车控规划层渐进加载，始终不追加到Talker的可调用工具集合。
+最新范围：车控目录按 skill 加载；车书另有本地向量检索。Thinker 的真实 Tavily 网页搜索保留。Talker 固定15个热车控、3个调度、3个地点/天气工具、`web_search` 和 `search_manual`，共23个。其余85个车控函数只经Pro车控规划层渐进加载，始终不追加到Talker的可调用工具集合。
 
 ## 渐进式车控协议（2026-10-14）
 
@@ -26,8 +26,10 @@ actor以最新车况对整组计划预检，通过后按依赖和读写冲突排
 
 ## HTTP
 
-- `GET /api/health`：模型连接预热与服务健康；检索明确 disabled。
-- `GET /api/config`：persona、100函数/10skill/热工具、模型、TTS及ASR配置状态。无密钥。
+- `GET /api/health`：模型连接预热与服务健康；`retrieval` 为车控目录状态，`manual` 为独立车书索引状态。
+- `GET /api/config`：persona、100函数/10skill/热工具、模型、TTS及ASR配置状态；`manual` 包含向量模型、密钥是否配置、索引就绪情况、标题、页数和片段数。无密钥。
+- `GET /api/manual/pdf`：当前车书原始 PDF，`application/pdf` 内联返回；前端可加 `#page=<page>` 打开命中页。
+- `GET /api/manual/{manual_id}/pages/{page}.png`：当前车书合法页的原始 PDF 整页 PNG；未知ID/越界页码404，预览不可用503。
 - `POST /api/sessions`：创建 session_id。
 - `POST /api/sessions/{session_id}/vehicle/commands/{command_id}/execute`：执行已登记模拟命令；按command_id幂等。默认200ms下行、300ms执行、200ms上行；返回receipt_id、ok、reason_code、resume_condition、state、state_version、timings。未知命令拒绝，浏览器只能把该回执ID回传。
 - `GET /api/sessions/{session_id}`：车况、任务、近期审计 `history`（最近 12 轮），以及 `turns` 轮次汇总（turn_id/text/output/finished/proactive/task_id/persona_version/metrics）。完整持久化记录通过 traces 接口读取。
@@ -99,11 +101,12 @@ Talker 用独立队列和线程异步写入，SQLite 日志操作不阻塞前台
 | asr.capture | capture_id、active：boolean；录音占位与释放，期间暂停助手音频及后台主动播报；过期 ID 的释放无效 |
 | audio.cancel | turn_id、playback_id 可选；取消对应轮次的服务端合成，前端同时清空 Worklet；错误 playback_id 不取消当前播放 |
 | audio.client_metrics | turn_id、playback_id、metrics；仅匹配的播放归入对应轮次，供应商与浏览器指标分开 |
-| vehicle.configure | settings：speed_kph、gear、navigation_active、call_active、timezone（IANA）；P档不能有车速 |
+| vehicle.configure | settings：speed_kph、gear、navigation_active、call_active、timezone（IANA）、location、location_country；P档不能有车速。地点为用户提供的城市或地标，空字符串清除默认位置 |
 | vehicle.receipt | command_id、receipt_id；必须匹配模拟执行端真实保存的回执，拒绝自报成功与旧ACK |
 | audio.played | turn_id、playback_id、played_ms；AudioWorklet真实渲染样本数换算，支持已打断轮次归档 |
 | task.create | goal |
 | task.get | task_id 可选；多个任务不明确则返回消歧 |
+| speaker.set | seat 必填：driver / front_passenger / rear_left / rear_right；更新会话默认音区，返回speaker.changed；从下一轮生效 |
 | task.reply / task.update | task_id、text、expected_revision 可选 |
 | task.cancel | task_id、expected_revision 可选 |
 
@@ -124,7 +127,7 @@ Talker 用独立队列和线程异步写入，SQLite 日志操作不阻塞前台
 | task.event / ui.card | task，事件另带 event_id/revision |
 | error | message、code/candidates 可选 |
 | audio.connection | Speech 连接预热/复用状态与诊断耗时，无凭证或音频内容 |
-| lookup.result | turn_id、call_id、tool、result；前台 POI/天气实际查询结果，按 call_id 合并 |
+| lookup.result | turn_id、call_id、tool、result；前台 POI/天气/网页/车书实际查询结果，按 call_id 合并 |
 
 ### 地点与天气 FC
 
@@ -135,6 +138,22 @@ Talker 用独立队列和线程异步写入，SQLite 日志操作不阻塞前台
 | search_places | query：含城市/区域的文本；max_results：1–5，默认5 | Google Places (New) 返回 places，每项含 place_id/name/address/location/country_code/maps_url/attributions；不修改导航 |
 | get_weather | location：城市及国家；date：now/today/tomorrow/YYYY-MM-DD | Google Places 城市消歧后获取 Google Weather；结果含 provider/place/date/timezone/mode/summary/details/queried_at/source_url/notice |
 | start_poi_navigation | place_id：本会话真实搜索结果 ID | 复用 set_navigation_destination 模拟命令/回执；成功后 navigation.destination_place 保存所选地点；无实际路线 |
+
+### 前台网页搜索 FC
+
+`web_search(query, max_results?, include_domains?)` 使用服务端 `TAVILY_API_KEY` 调用 Tavily Search，默认返回三个结果，最多五个。`include_domains` 可选，仅接受域名列表。`GET /api/config` 的 `web_search` 字段返回提供方与凭证是否配置，不返回密钥。
+
+结果经同一 `lookup.result` 事件返回，包含 `ok/kind/provider/query/results/queried_at/evidence/notice/elapsed_ms`。每个搜索结果保留 Tavily 返回的标题、URL 和摘要；`evidence=search_snippets` 表示未读取或核实页面全文。工具结果回给同一个 Talker 组织口语答案，前端保留来源链接、摘要和查询时间，不创建后台任务。
+
+网页查询和地点/天气查询共用异步执行、25秒整体超时和过期轮次丢弃机制。缺少密钥、上游错误、超时直接返回错误；不生成替代搜索结果。复杂比较、多步调研及指定来源深入核验仍使用 `delegate_task`。
+
+### 车书问答 FC
+
+`search_manual(query, max_results?)` 在当前轮检索本地只读车书库，默认返回五段，最多五段。仅问题文字发送给火山 embedding；本地执行向量比对，随后把真实原文作为工具结果交给同一个 Talker 回答。没有额外路由模型，也不登记任务或执行车控。与其他 lookup 共用取消、25秒整体超时和过期结果丢弃机制。
+
+`lookup.result.result` 使用 `kind=manual, evidence=manual_text`，包含 `manual:{id,title,pages,pdf_url}` 和 `hits:[{chunk_id,page,section,text,score,images:[{url,caption,page}]}]`。PDF/图片均为上面的同源车书接口；图片为文字命中页的原始整页预览，仅在渲染成功后提供，失败保留 `images:[]` 与 `image_notice`。`notice` 保留资料版本和文字提取限制。`embedding_ms/local_search_ms/cache_hit` 用于调试；分数不是事实可信度。
+
+完整 embedding 请求/响应进入脱敏的 `embedding.completed` 轨迹，不包含认证头；原始向量不会放入回答模型上下文或前端 lookup 事件。配置、重建与验收记录见 [MANUAL_RAG.md](MANUAL_RAG.md)。
 
 日期按地点 IANA 时区计算，并匹配 Google `displayDate`（Google 日预报区间为当地07:00至次日07:00）。指定日期限定当地今天至未来第9天；请求日期无记录则返回错误，绝不拿别的日期替代。城市多解返回 `needs_clarification/candidates`，不默选第一项。天气返回404时才改用 Open-Meteo，显式标注 `provider=Open-Meteo`、`fallback_reason=google_unsupported_location`；权限/配额/超时均直接报错。原始天气字段保留在 details，summary 使用摄氏度，Open-Meteo WMO代码附中文释义。
 
@@ -148,7 +167,7 @@ Talker 用独立队列和线程异步写入，SQLite 日志操作不阻塞前台
 
 Talker调度工具为固定三个：`delegate_vehicle_control`、`delegate_task`、`manage_task`。`load_skill`仅供独立Pro车控层使用。`delegate_task`可选`query_mode=quick|research`与简短`spoken_goal`，完整要求保留在goal；只有明确要求详细朗读时`read_details=true`。`manage_task(action=get,task_ids=[...])`可一次读取多个明确任务，与单个task_id互斥；数组须非空、不同且全部属于当前会话，任何无效ID整批拒绝。reply/update/cancel仍仅支持单个task_id，用户回答已有澄清时reply原任务，不另建重复任务。
 
-Talker跨轮保持15个热车控、3个调度和3个地点/天气工具；Pro加载仅在该委托上下文保留。模型上下文只压缩副本：历史任务保留目标、条件、状态、问题和口语结果，移除重复车况/上下文/工具schema；原始消息、参数、全部报告和trace保持完整。读取车况工具后由同一Talker解释具体值；混合读写在后续失败时仍确认已实际执行的动作，避免把部分成功描述成完全未执行。
+Talker跨轮保持固定23个工具；Pro加载仅在该委托上下文保留。模型上下文只压缩副本：历史任务保留目标、条件、状态、问题和口语结果，移除重复车况/上下文/工具schema；原始消息、参数、全部报告和trace保持完整。读取车况工具后由同一Talker解释具体值；混合读写在后续失败时仍确认已实际执行的动作，避免把部分成功描述成完全未执行。
 
 后台天气工具`get_weather_forecast(city,date,country_code?)`使用真实Open-Meteo城市地理编码与预报API，明确目标当地日期、IANA时区、摄氏单位与最低/最高温；歧义城市须澄清，错日期/空值/历史数据不可作为未来预报回退。结果的`forecast_records`与原始JSON可供核对，`web_evidence=forecast`或`verified`区分结构化数据与网页材料；这不代表模型已经逐句完成事实审核。用户要求指定官网时仍需实际读取官网，并说明日期不能核实等限制。接口依据[Forecast API](https://open-meteo.com/en/docs)与[Geocoding API](https://open-meteo.com/en/docs/geocoding-api)。
 
@@ -206,4 +225,25 @@ Talker跨轮保持15个热车控、3个调度和3个地点/天气工具；Pro加
 2026-10-14 范围补充：`delegate_task` 的 `query_domain=weather` 在当前原型仅支持显式 `query_mode=quick`。其他/缺省mode返回 `weather_quick_required`、`retry_model=true`、`executed=false`，登记前拒绝且不改写参数；同一Talker在原5次上限内继续。`general` research协议保留。明确指向已有任务/历史查询结果的读取请求须先取得本轮真实get证据；错误直答仅存原模型轨迹，不展示或合成。已完成任务引用与主动历史播报保留归属；这些检查不是通用自然语言意图或事实验证。
 
 
-任务新增持久字段：`running_seconds/running_since/clarification_expires_at/checkpoint`。300秒仅计算running累计，waiting_clarification单独默认1800秒；回复或补充条件增加revision并恢复完整checkpoint的messages/sources，追加user条件。未完成的工具组和旧revision网络结果不能提交到新版。车辆`_meta.timezone`进入Talker和Thinker上下文，UTC缺省，可显式配置为用户或车辆所在地。
+任务持久字段：`running_seconds/running_since/clarification_expires_at/checkpoint/deadline_at/deadline_paused_at/progress/progress_notified/error_code`。从登记开始最长60秒，排队计入；waiting_clarification暂停截止时间，仍有独立的默认1800秒澄清期限。补充条件、revision推进和进程重启不重置已用预算。30秒尚在queued/running时，事务内写一次`progress_notice`事件，actor在没有对话、朗读或ASR占用时播报当前阶段；终态取代待播进度。最后15秒取消尚未结束的常规调用，预留一次关闭思考、仅可finish_task的收尾调用；60秒仍未得到合法结果则失败，保留真实来源与checkpoint，拒绝迟到提交。工具预算不消耗交付调用，最后一步同样仅允许交付。`result.partial=true`标明预算收尾的阶段结果，不表示完整需求已全部核实。技术error/搜索参数保留在DB、卡片诊断和trace；模型任务上下文与默认TTS使用结构化阶段、来源读取数量和error_code对应的口语，不回放原始异常。
+
+播放打断信息在快照`interrupted_playback`内记录，历史assistant正文只保留确认播放的文字，不拼接可被模型复述的打断标记。车辆`_meta.timezone`进入Talker和Thinker上下文；初值来自`DEFAULT_TIMEZONE`（未配置时UTC）。`DEFAULT_LOCATION`与`DEFAULT_LOCATION_COUNTRY`设置用户提供的默认位置，未配置时不猜地点。每次Talker请求在历史之后的会话快照中注入`current_location:{name,country,source:user_setting}`（未知时null）、同一时刻的`current_utc/current_local/current_date/timezone`，当地时间由IANA时区转换并处理夏令时。用户提供的位置设置也作为地点参数的来源；后台任务保留位置来源与登记时车况，Thinker仍使用执行时的UTC时间和任务时区。固定prompt前缀和工具集保持稳定，不新增模型调用。
+
+限时收尾使用快速模型并保持中性表达；其临时`finish_task` schema只接收`source_ids`，从本任务实际读取/验证的来源账本中选择。服务端将ID映射成真实URL并附到阅读报告，模型不需要拼接网址，原有来源校验继续执行。原始模型ID参数、解析后的URL参数、工具回执均进入trace。收尾调用不再启动搜索，也不因校验失败反复调用模型；校验失败使用`finalization_failed`友好说明，保留已取得资料。
+
+### 用户座位 / 音区
+
+`session.snapshot.speaker`和`speaker.changed.speaker`包含`seat/audio_zone/display_name/default_targets/control_defaults`。模拟会话默认主驾（可用`DEFAULT_SPEAKER_SEAT`配置上述四个值之一），前端“当前音区”可切换。当前原型没有麦克风声源定位，座位来自会话设置；集成方可在`input`事件携带`speaker_seat`，只覆盖本轮，不改变会话默认值。非法值在启动轮次前拒绝。
+
+每轮开始固定speaker并写入`turn.started`轨迹。Talker将其放在历史之后、本轮输入之前的system会话快照；Vehicle Planner另有动态system音区消息，用户原话不重写；后台任务保存登记轮次音区，Thinker也以system数据接收。人设不改变音区或默认目标，工具集仍固定23个。
+
+| 音区 | 座椅 / 车窗 / 车门 / 阅读灯 | 温区 | 车内照明 | 后视镜侧 |
+| --- | --- | --- | --- | --- |
+| driver | driver | driver | front | left |
+| front_passenger | front_passenger | front_passenger | front | right |
+| rear_left | rear_left | rear | rear | left |
+| rear_right | rear_right | rear | rear | right |
+
+未明确位置或“我的 / 我这边”使用以上默认位置；明确座位、全部范围和近期明确指代优先。儿童安全锁默认同侧后门，玻璃清洗默认所在排对应的前/后挡风玻璃。区域粒度受真实工具schema限制；不为整车音量、雨刷速度、方向盘等臆造位置参数。
+
+`control_defaults`从工具参数schema生成，当前覆盖23个带位置参数的写操作，提供底层功能的默认位置参数以及热工具/Vehicle Planner路线；它不是新增的可调用工具清单，也不授予额外权限。Thinker只接收座位与默认区域，不接收执行路线表。位置决定由模型按prompt/few-shot和这些结构化数据完成，代码不匹配用户文本，不偷偷改写模型参数，也不增加模型调用。温区同步等联动会改变其他区域时先澄清，音区本身不授权额外动作。

@@ -228,7 +228,7 @@ async def test_cold_vehicle_delegation_does_not_add_schema_or_second_talker_call
     done, events = await wait_for(q, 'stream.done', actor)
     assert done['metrics']['model_calls'] == 1 and len(planner.requests) == 1
     assert actor.vehicle['mirrors']['heating']
-    assert len(ark.requests[-1]['tools']) == 21
+    assert len(ark.requests[-1]['tools']) == 23
     assert all(t['function']['name'] != 'set_mirror_heating' for t in ark.requests[-1]['tools'])
 
 
@@ -322,9 +322,9 @@ async def test_fixed_prefix_and_tool_order_do_not_change_with_persona(make_actor
         tools=actor.tools_for(turn)
         if prefix is None: prefix,definitions=messages[0],tools
         assert messages[0]==prefix and tools==definitions
-        assert len(tools)==21
+        assert len(tools)==23
     assert [t['function']['name'] for t in definitions[:15]] == __import__('backend.catalog',fromlist=['HOT_TOOL_NAMES']).HOT_TOOL_NAMES
-    assert [t['function']['name'] for t in definitions[15:]] == ['delegate_vehicle_control', 'delegate_task', 'manage_task', 'search_places', 'get_weather', 'start_poi_navigation']
+    assert [t['function']['name'] for t in definitions[15:]] == ['delegate_vehicle_control', 'delegate_task', 'manage_task', 'search_places', 'get_weather', 'start_poi_navigation', 'web_search', 'search_manual']
 
 
 async def test_compound_hot_receipts_cover_every_intent_without_unrelated_settings(make_actor):
@@ -380,7 +380,7 @@ async def test_fixed_hot_capability_handles_next_turn_correction_without_loading
     assert [e['name'] for e in events if e['type'] == 'vehicle.command'] == ['set_seat_massage']
     assert '腰部' in done['text']
     assert 'set_seat_massage' in [t['function']['name'] for t in ark.requests[-1]['tools']]
-    assert len(ark.requests[0]['tools']) == len(ark.requests[-1]['tools']) == 21
+    assert len(ark.requests[0]['tools']) == len(ark.requests[-1]['tools']) == 23
     assert not any(c['function']['name'] == 'load_skill' for m in actor.history() for c in m.get('tool_calls', []))
 
 

@@ -1,0 +1,22 @@
+.vehicle-panel.has-vehicle-update { border-color: #369e88; box-shadow: 0 0 0 3px #369e8830; }
+.vehicle-panel .panel-heading { position: sticky; top: 0; z-index: 3; background: #fff; padding-bottom: 8px; }
+.quiet-label.vehicle-update-badge { display: flex; align-items: center; gap: 5px; border-color: #369e88; background: #167d68; color: #fff; font-size: 11px; font-weight: 600; animation: vehicle-badge-pulse 1.4s ease-out 3; }
+.vehicle-update-badge > i { width: 6px; height: 6px; border-radius: 50%; background: #c6ffe6; }
+.vehicle-group-changed > summary { background: #e0f4ec; color: #246b57; border-radius: 6px; }
+.vehicle-group-update { margin-left: auto; padding: 1px 5px; border-radius: 4px; background: #167d68; color: white; font-size: 9px; white-space: nowrap; animation: vehicle-badge-pulse 1.4s ease-out 3; }
+.vehicle-group-changed .group-count { margin-left: 0; }
+.state-row.state-row-changed { position: relative; margin: 2px -4px; padding: 5px 7px; border-left: 3px solid #d7962e; border-radius: 4px; background: #fff0c6; color: #72511d; animation: vehicle-row-pulse 1.4s ease-out 3; }
+.state-row-changed > strong { display: flex; align-items: baseline; justify-content: flex-end; flex-wrap: wrap; gap: 4px; font-size: 13px; font-weight: 700; color: #17694f; }
+.state-previous { font-size: 10px; font-weight: 400; color: #9b8050; text-decoration: line-through; }
+.state-change-arrow { font-size: 12px; color: #c0862f; }
+.state-current { display: inline-block; animation: vehicle-value-enter .45s ease-out; }
+.vehicle-setting-changes { margin: 5px 16px 8px; }
+.vehicle-setting-changes .state-row { font-size: 11px; }
+.vehicle-setup-changed > summary { background: #e0f4ec; border-radius: 5px; color: #246b57; }
+.vehicle-setup-changed > summary::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #167d68; }
+@keyframes vehicle-row-pulse { 0%, 45% { background: #ffe095; box-shadow: 0 0 0 2px #dfae4a45; } 100% { background: #fff0c6; box-shadow: 0 0 0 0 #dfae4a00; } }
+@keyframes vehicle-badge-pulse { 0%, 45% { box-shadow: 0 0 0 4px #37a48635; } 100% { box-shadow: 0 0 0 0 #37a48600; } }
+@keyframes vehicle-value-enter { from { opacity: .3; transform: translateY(5px) scale(1.12); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@media (prefers-reduced-motion: reduce) {
+  .quiet-label.vehicle-update-badge, .vehicle-group-update, .state-row.state-row-changed, .state-current { animation: none; }
+}

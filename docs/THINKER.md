@@ -2,11 +2,11 @@
 
 `python -m backend.worker` 启动独立 Python 进程，共用云端会话服务的 SQLite WAL 数据库。完整研究默认 Ark Thinker 是 `doubao-seed-2-1-pro-260915`，启用 thinking。真实网络查询使用服务端 `TAVILY_API_KEY` 调用 Tavily Search 和 Extract。生产运行没有假模型或假网页查询回退。
 
-默认并发 2，其余任务排队。Talker 使用另一个客户端和执行路径，不占用 Thinker 的并发额度。配置 `THINKER_CONCURRENCY`、`THINKER_MAX_STEPS`、`THINKER_TIMEOUT_SECONDS`；后两项分别限制在最多 20 和 300。5 分钟从任务创建算起，包括排队、修改和等待澄清，回复不会重新获得时间预算；轮询会将过期任务终止。修改或澄清后续跑仍沿用已经消耗的推理步骤。
+默认并发2，其余任务排队。Talker不占用Thinker并发额度。`THINKER_MAX_STEPS`最多20，`THINKER_TIMEOUT_SECONDS`最多60（旧配置300也硬限制为60）。一分钟从任务登记起计算，包括排队；等待用户澄清暂停，独立澄清期限默认1800秒。补充条件和进程重启不重置预算。30秒仍未结束时事务内发一次进度通知，Talker空闲时播报当前实际阶段。最后15秒取消尚未返回的常规模型/工具请求，预留一次使用已配置TALKER_MODEL、关闭thinking、仅允许finish_task的收尾调用（不附加人设）；60秒仍无合法结果则停止，保留来源和逐工具checkpoint。最后推理步骤和工具预算用尽后同样只允许交付，finish_task不占外部工具预算。
 
 `delegate_task` 将同次 Talker 模型选择的 `query_mode` 放入 `task.context.query_mode`，worker 不以关键词路由。`research`（缺省及未知值）沿用完整研究流程、Pro thinking 和上述预算。`quick` 使用当前 `TALKER_MODEL` 并关闭 thinking（不固定为 mini，也不另做模型扫描），适用于简短实时核实，通常只需两次模型调用：第一次调用结构化 `get_weather_forecast` 或真实 `lookup_web`，第二次根据实际材料一次 `finish_task` 提交简短完整答案与口语结论。quick 提供 forecast、lookup、澄清和完成工具；缺失关键字段或来源冲突时可再核对一次，全任务最多两次 lookup、四次模型调用，不以固定文本或模型以外的规则拼出答案。报告篇幅是生成偏好，不截断任何原始模型/网页材料或必要条件。quick 每步要求真实函数调用；已用完两次 lookup 或到达第四步时，仅提供并指定 `finish_task`，保留一次纠正校验错误的收口机会。强制提交也可以是带明确无法核实限制的结论，不能编造事实。
 
-quick 另有累计执行 45 秒预算，模型请求、工具请求和执行编排计入；排队及等待用户澄清不计入这 45 秒，但仍计入创建起五分钟绝对硬限。每次执行的实际耗时写入 `task.execution.finished` trace，回复后从持久轨迹累计已有消耗，revision 修改不会刷新预算。达到步骤或时间预算明确失败，不把未提交结果称为完成。 两次 lookup 的全任务预算跨 revision 保持累计，但完成资格只来自当前 revision 的真实工具尝试；参数校验失败不算真实尝试。新条件清空旧证据后若两次 lookup 已用尽，直接明确失败并说明新条件尚未核实，不调用模型强行生成无依据结果，也不刷新预算。
+quick仍累计实际执行耗时，默认上限60秒，同时受登记起的一分钟硬限约束；测试或调用方可配置更短预算。每次执行耗时写入`task.execution.finished`，回复后累计已有消耗，revision修改不刷新预算。两次lookup的全任务预算跨revision保持累计；完成资格仍来自当前revision真实工具尝试，参数校验失败不算尝试。限时收尾结果带`partial=true`并明确未核实项，不能把未提交或旧条件结果称为完成；收尾也失败时只返回友好说明与已保存来源，不合成虚构答案。
 
 `lookup_web(query, max_results?)` 真实调用 Tavily Search（默认最多 3 条），按搜索返回的相关性排序对前两个有效且不同的 URL 执行真实 Extract，再将完整搜索与页面内容一起交给模型。全量搜索来源仍保留，模型通过 `source_urls` 指出结论实际采用的来源；未读取的来源若被引用仍明确标记未核实。Search 和 Extract 之间读取最新 revision/cancel；旧搜索的实际返回另存 stale 工具 trace，不会继续按旧条件提取页面。两个真实子调用独立记录工具轨迹并通过 `parent_call_id` 关联 lookup，失败与超时保留实际限制。结果包含 `query_mode` 标识，其他来源、口语与完整报告契约保持。
 
@@ -36,6 +36,6 @@ Thinker 不包含 persona。结果结构包括 `summary`、`spoken_summary`、`s
 
 每次外部调用前后均消费 inbox 并读取当前 revision。模型或工具仍在处理旧条件时收到修改，旧响应不会提交到新 revision；下一步骤基于原始目标和最新完整 constraints 重建提示词。时间、步骤继续累计。`save_task` 使用 revision 乐观比较；终态及已取消任务不能被迟到结果复活。SQLite 事务不会跨越模型、网页或检索 await。
 
-进程仅负责任务状态和事件，事件进入会话 actor 后才影响 UI 和播报。进度默认只更新任务卡片；等待澄清及最终结果由 actor 在当前生成与朗读结束后用当前 persona 表达。切 persona 无需重建 Thinker 或任务。此原型只验收连续在线；进程重启时恢复已运行任务不在本次范围内。
+进程仅负责任务状态和事件，事件进入会话actor后才影响UI和播报。普通进度只更新卡片，30秒的`progress_notice`额外播报一次，终态会覆盖尚未播出的进度；当前生成、朗读或ASR占用时等待空闲。用户查询进度也只读结构化阶段和实际读取数量，不念原始query、URL或异常。失败以`error_code`生成口语，原始error留在诊断与trace。切persona无需重建任务。重启不会刷新持久deadline；原型仍不承诺重启后恢复中断中的外部请求。
 
 离线回归：`.venv/bin/python -m pytest tests/test_worker.py -q`。fake Ark/Tavily 仅通过测试显式依赖注入，覆盖实际工具消息保存、来源白名单、修改竞争、取消、澄清释放名额与回复、并发排队、参数错误、凭证错误脱敏、无结果、时间与步骤预算，以及动作建议不执行。真实验收记录位于 `docs/thinker-live.json`，其中标注真实模型和查询调用，不能把离线测试当作真实 API 通过结果。

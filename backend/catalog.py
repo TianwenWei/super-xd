@@ -13,6 +13,7 @@ from typing import Any, Callable
 from jsonschema import Draft202012Validator, ValidationError
 
 from .types import SkillManifest, ToolSpec
+from .settings import environment_defaults
 
 TOOLS: dict[str, ToolSpec] = {}
 SKILLS: dict[str, SkillManifest] = {}
@@ -102,7 +103,7 @@ def initial_vehicle_state() -> dict:
     memories = {seat: {str(slot): deepcopy(settings) for slot in range(1, 4)} for seat, settings in seats.items()}
     mirrors = {"left": {"horizontal": 0, "vertical": 0}, "right": {"horizontal": 0, "vertical": 0}}
     return {
-        "_meta": {"simulated": True, "speed_kph": 0, "gear": "P", "call_active": False, "timezone": "UTC", "charging": False},
+        "_meta": {"simulated": True, "speed_kph": 0, "gear": "P", "call_active": False, **environment_defaults(), "charging": False},
         "climate": {"power": False, "temperatures": {"driver": 22, "front_passenger": 22, "rear": 22},
                     "fan_speed": 3, "airflow_mode": "face", "recirculation": "auto", "auto": True,
                     "front_defrost": False, "rear_defrost": False, "air_purifier": False, "fragrance": 0,
@@ -214,7 +215,7 @@ def position_seat(a, s, relative=False):
     return value
 
 
-register("seats", "set_seat_position", "设置座椅轴向绝对位置，主驾停车才可调；靠背80至140度，其余0至100", {"seat": SEAT, "axis": AXIS, "position": number(0, 140, "目标位置，需满足轴向范围")}, {"seat": "driver", "axis": "fore_aft", "position": 60}, position_seat, ["seats.positions.{seat}.{axis}"])
+register("seats", "set_seat_position", "调节座椅滑轨前后位置、整椅高度、靠背角度或腰托位置；仅fore_aft/height/backrest/lumbar四种轴。主驾停车才可调；靠背80至140度，其余0至100", {"seat": SEAT, "axis": AXIS, "position": number(0, 140, "目标位置，需满足轴向范围")}, {"seat": "driver", "axis": "fore_aft", "position": 60}, position_seat, ["seats.positions.{seat}.{axis}"])
 register("seats", "adjust_seat_position", "相对调整座椅位置，主驾停车才可调", {"seat": SEAT, "axis": AXIS, "delta": number(-10, 10, "位置变化量")}, {"seat": "driver", "axis": "height", "delta": 5}, lambda a, s: position_seat(a, s, True), ["seats.positions.{seat}.{axis}"], "adjust")
 
 
@@ -334,7 +335,7 @@ def interior(a, s):
     return s["lights"]["interior"]
 
 
-register("lights", "set_interior_light", "开关全部、前排或后排车内照明灯", {"zone": enum(["all", "front", "rear"], "照明区域"), "enabled": boolean("是否开启")}, {"zone": "all", "enabled": True}, interior, ["lights.interior.{zone}"])
+register("lights", "set_interior_light", "开关共用车厢顶灯，按前排、后排或全部区域控制", {"zone": enum(["all", "front", "rear"], "照明区域"), "enabled": boolean("是否开启")}, {"zone": "all", "enabled": True}, interior, ["lights.interior.{zone}"])
 set_simple("lights", "set_ambient_light", "开启或关闭氛围灯电源；设置颜色/亮度不需要本工具；不要打开/保持原状不构成关闭指令", "ambient", boolean("true=开启氛围灯；false=明确关闭氛围灯"), True)
 set_simple("lights", "set_ambient_color", "设置氛围灯颜色", "ambient_color", enum(["white", "warm", "red", "blue", "green", "purple"], "颜色"), "blue", "color")
 set_simple("lights", "set_ambient_brightness", "设置氛围灯亮度", "ambient_brightness", number(0, 100, "亮度百分比", True), 60, "brightness")

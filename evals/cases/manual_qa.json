@@ -1,0 +1,15 @@
+[
+  {"id":"manual_fridge_temperature", "tags":["manual","routing"], "personas":["professional","warm","playful"],
+   "turns":[{"input":"查一下腾势D9说明书，冰箱制冷最低能设到几度？", "expect":{"talker_calls":[{"name":"search_manual"}],"manual_pages_any":[238],"no_commands":true,"tasks_created":0,"forbid_talker_calls":["web_search","delegate_task","delegate_vehicle_control"]}}]},
+  {"id":"manual_nfc_usage", "tags":["manual","routing"],
+   "turns":[{"input":"车书里说用手机NFC钥匙解锁，手机要贴在什么地方？", "expect":{"talker_calls":[{"name":"search_manual"}],"manual_pages_any":[61,221],"no_commands":true,"tasks_created":0,"forbid_talker_calls":["web_search","delegate_task"]}}]},
+  {"id":"manual_operating_instructions", "tags":["manual","routing"],
+   "turns":[{"input":"D9的手机无线充电要怎么用，又在哪里关闭？", "expect":{"talker_calls":[{"name":"search_manual"}],"manual_pages_any":[231],"no_commands":true,"tasks_created":0,"forbid_talker_calls":["web_search","delegate_task"]}}]},
+  {"id":"manual_and_hot_control", "tags":["manual","routing"],
+   "turns":[{"input":"先把音量设成16，再查查说明书里自动驻车的使用条件。", "expect":{"talker_calls":[{"name":"search_manual"}],"manual_pages_any":[150,151],"commands":[{"name":"set_volume","arguments":{"volume":16}}],"commands_exact":true,"tasks_created":0,"forbid_talker_calls":["delegate_task","delegate_vehicle_control"]}}]},
+  {"id":"manual_not_vehicle_state", "tags":["manual","routing"],
+   "turns":[{"input":"现在主驾座椅通风是几档？", "expect":{"no_talker_calls":true,"no_commands":true,"tasks_created":0}}]},
+  {"id":"manual_followup", "tags":["manual","routing"],
+   "turns":[{"input":"帮我查车书里NFC手机钥匙的操作方法。", "expect":{"talker_calls":[{"name":"search_manual"}],"manual_pages_any":[61,220,221],"no_commands":true,"tasks_created":0}},
+            {"input":"那手机没电了还能解锁吗？查一下手册再说。", "expect":{"talker_calls":[{"name":"search_manual"}],"manual_pages_any":[61,221],"no_commands":true,"tasks_created":0}}]}
+]

@@ -45,6 +45,8 @@ markdown-it-py==4.2.0
     # via -r requirements.txt
 mdurl==0.1.2
     # via markdown-it-py
+numpy==2.5.4
+    # via -r requirements.txt
 opentelemetry-api==1.45.1
     # via fastapi
 packaging==26.3

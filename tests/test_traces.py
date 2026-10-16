@@ -356,6 +356,9 @@ async def test_manual_task_does_not_inherit_previous_turn_association(trace_cont
     await actor.post({"type": "input", "text": "上一轮闲聊"})
     previous, _ = await receive(queue, "stream.done")
     await actor.post({"type": "task.create", "goal": "手工登记的独立任务"})
+    # Registration runs off the actor thread; wait for its receipt, not just
+    # the event that launched the write.
+    await receive(queue, "ui.card")
     events = await recorded(actor)
     task = next(task for task in db.list_tasks(actor.id) if task["goal"] == "手工登记的独立任务")
     assert task["context"]["origin_turn_id"] is None

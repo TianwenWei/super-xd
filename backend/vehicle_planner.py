@@ -16,6 +16,7 @@ from uuid import uuid4
 from jsonschema import Draft202012Validator, ValidationError
 
 from backend.catalog import HOT_TOOL_NAMES, SKILLS, TOOLS, execute_tool, load_skill
+from backend.speaker import DEFAULT_SPEAKER_SEAT, speaker_context
 from backend.models import sanitized_error, utcnow
 from backend.prompt_templates import render_prompt
 from backend.settings import VEHICLE_CONTROL_MODEL
@@ -402,7 +403,8 @@ class VehicleControlPlanner:
     def __init__(self, ark):
         self.ark = ark
 
-    async def plan(self, request_text, vehicle, skill_ids, history=None, completed_operations=None, trace=None):
+    async def plan(self, request_text, vehicle, skill_ids, history=None, completed_operations=None, trace=None,
+                   speaker_seat=DEFAULT_SPEAKER_SEAT):
         plan_call_id = uuid4().hex
         loaded, observations, loads, events = [], [], [], []
         model_call_id = None
@@ -438,17 +440,22 @@ class VehicleControlPlanner:
             emit('vehicle.skill.loaded', loads[-1], call_id=plan_call_id, status='completed')
         planning_input = {
             'request_text': request_text, 'vehicle_snapshot': deepcopy(vehicle),
+            'speaker': speaker_context(speaker_seat),
             'loaded_skills': list(loaded), 'available_action_names': _names(loaded),
             'history_reference_only': deepcopy(history or []), 'completed_operations': deepcopy(completed_operations or []),
             'skills': {key: manifest.model_dump() for key, manifest in SKILLS.items()},
             'capabilities': {'gps': False, 'real_navigation': False}, 'executed': False}
-        messages = [{'role': 'system', 'content': PROMPT}, {'role': 'user', 'content': json.dumps(planning_input, ensure_ascii=False)}]
+        # The stable rules stay first; dynamic device metadata belongs at the end.
+        planning_message = {'role': 'user', 'content': json.dumps(planning_input, ensure_ascii=False)}
+        messages = [{'role': 'system', 'content': PROMPT},
+                    {'role': 'system', 'content': render_prompt('speaker_context',
+                        speaker_json=json.dumps(planning_input['speaker'], ensure_ascii=False))}, planning_message]
         for index in range(1, MAX_MODEL_CALLS + 1):
             attempts += 1
             allowed = _names(loaded)
             planning_input.update(loaded_skills=list(loaded), available_action_names=allowed,
                                   action_schemas={name: TOOLS[name].parameters for name in allowed})
-            messages[1]['content'] = json.dumps(planning_input, ensure_ascii=False)
+            planning_message['content'] = json.dumps(planning_input, ensure_ascii=False)
             submit = {'type': 'function', 'function': {'name': 'submit_vehicle_plan',
                        'description': '提交整组结构化车辆计划；仅校验/模拟副本，不执行真实车辆。',
                        'parameters': _submission_schema(allowed, request_text, vehicle)}}

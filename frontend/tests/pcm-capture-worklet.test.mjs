@@ -42,6 +42,17 @@ function capture(rate = 48000) {
 }
 const start = (p, captureId = 'capture-a', frameSamples = 1600) => p.send({ type: 'start', capture_id: captureId, sample_rate: 16000, frame_samples: frameSamples });
 
+for (const rate of [44100, 48000]) test(`${rate}Hz microphone produces complete 32ms VAD frames without phase loss`, () => {
+  const p = capture(rate);
+  start(p, 'listener-a', 512);
+  p.feed([new Float32Array(rate).fill(.25)], [128, 61, 257]);
+  assert.equal(p.pcm().length, 31);
+  assert.ok(p.pcm().every(event => event.buffer.byteLength === 1024 && event.capture_id === 'listener-a'));
+  p.send({ type: 'flush', capture_id: 'listener-a' });
+  assert.equal(p.samples().length, 16000);
+  assert.equal(p.pcm().at(-1).buffer.byteLength, 256);
+});
+
 for (const rate of [44100, 48000]) {
   test(`${rate}Hz input has exact 16k duration and 100ms frames across block boundaries`, () => {
     const p = capture(rate);

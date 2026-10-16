@@ -24,10 +24,11 @@ from uuid import uuid4
 from jsonschema import Draft202012Validator
 
 from .catalog import SKILLS
-from .db import step_summary
 from .prompt_templates import render_prompt
 from .speech_text import brief_result, spoken_number
 from .textutil import find_urls, is_domain, redact
+from .task_feedback import PHASES, partial_result, task_user_detail
+from .speaker import speaker_context
 
 logger = logging.getLogger(__name__)
 SKILL_GUIDE = "；".join(f"{skill_id}：{SKILLS[skill_id].name}" for skill_id in sorted(SKILLS))
@@ -194,11 +195,11 @@ def _safe_error(exc: BaseException, max_length: int | None = 500) -> str:
 
 class ThinkerWorker:
     def __init__(self, db: Any, ark: Any = None, tavily: Any = None, *,
-                 max_steps: int = 20, timeout_seconds: float = 300,
+                 max_steps: int = 20, timeout_seconds: float = 60,
                  concurrency: int = 2,
                  catalog: dict[str, Any] | None = None,
                  tool_timeout_seconds: float | None = None,
-                 quick_max_steps: int = 4, quick_timeout_seconds: float = 45, weather: Any = None):
+                 quick_max_steps: int = 4, quick_timeout_seconds: float = 60, weather: Any = None):
         self.db = db
         if ark is None or tavily is None:
             from .models import ArkClient, TavilyClient
@@ -207,10 +208,10 @@ class ThinkerWorker:
         self.ark, self.tavily = ark, tavily
         self.weather = weather
         self.max_steps = max(1, min(20, max_steps))
-        self.timeout_seconds = max(0.01, min(300, timeout_seconds))
+        self.timeout_seconds = max(0.01, min(60, timeout_seconds))
         self.concurrency = max(1, concurrency)
         self.quick_max_steps = max(1, min(self.max_steps, 4, quick_max_steps))
-        self.quick_timeout_seconds = max(0.01, min(45, quick_timeout_seconds))
+        self.quick_timeout_seconds = max(0.01, min(60, quick_timeout_seconds))
         self.tool_timeout_seconds = max(0.01, tool_timeout_seconds if tool_timeout_seconds is not None
                                         else float(os.getenv("TOOL_TIMEOUT_SECONDS", "35")))
         self.catalog = catalog
@@ -224,7 +225,11 @@ class ThinkerWorker:
         """Claim only free slots. Clarification returns immediately to this loop."""
         try:
             while not self._stopping.is_set():
+                self.db.expire_tasks(self.timeout_seconds)
                 for task_id, future in list(self._active.items()):
+                    current = self.db.get_task(task_id)
+                    if current and current['status'] in {'completed', 'failed', 'cancelled'} and not future.done():
+                        future.cancel()
                     if future.done():
                         # run_task handles ordinary failures, but surface unexpected ones.
                         if not future.cancelled() and future.exception():
@@ -241,9 +246,6 @@ class ThinkerWorker:
                         # active coroutine reaches a boundary. Yield to it.
                         break
                     self._active[task["id"]] = asyncio.create_task(self.run_task(task))
-                expire = getattr(self.db, "expire_tasks", None)
-                if expire:
-                    expire(self.timeout_seconds)
                 try:
                     await asyncio.wait_for(self._stopping.wait(), timeout=poll_interval)
                 except asyncio.TimeoutError:
@@ -264,6 +266,9 @@ class ThinkerWorker:
             # A concurrent deadline sweep may have closed this task while an
             # external request was in flight. Never resurrect it.
             raise TaskCancelled()
+        if task['status'] != 'waiting_clarification' and datetime.fromisoformat(task['deadline_at']) <= datetime.now(timezone.utc):
+            self.db.expire_tasks(self.timeout_seconds)
+            raise TaskCancelled()
         if revision is not None and task["revision"] != revision:
             raise RevisionChanged(task)
         return task
@@ -278,13 +283,23 @@ class ThinkerWorker:
                    "revision": task["revision"], "query_mode": self._query_mode(task),
                    "current_utc": datetime.now(timezone.utc).isoformat()}
         if task.get("context"):
-            context["context"] = task["context"]
+            context["context"] = deepcopy(task["context"])
+            # Talker routing metadata is redundant in a suggestion-only worker.
+            if isinstance(context['context'].get('speaker'), dict):
+                context['context']['speaker'].pop('control_defaults', None)
         # apply_pending may store a user's reply in transcript or a replies field.
         if task.get("replies"):
             context["user_replies"] = task["replies"]
         prompt = QUICK_PROMPT if self._query_mode(task) == "quick" else SYSTEM_PROMPT
-        return [{"role": "system", "content": prompt},
-                {"role": "user", "content": json.dumps(context, ensure_ascii=False)}]
+        messages = [{"role": "system", "content": prompt}]
+        speaker = (task.get('context') or {}).get('speaker')
+        if speaker:
+            defaults = speaker_context(speaker['seat'])
+            defaults.pop('control_defaults')
+            messages.append({'role': 'system', 'content': render_prompt('speaker_context',
+                speaker_json=json.dumps(defaults, ensure_ascii=False))})
+        messages.append({"role": "user", "content": json.dumps(context, ensure_ascii=False)})
+        return messages
 
     @staticmethod
     def _query_mode(task: dict[str, Any]) -> str:
@@ -335,9 +350,11 @@ class ThinkerWorker:
         started = time.perf_counter()
         mode = self._query_mode(task)
         deadline_reason = "running_budget"
+        progress_timer = None
         try:
-            # Waiting/queued time never consumes the cumulative running budget.
-            remaining = self.timeout_seconds - self.db.running_elapsed(task)
+            # The persisted wall deadline includes queue time and survives a restart.
+            remaining = min(self.timeout_seconds - self.db.running_elapsed(task),
+                            (datetime.fromisoformat(task['deadline_at']) - datetime.now(timezone.utc)).total_seconds())
             if remaining <= 0:
                 raise asyncio.TimeoutError()
             if mode == "quick":
@@ -347,7 +364,32 @@ class ThinkerWorker:
                     remaining, deadline_reason = execution_remaining, "quick_execution_budget"
                 if remaining <= 0:
                     raise asyncio.TimeoutError()
-            await asyncio.wait_for(self._run_task(task), remaining)
+            end = time.perf_counter() + remaining
+            async def notify_progress():
+                delay = (datetime.fromisoformat(task['deadline_at']) - datetime.now(timezone.utc)).total_seconds() - 30
+                await asyncio.sleep(max(0, delay))
+                self.db.notify_task_progress(task['id'])
+            progress_timer = asyncio.create_task(notify_progress())
+            # Reserve delivery time instead of letting one more search consume the minute.
+            budget = min(self.timeout_seconds, self.quick_timeout_seconds) if mode == 'quick' else self.timeout_seconds
+            reserve = min(15, budget / 4, remaining)
+            try:
+                await asyncio.wait_for(self._run_task(task), remaining - reserve)
+            except asyncio.TimeoutError:
+                current = self._boundary(task['id'])
+                self._trace(current, 'task.finalizing', {'remaining_seconds': max(0, end - time.perf_counter())}, status='running')
+                try:
+                    await asyncio.wait_for(self._finalize(current), max(.001, end - time.perf_counter()))
+                except (TaskCancelled, RevisionChanged):
+                    raise
+                except asyncio.TimeoutError:
+                    raise
+                except Exception as exc:
+                    self._trace(current, 'task.finalize_error', {'error': _safe_error(exc, None)}, status='error')
+                    self._fail_revision(task['id'], current['revision'], _safe_error(exc), code='finalization_failed')
+        except RevisionChanged as changed:
+            self._trace(task, 'revision.discarded', {'new_revision': changed.task['revision'], 'phase': 'finalize'}, status='stale')
+            self._fail_current(task['id'], '条件在收尾期间更新，未能在时间上限内核实。', code='deadline')
         except TaskCancelled:
             return
         except asyncio.TimeoutError:
@@ -356,7 +398,7 @@ class ThinkerWorker:
                         step=current.get("steps"), status="failed")
             error = (f"快速查询累计执行超过{self.quick_timeout_seconds:g}秒时间上限，已停止；没有宣称完成。"
                      if deadline_reason == "quick_execution_budget" else "任务超过时间上限，已停止；没有宣称完成。")
-            self._fail_current(task["id"], error)
+            self._fail_current(task["id"], error, code='deadline')
         except asyncio.CancelledError:
             # Process shutdown is outside the promised continuous-online scope.
             self._trace(task, "worker.interrupted", {"reason": "worker_coroutine_cancelled"},
@@ -369,30 +411,110 @@ class ThinkerWorker:
                         step=task.get("steps"), status="error")
             self._fail_revision(task["id"], task["revision"], _safe_error(exc))
         finally:
+            if progress_timer:
+                progress_timer.cancel()
+                await asyncio.gather(progress_timer, return_exceptions=True)
             if mode == "quick":
                 current = self.db.get_task(task["id"]) or task
                 self._trace(current, "task.execution.finished", {"query_mode": mode,
                     "elapsed_seconds": time.perf_counter() - started},
                     step=current.get("steps"), status=current["status"])
 
-    def _fail_revision(self, task_id: str, revision: int, error: str) -> bool:
+    def _fail_revision(self, task_id: str, revision: int, error: str, code='execution_failed') -> bool:
         """Return False if the failing work became stale and should be retried."""
         try:
-            self._boundary(task_id, revision)
-            return self.db.save_task(task_id, revision, status="failed", error=error,
-                                     summary="任务未完成。" + error, question=None)
+            current = self._boundary(task_id, revision)
+            closed = {**current, 'status': 'failed', 'error_code': code}
+            return self.db.save_task(task_id, revision, status="failed", error=error, error_code=code,
+                                     summary=task_user_detail(closed), result=partial_result(closed), question=None)
         except RevisionChanged:
             return False
         except TaskCancelled:
             return True
 
-    def _fail_current(self, task_id: str, error: str) -> None:
+    def _fail_current(self, task_id: str, error: str, code='execution_failed') -> None:
         try:
             current = self._boundary(task_id)
-            self.db.save_task(task_id, current["revision"], status="failed", error=error,
-                              summary="任务未完成。" + error, question=None)
+            self._fail_revision(task_id, current['revision'], error, code=code)
         except TaskCancelled:
             pass
+
+    async def _finalize(self, task):
+        """One bounded delivery call, with no permission to perform more IO tools."""
+        revision, task_id = task['revision'], task['id']
+        checkpoint = task.get('checkpoint') or {}
+        if not checkpoint:
+            self._fail_current(task_id, '任务未能在时间上限内取得资料。', code='deadline')
+            return
+        messages = deepcopy(checkpoint.get('messages') or self._messages(task))
+        sources = {item['url']: deepcopy(item) for item in checkpoint.get('sources', [])}
+        observations = deepcopy(checkpoint.get('observations', []))
+        suggestions = deepcopy(checkpoint.get('suggestions', []))
+        citable = {f'source_{index}': source for index, source in enumerate(sources.values(), 1)
+                   if source.get('extracted') is True or source.get('verified') is True}
+        # Cancellation can cut a batch between tool calls; close the protocol group
+        # explicitly without pretending those pending calls ran.
+        answered = {item.get('tool_call_id') for item in messages if item.get('role') == 'tool'}
+        for item in list(messages):
+            for call in item.get('tool_calls') or []:
+                if call['id'] not in answered:
+                    messages.append({'role': 'tool', 'tool_call_id': call['id'],
+                                     'content': json.dumps({'ok': False, 'executed': False, 'code': 'stopped_for_delivery'})})
+        messages.append({'role': 'user', 'content': json.dumps({
+            'instruction': render_prompt('thinker_finalize') + '\n' + render_prompt('thinker_source_selection'),
+            'constraints': task.get('constraints', []),
+            'revision': revision, 'citable_sources': citable}, ensure_ascii=False)})
+        tools = deepcopy([tool for tool in THINKER_TOOLS if tool['function']['name'] == 'finish_task'])
+        schema = tools[0]['function']['parameters']
+        schema['properties'].pop('source_urls')
+        schema['properties']['source_ids'] = {'type': 'array', 'items': {'type': 'string', 'enum': list(citable)}
+                                             if citable else {'type': 'string'},
+                                             'maxItems': min(20, len(citable)), 'uniqueItems': True}
+        schema['required'] = ['summary', 'spoken_summary', 'source_ids']
+        call_id = uuid4().hex
+        request = {'messages': deepcopy(messages), 'tools': tools, 'thinker': False,
+                   'thinking': False, 'max_tokens': 2500,
+                   'tool_choice': {'type': 'function', 'function': {'name': 'finish_task'}}}
+        self._save(task_id, revision, progress={'phase': 'finish_task', 'read_sources': sum(bool(s.get('extracted')) for s in sources.values())},
+                   summary=PHASES['finish_task'])
+        self._trace(task, 'model.started', {'request': request, 'phase': 'finalize'}, call_id=call_id, model_call_id=call_id, status='running')
+        try:
+            response = await self.ark.complete(**request)
+        except BaseException as exc:
+            self._trace(task, 'model.error', {'error': _safe_error(exc, None), 'phase': 'finalize'},
+                        call_id=call_id, model_call_id=call_id, status='cancelled' if isinstance(exc, asyncio.CancelledError) else 'error')
+            raise
+        response = deepcopy(response)
+        meta = response.pop('_meta', {})
+        self._trace(task, 'model.completed', {'message': response, 'meta': meta, 'phase': 'finalize'},
+                    call_id=call_id, model_call_id=call_id, status=self._response_status(task_id, revision, 'received'))
+        self._boundary(task_id, revision)
+        calls = response.get('tool_calls') or []
+        if len(calls) != 1 or calls[0].get('function', {}).get('name') != 'finish_task':
+            raise ValueError('收尾未提交结构化结果。')
+        call = calls[0]
+        raw_args = json.loads(call['function']['arguments'])
+        Draft202012Validator(schema).validate(raw_args)
+        args = deepcopy(raw_args)
+        selected = [citable[identity] for identity in args.pop('source_ids')]
+        args['source_urls'] = [source['url'] for source in selected]
+        if checkpoint.get('revision') != revision:
+            # Old material must not silently become a result for updated conditions.
+            raise ValueError('任务条件在收尾前变更，已有资料尚未核实新条件。')
+        adopted = _weather_finish_guard(args, task, sources, observations)
+        self._trace(task, 'tool.started', {'name': 'finish_task', 'arguments': raw_args, 'resolved_arguments': args, 'call': call},
+                    call_id=call['id'], model_call_id=call_id, status='running')
+        result = await self._execute_tool('finish_task', args, sources, suggestions, observations, adopted_forecasts=adopted)
+        if selected:
+            result['result']['summary'] += '\n来源：\n' + '\n'.join(
+                f"- [{source.get('title') or source['url']}]({source['url']})" for source in selected)
+        self._trace(task, 'tool.completed', {'name': 'finish_task', 'arguments': args, 'result': result},
+                    call_id=call['id'], model_call_id=call_id, status=self._response_status(task_id, revision, 'completed'))
+        self._boundary(task_id, revision)
+        result['result'].update(partial=True, query_mode=self._query_mode(task))
+        messages.extend([response, {'role': 'tool', 'tool_call_id': call['id'], 'content': json.dumps(result, ensure_ascii=False)}])
+        self._save(task_id, revision, status='completed', result=result['result'], summary=result['result']['summary'],
+                   transcript=messages, sources=list(sources.values()), question=None)
 
     async def _run_task(self, task: dict[str, Any]) -> None:
         task_id = task["id"]
@@ -412,7 +534,7 @@ class ThinkerWorker:
                 mode = self._query_mode(current)
                 step_limit = self.quick_max_steps if mode == "quick" else self.max_steps
                 if step > step_limit:
-                    self._fail_current(task_id, "任务达到推理步骤上限，已停止；没有宣称完成。")
+                    self._fail_current(task_id, "任务达到推理步骤上限，已停止；没有宣称完成。", code='step_budget')
                     return
                 tools = QUICK_TOOLS if mode == "quick" else THINKER_TOOLS
                 thinker = mode != "quick"
@@ -428,7 +550,9 @@ class ThinkerWorker:
                     previous_revision = revision if revision >= 0 else None
                     revision = current["revision"]
                     checkpoint = current.get('checkpoint') or {}
-                    restored = checkpoint.get('goal') == current['goal'] and bool(checkpoint.get('messages'))
+                    restored = (checkpoint.get('goal') == current['goal'] and bool(checkpoint.get('messages'))
+                                and (checkpoint.get('revision') == revision or any(
+                                    item.get('role') == 'tool' for item in checkpoint['messages'])))
                     if restored:
                         messages = deepcopy(checkpoint['messages'])
                         sources = {item['url']: deepcopy(item) for item in checkpoint.get('sources', [])}
@@ -476,11 +600,22 @@ class ThinkerWorker:
                     self._trace(current, "task.budget_exhausted", {"reason": "quick_lookup_budget",
                         "lookup_limit": 2, "current_revision_attempts": 0}, revision=revision,
                         step=current.get("steps"), status="failed")
-                    self._save(task_id, revision, status="failed", error=error, summary=error,
+                    self._save(task_id, revision, status="failed", error=error, error_code='step_budget', summary=error,
                                result=None, sources=[], transcript=messages, question=None)
                     return
+                finalizing = step == step_limit or tool_count >= step_limit
+                if finalizing:
+                    tools = [tool for tool in THINKER_TOOLS if tool['function']['name'] == 'finish_task']
+                    thinker = False
+                    options['thinking'] = False
+                    options['max_tokens'] = 2500
+                    options['tool_choice'] = {'type': 'function', 'function': {'name': 'finish_task'}}
+                    messages.append({'role': 'user', 'content': render_prompt('thinker_finalize')})
                 self._save(task_id, revision, status="running", steps=step, error=None,
-                           summary=step_summary(step), question=None)
+                           summary=PHASES['finish_task' if finalizing else 'model'], question=None,
+                           progress={'phase': 'finish_task' if finalizing else 'model',
+                                     'read_sources': sum(bool(s.get('extracted')) for s in sources.values())},
+                           checkpoint=self._checkpoint(current, revision, messages, sources, suggestions, observations, tool_count))
                 self._trace(current, "step.started", {}, revision=revision, step=step, status="running")
                 phase = "model"
                 model_call_id = uuid4().hex
@@ -528,9 +663,6 @@ class ThinkerWorker:
                 for index, call in enumerate(calls):
                     phase = "tool"
                     self._boundary(task_id, revision)
-                    tool_count += 1
-                    if tool_count > step_limit:
-                        raise RuntimeError("任务达到工具步骤上限，未完成。")
                     function = call.get("function", {})
                     name = function.get("name", "")
                     call_id = call.get("id", f"step{step}_{index}")
@@ -550,7 +682,12 @@ class ThinkerWorker:
                         if terminal:
                             result = {"ok": False, "error": "本轮已提交终止操作，剩余调用未执行。"}
                         else:
-                            self._save(task_id, revision, summary=self._progress(name, arguments))
+                            if name not in {'finish_task', 'ask_clarification'}:
+                                if tool_count >= step_limit:
+                                    raise ValueError('检索预算已用尽，请用已有材料finish_task。')
+                                tool_count += 1
+                            self._save(task_id, revision, summary=self._progress(name, arguments),
+                                       progress={'phase': name, 'read_sources': sum(bool(s.get('extracted')) for s in sources.values())})
                             if name == "lookup_web":
                                 lookup_count += 1
                                 if lookup_count > 2:
@@ -573,6 +710,8 @@ class ThinkerWorker:
                                 timeout=self.tool_timeout_seconds)
                             if name == "finish_task" and result.get("ok"):
                                 result["result"]["query_mode"] = mode
+                                if finalizing:
+                                    result['result']['partial'] = True
                             self._trace(current, "tool.completed", {"name": name,
                                         "arguments": arguments, "result": result}, revision=revision,
                                         step=step, call_id=call_id, model_call_id=model_call_id,
@@ -608,6 +747,10 @@ class ThinkerWorker:
                                              "error": result["error"]})
                     messages.append({"role": "tool", "tool_call_id": call_id,
                                      "content": json.dumps(result, ensure_ascii=False)})
+                    # Persist each completed tool before the next await, so timed
+                    # delivery can reuse real evidence even in a cancelled batch.
+                    self._save(task_id, revision, sources=list(sources.values()),
+                               checkpoint=self._checkpoint(current, revision, messages, sources, suggestions, observations, tool_count))
                 self._save(task_id, revision, transcript=messages, sources=list(sources.values()),
                     checkpoint={'goal': current['goal'], 'revision': revision, 'messages': messages,
                                 'sources': list(sources.values()), 'suggestions': suggestions,
@@ -648,7 +791,14 @@ class ThinkerWorker:
                 # A model/network failure from an old revision is discarded just
                 # like a late successful response. Continue with new conditions.
                 continue
-        self._fail_current(task_id, "任务达到推理步骤上限，已停止；没有宣称完成。")
+        self._fail_current(task_id, "任务达到推理步骤上限，已停止；没有宣称完成。", code='step_budget')
+
+    @staticmethod
+    def _checkpoint(task, revision, messages, sources, suggestions, observations, tool_count):
+        return {'goal': task['goal'], 'revision': revision, 'messages': messages,
+                'sources': list(sources.values()), 'suggestions': suggestions,
+                'observations': observations, 'tool_count': tool_count,
+                'constraint_count': len(task.get('constraints', []))}
 
     async def _quick_lookup(self, args, sources, suggestions, observations, task, revision,
                             step, model_call_id, parent_call_id):
@@ -701,13 +851,7 @@ class ThinkerWorker:
 
     @staticmethod
     def _progress(name: str, arguments: dict[str, Any]) -> str:
-        return {"search_web": f"正在搜索：{arguments.get('query', '')[:90]}",
-                "lookup_web": f"正在查询并核实：{arguments.get('query', '')[:90]}",
-                "get_weather_forecast": "正在读取目标日期的结构化天气预报。",
-                "extract_web": "正在读取搜索来源页面。",
-                "load_skill": "正在查看车辆子系统说明。", "ask_clarification": "等待必要条件。",
-                "suggest_vehicle_action": "正在整理待校验的模拟车辆动作建议。",
-                "finish_task": "正在整理结果。"}.get(name, "正在处理任务。")
+        return PHASES.get(name, '正在处理任务。')
 
     async def _execute_tool(self, name: str, args: dict[str, Any], sources: dict[str, Any],
                             suggestions: list[dict[str, Any]], observations: list[dict[str, Any]], *,
@@ -879,7 +1023,7 @@ async def _main() -> None:
     db = Database(args.database)
     worker = ThinkerWorker(db, concurrency=args.concurrency,
                            max_steps=int(os.getenv("THINKER_MAX_STEPS", "20")),
-                           timeout_seconds=float(os.getenv("THINKER_TIMEOUT_SECONDS", "300")))
+                           timeout_seconds=float(os.getenv("THINKER_TIMEOUT_SECONDS", "60")))
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, worker.stop)

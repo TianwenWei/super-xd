@@ -28,3 +28,11 @@
 .performance-within-target{color:#3d8871}.performance-over-target{color:var(--orange)}
 
 .vehicle-function-calls{display:grid;gap:4px;margin-top:10px;padding-top:8px;border-top:1px solid #edf2f3;color:#6e8790;font-size:10px;line-height:1.7}.vehicle-function-calls>span{font-size:9px;color:#879ba2}.vehicle-function-calls code{font-family:var(--mono);font-size:inherit;white-space:pre-wrap;overflow-wrap:anywhere;user-select:text}
+
+.message-diagnostics{margin-top:8px}
+.message-diagnostics>summary{display:flex;align-items:center;gap:4px;width:fit-content;max-width:100%;padding:3px 0;list-style:none;cursor:pointer;color:var(--muted);font-size:10px;line-height:1.6}
+.message-diagnostics>summary::-webkit-details-marker{display:none}
+.message-diagnostics>summary:hover{color:var(--teal)}
+.message-diagnostics-content{padding:0 0 4px 16px}
+.speaker-selector{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;color:var(--text-muted,#687a7c);font-size:12px}
+.speaker-selector select{min-height:36px;padding:5px 28px 5px 10px;border:1px solid var(--border,#dbe5e5);border-radius:8px;background:var(--panel,#fff);color:inherit;font:inherit}

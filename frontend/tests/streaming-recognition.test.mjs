@@ -8,7 +8,10 @@ const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.Scri
 const { StreamingRecognition } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
 const speechSource = fs.readFileSync(new URL('../src/StreamingSpeech.ts', import.meta.url), 'utf8');
 const speechCompiled = ts.transpileModule(speechSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
-const { StreamingSpeech } = await import(`data:text/javascript;base64,${Buffer.from(speechCompiled).toString('base64')}`);
+const textSource = fs.readFileSync(new URL('../src/text.ts', import.meta.url), 'utf8');
+const textCompiled = ts.transpileModule(textSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
+const textModule = `data:text/javascript;base64,${Buffer.from(textCompiled).toString('base64')}`;
+const { StreamingSpeech } = await import(`data:text/javascript;base64,${Buffer.from(speechCompiled.replace("from './text'", `from '${textModule}'`)).toString('base64')}`);
 globalThis.location = { protocol: 'http:', host: 'localhost' };
 let sockets = [], nodes = [], contexts = [];
 globalThis.WebSocket = class {

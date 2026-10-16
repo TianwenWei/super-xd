@@ -27,8 +27,8 @@ def test_task_compaction_preserves_all_conditions_and_current_answer_without_mut
     archive = deepcopy(original)
     compact = compact_tool_result(original, 'manage_task')
     assert original == archive
-    assert set(compact['task']) == {'id', 'goal', 'status', 'revision', 'summary', 'question', 'error', 'constraints', 'result'}
-    for key in ('goal', 'constraints', 'summary', 'question', 'error'):
+    assert set(compact['task']) == {'id', 'goal', 'status', 'revision', 'summary', 'question', 'constraints', 'result'}
+    for key in ('goal', 'constraints', 'summary', 'question'):
         assert compact['task'][key] == archive['task'][key]
     assert compact['task']['result'] == {'spoken_summary': '具体结论，必要条件不变。'}
     assert compact['detail'] == '当前明确限制。'

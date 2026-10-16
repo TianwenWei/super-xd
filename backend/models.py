@@ -28,7 +28,7 @@ def sanitized_error(exc):
         return 'network timeout'
     else:
         value = str(exc)
-    for key in ('ARK_API_KEY', 'TAVILY_API_KEY', 'OPENAI_API_KEY', 'GOOGLE_MAPS_API_KEY',
+    for key in ('ARK_API_KEY', 'ARK_EMBEDDING_API_KEY', 'TAVILY_API_KEY', 'OPENAI_API_KEY', 'GOOGLE_MAPS_API_KEY',
                 'VOLCENGINE_SPEECH_API_KEY', 'VOLCENGINE_SPEECH_ACCESS_TOKEN'):
         secret = os.getenv(key)
         if secret:

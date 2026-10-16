@@ -1,0 +1,140 @@
+[
+  {
+    "id": "configured_location_weather",
+    "tags": [
+      "location_context",
+      "maps"
+    ],
+    "personas": [
+      "professional",
+      "warm",
+      "playful"
+    ],
+    "turns": [
+      {
+        "input": "今天出门要带伞吗？",
+        "expect": {
+          "no_commands": true,
+          "tasks_created": 0,
+          "forbid_talker_calls": [
+            "delegate_task"
+          ],
+          "talker_call_options": [
+            [
+              {
+                "name": "get_weather",
+                "arguments": {
+                  "location": "Paris France",
+                  "date": "today"
+                }
+              },
+              {
+                "name": "get_weather",
+                "arguments": {
+                  "location": "Paris 法国",
+                  "date": "today"
+                }
+              },
+              {
+                "name": "get_weather",
+                "arguments": {
+                  "location": "巴黎 法国",
+                  "date": "today"
+                }
+              },
+              {
+                "name": "get_weather",
+                "arguments": {
+                  "location": "Paris, France",
+                  "date": "today"
+                }
+              }
+            ]
+          ]
+        }
+      }
+    ],
+    "vehicle": {
+      "_meta.location": "Paris",
+      "_meta.location_country": "France",
+      "_meta.timezone": "Europe/Paris"
+    }
+  },
+  {
+    "id": "configured_location_nearby",
+    "tags": [
+      "location_context",
+      "maps"
+    ],
+    "turns": [
+      {
+        "input": "找我附近的充电站，给我几个选项就行",
+        "expect": {
+          "no_commands": true,
+          "tasks_created": 0,
+          "forbid_talker_calls": [
+            "delegate_task",
+            "start_poi_navigation"
+          ],
+          "talker_call_options": [
+            [
+              {
+                "name": "search_places",
+                "arguments": {
+                  "area": "Paris"
+                }
+              },
+              {
+                "name": "search_places",
+                "arguments": {
+                  "area": "Paris France"
+                }
+              },
+              {
+                "name": "search_places",
+                "arguments": {
+                  "area": "Paris, France"
+                }
+              }
+            ]
+          ]
+        }
+      }
+    ],
+    "vehicle": {
+      "_meta.location": "Paris",
+      "_meta.location_country": "France",
+      "_meta.timezone": "Europe/Paris"
+    }
+  },
+  {
+    "id": "configured_location_explicit_city_takes_precedence",
+    "tags": [
+      "location_context",
+      "maps"
+    ],
+    "turns": [
+      {
+        "input": "我想知道日本东京明天天气怎么样",
+        "expect": {
+          "talker_calls": [
+            {
+              "name": "get_weather",
+              "arguments": {
+                "location": "东京 日本",
+                "date": "tomorrow"
+              }
+            }
+          ],
+          "no_commands": true,
+          "tasks_created": 0
+        }
+      }
+    ],
+    "vehicle": {
+      "_meta.location": "Paris",
+      "_meta.location_country": "France",
+      "_meta.timezone": "Europe/Paris"
+    }
+  }
+]

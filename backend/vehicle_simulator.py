@@ -30,7 +30,7 @@ class VehicleSimulator:
         self.expired_commands.add(command_id)
 
     def configure(self, settings):
-        allowed = {'speed_kph', 'gear', 'call_active', 'navigation_active', 'timezone'}
+        allowed = {'speed_kph', 'gear', 'call_active', 'navigation_active', 'timezone', 'location', 'location_country'}
         if not isinstance(settings, dict) or not set(settings) <= allowed:
             raise ValueError('未知模拟器设置')
         state = deepcopy(self.state)
@@ -45,6 +45,10 @@ class VehicleSimulator:
                 if not isinstance(value, str):
                     raise ValueError('无效时区')
                 ZoneInfo(value)
+            if key in ('location', 'location_country'):
+                if not isinstance(value, str) or len(value) > 200:
+                    raise ValueError('地点设置需为不超过200字的文本。')
+                value = value.strip()
             if key == 'navigation_active':
                 state['navigation']['active'] = value
             else:

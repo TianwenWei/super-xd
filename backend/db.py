@@ -9,8 +9,9 @@ from uuid import uuid4
 from backend.settings import DATABASE_PATH
 from backend.models import utcnow
 from backend.textutil import redact_bearer, redact_known_secrets
+from backend.task_feedback import partial_result, task_user_detail
 
-JSON_FIELDS = {'constraints', 'result', 'sources', 'transcript', 'context', 'checkpoint'}
+JSON_FIELDS = {'constraints', 'result', 'sources', 'transcript', 'context', 'checkpoint', 'progress'}
 TERMINAL = {'completed', 'failed', 'cancelled'}
 
 
@@ -74,9 +75,16 @@ class Database:
 
             for name, sql_type in {'running_seconds': 'REAL NOT NULL DEFAULT 0',
                                    'running_since': 'TEXT', 'clarification_expires_at': 'TEXT',
-                                   'checkpoint': "TEXT NOT NULL DEFAULT '{}'"}.items():
+                                   'checkpoint': "TEXT NOT NULL DEFAULT '{}'",
+                                   'deadline_at': 'TEXT', 'deadline_paused_at': 'TEXT',
+                                   'progress_notified': 'INTEGER NOT NULL DEFAULT 0',
+                                   'progress': "TEXT NOT NULL DEFAULT '{}'", 'error_code': 'TEXT'}.items():
                 if name not in columns:
                     con.execute(f'ALTER TABLE tasks ADD COLUMN {name} {sql_type}')
+            for row in con.execute('SELECT id,created_at FROM tasks WHERE deadline_at IS NULL').fetchall():
+                deadline = datetime.fromisoformat(row['created_at']) + timedelta(seconds=60)
+                con.execute('UPDATE tasks SET deadline_at=? WHERE id=?', (deadline.isoformat(), row['id']))
+            con.execute("UPDATE tasks SET deadline_paused_at=updated_at WHERE status='waiting_clarification' AND deadline_paused_at IS NULL")
             con.execute("UPDATE tasks SET running_since=updated_at WHERE status='running' AND running_since IS NULL")
             con.execute("UPDATE tasks SET clarification_expires_at=? WHERE status='waiting_clarification' AND clarification_expires_at IS NULL",
                         ((datetime.now(timezone.utc) + timedelta(seconds=self.clarification_timeout())).isoformat(),))
@@ -97,6 +105,13 @@ class Database:
         if task['status'] == status:
             return
         now = datetime.now(timezone.utc)
+        if task['status'] == 'waiting_clarification' and task.get('deadline_paused_at'):
+            pause = now - datetime.fromisoformat(task['deadline_paused_at'])
+            deadline = datetime.fromisoformat(task['deadline_at']) + pause
+            con.execute('UPDATE tasks SET deadline_at=?,deadline_paused_at=NULL WHERE id=?',
+                        (deadline.isoformat(), task['id']))
+        if status == 'waiting_clarification':
+            con.execute('UPDATE tasks SET deadline_paused_at=? WHERE id=?', (now.isoformat(), task['id']))
         seconds = self.running_elapsed(task, now)
         expires = (now + timedelta(seconds=self.clarification_timeout())).isoformat() if status == 'waiting_clarification' else None
         con.execute('UPDATE tasks SET running_seconds=?,running_since=?,clarification_expires_at=? WHERE id=?',
@@ -181,9 +196,10 @@ class Database:
 
     def create_task(self, session_id, goal, context=None):
         task_id, at = uuid4().hex[:12], utcnow()
+        deadline = (datetime.fromisoformat(at) + timedelta(seconds=60)).isoformat()
         with self.connection() as con:
-            con.execute('INSERT INTO tasks(id,session_id,goal,context,created_at,updated_at) VALUES(?,?,?,?,?,?)',
-                        (task_id, session_id, goal, json.dumps(context or {}, ensure_ascii=False), at, at))
+            con.execute('INSERT INTO tasks(id,session_id,goal,context,created_at,updated_at,deadline_at) VALUES(?,?,?,?,?,?,?)',
+                        (task_id, session_id, goal, json.dumps(context or {}, ensure_ascii=False), at, at, deadline))
             task = self._get(con, task_id)
             self._event(con, task, 'created')
             return task
@@ -238,7 +254,7 @@ class Database:
             status = 'cancelling' if action == 'cancel' else ('running' if task['status'] == 'running' else 'queued')
             self._transition_clock(con, task, status)
             summary = '正在取消，等待当前步骤边界' if action == 'cancel' else '已接收新条件，后台将在步骤边界应用'
-            con.execute('UPDATE tasks SET revision=?,constraints=?,context=?,status=?,summary=?,result=NULL,question=NULL,error=NULL,updated_at=? WHERE id=?',
+            con.execute("UPDATE tasks SET revision=?,constraints=?,context=?,status=?,summary=?,result=NULL,question=NULL,error=NULL,error_code=NULL,progress='{}',updated_at=? WHERE id=?",
                         (revision, json.dumps(constraints, ensure_ascii=False), json.dumps(context, ensure_ascii=False), status, summary, utcnow(), task_id))
             con.execute('INSERT INTO inbox(task_id,action,text,revision,created_at) VALUES(?,?,?,?,?)',
                         (task_id, action, text.strip(), revision, utcnow()))
@@ -259,7 +275,7 @@ class Database:
             return self._get(con, task_id)
 
     def save_task(self, task_id, revision, **fields):
-        allowed = {'status', 'summary', 'result', 'sources', 'transcript', 'question', 'error', 'steps', 'checkpoint'}
+        allowed = {'status', 'summary', 'result', 'sources', 'transcript', 'question', 'error', 'steps', 'checkpoint', 'progress', 'error_code'}
         if not fields or not set(fields) <= allowed:
             raise ValueError('非法任务字段')
         values = [json.dumps(v, ensure_ascii=False) if k in JSON_FIELDS else v for k, v in fields.items()]
@@ -299,7 +315,18 @@ class Database:
                 items.append(item)
             return items
 
-    def expire_tasks(self, max_age_seconds=300):
+    def notify_task_progress(self, task_id):
+        with self.connection() as con:
+            con.execute('BEGIN IMMEDIATE')
+            task = self._get(con, task_id)
+            if (not task or task['status'] not in {'queued', 'running'} or task['progress_notified']
+                    or not timedelta(0) < datetime.fromisoformat(task['deadline_at']) - datetime.now(timezone.utc) <= timedelta(seconds=30)):
+                return False
+            con.execute('UPDATE tasks SET progress_notified=1 WHERE id=?', (task_id,))
+            self._event(con, self._get(con, task_id), 'progress_notice')
+            return True
+
+    def expire_tasks(self, max_age_seconds=60):
         now, count = datetime.now(timezone.utc), 0
         with self.connection() as con:
             con.execute('BEGIN IMMEDIATE')
@@ -308,17 +335,27 @@ class Database:
             for task in tasks:
                 expired_wait = (task['status'] == 'waiting_clarification' and task.get('clarification_expires_at')
                                 and datetime.fromisoformat(task['clarification_expires_at']) <= now)
-                exhausted = self.running_elapsed(task, now) >= max_age_seconds
+                exhausted = (self.running_elapsed(task, now) >= max_age_seconds or
+                             task['status'] != 'waiting_clarification' and
+                             datetime.fromisoformat(task['deadline_at']) <= now)
                 cancel_expired = (task['status'] == 'cancelling' and
                                   (now - datetime.fromisoformat(task['updated_at'])).total_seconds() >= max_age_seconds)
                 if not expired_wait and not exhausted and not cancel_expired:
+                    if (task['status'] in {'queued', 'running'} and not task['progress_notified'] and
+                            datetime.fromisoformat(task['deadline_at']) - now <= timedelta(seconds=30)):
+                        con.execute('UPDATE tasks SET progress_notified=1 WHERE id=?', (task['id'],))
+                        self._event(con, self._get(con, task['id']), 'progress_notice')
                     continue
                 status = 'cancelled' if task['status'] == 'cancelling' else 'failed'
                 error = None if status == 'cancelled' else ('澄清等待已超时，请新建任务。' if expired_wait
                         else f'任务累计执行达到{max_age_seconds:g}秒上限，已停止。')
+                code = None if status == 'cancelled' else 'clarification_timeout' if expired_wait else 'deadline'
+                closed = {**task, 'status': status, 'error_code': code}
+                summary, result = task_user_detail(closed), partial_result(closed)
                 self._transition_clock(con, task, status)
-                con.execute('UPDATE tasks SET status=?,error=?,summary=?,updated_at=? WHERE id=?',
-                            (status, error, error or '任务已取消', now.isoformat(), task['id']))
+                con.execute('UPDATE tasks SET status=?,error=?,error_code=?,summary=?,result=?,question=NULL,updated_at=? WHERE id=?',
+                            (status, error, code, summary, json.dumps(result, ensure_ascii=False) if result else None,
+                             now.isoformat(), task['id']))
                 self._event(con, self._get(con, task['id']), status)
                 count += 1
         return count

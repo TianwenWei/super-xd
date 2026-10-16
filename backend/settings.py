@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -10,3 +11,12 @@ VEHICLE_CONTROL_MODEL = os.getenv('VEHICLE_CONTROL_MODEL', 'doubao-seed-2-1-pro-
 DATABASE_PATH = os.getenv('DATABASE_PATH', str(ROOT / 'data' / 'super_xd.sqlite3'))
 MODEL_TIMEOUT = float(os.getenv('MODEL_TIMEOUT_SECONDS', '45'))
 TOOL_TIMEOUT = float(os.getenv('TOOL_TIMEOUT_SECONDS', '12'))
+DEFAULT_SPEAKER_SEAT = os.getenv('DEFAULT_SPEAKER_SEAT', 'driver')
+
+
+def environment_defaults():
+    zone = os.getenv('DEFAULT_TIMEZONE', 'UTC')
+    ZoneInfo(zone)
+    return {'location': os.getenv('DEFAULT_LOCATION', '').strip(),
+            'location_country': os.getenv('DEFAULT_LOCATION_COUNTRY', '').strip(),
+            'timezone': zone}

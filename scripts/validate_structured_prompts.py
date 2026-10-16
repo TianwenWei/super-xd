@@ -79,6 +79,7 @@ async def capture_case(runtime, case, fixed_time):
                 'stream': False, 'max_tokens': 900 if mode == 'quick' else 6000}
     actor = object.__new__(session.SessionActor)
     actor.id = 'synthetic-prompt-evaluation'
+    actor.speaker_seat = case.get('speaker_seat', session.DEFAULT_SPEAKER_SEAT)
     actor.db = SimpleNamespace(list_tasks=lambda session_id: deepcopy(case.get('tasks', [])))
     actor.tasks = {task['id']: deepcopy(task) for task in case.get('tasks', [])}
     actor.vehicle = runtime.catalog.initial_vehicle_state()

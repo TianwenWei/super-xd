@@ -9,13 +9,16 @@ from __future__ import annotations
 from copy import deepcopy
 import json
 from typing import Any
+from backend.task_feedback import task_user_detail
 
-TASK_FIELDS = ('id', 'goal', 'status', 'revision', 'summary', 'question', 'error', 'constraints')
+TASK_FIELDS = ('id', 'goal', 'status', 'revision', 'question', 'constraints', 'progress', 'error_code')
 
 
 def _result_for_context(result: Any, read_details: bool) -> Any:
-    if read_details is True or not isinstance(result, dict):
+    if not isinstance(result, dict):
         return deepcopy(result)
+    if read_details is True:
+        return {key: deepcopy(value) for key, value in result.items() if key != 'tool_observations'}
     if isinstance(result.get('spoken_summary'), str) and result['spoken_summary'].strip():
         return {'spoken_summary': result['spoken_summary']}
     # Legacy tasks without a generated spoken summary retain their complete
@@ -29,8 +32,11 @@ def _task_for_context(task: Any, read_details: bool) -> Any:
     if not isinstance(task, dict):
         return deepcopy(task)
     compact = {key: deepcopy(task[key]) for key in TASK_FIELDS if key in task}
+    compact['summary'] = task_user_detail(task)
     if 'result' in task:
-        compact['result'] = _result_for_context(task['result'], read_details)
+        compact['result'] = ({'partial': True, 'spoken_summary': task_user_detail(task)}
+                             if task.get('status') == 'failed' and task['result'] else
+                             _result_for_context(task['result'], read_details))
     return compact
 
 

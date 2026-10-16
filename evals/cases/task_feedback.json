@@ -1,0 +1,14 @@
+[
+  {
+    "id": "task_progress_read_does_not_restart",
+    "tags": ["task_feedback"],
+    "tasks": [{"goal": "安排东京周末行程", "state": {"status": "running", "summary": "正在搜索：site:gotokyo.org/en visitor opening hours"}}],
+    "turns": [{"input": "我之前让你安排的东京行程查得怎么样了？", "expect": {"talker_calls": [{"name": "manage_task", "arguments": {"action": "get"}}], "forbid_talker_calls": ["delegate_task", "web_search"], "no_commands": true, "tasks_created": 0}}]
+  },
+  {
+    "id": "task_failure_read_does_not_restart",
+    "tags": ["task_feedback"],
+    "tasks": [{"goal": "比较阿姆斯特丹的展馆", "state": {"status": "failed", "summary": "任务未完成。RuntimeError: 工具步骤上限", "error": "RuntimeError: 工具步骤上限"}}],
+    "turns": [{"input": "刚才比较展馆的那个任务现在是什么状态？", "expect": {"talker_calls": [{"name": "manage_task", "arguments": {"action": "get"}}], "forbid_talker_calls": ["delegate_task", "web_search"], "no_commands": true, "tasks_created": 0}}]
+  }
+]

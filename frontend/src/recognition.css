@@ -7,4 +7,7 @@
 .voice-capture p{font-size:13px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0 0;max-height:86px;overflow:auto}
 .voice-capture small{display:block;margin-top:4px;font-size:10px;color:#91a5aa}
 .capture-dot{width:6px;height:6px;border-radius:50%;background:#8daeb5;flex-shrink:0}.capture-dot.recording{background:#c7806b;box-shadow:0 0 0 3px #f6e9e4}
+.handsfree-toggle{border:1px solid #d9e5e8;border-radius:6px;padding:4px 8px;background:#f6fafb;color:#64858d;font:inherit;white-space:nowrap;margin-left:auto}
+.handsfree-toggle.enabled{background:#e6f3ed;border-color:#b7d7c8;color:#39745b}
+.compose-topline{flex-wrap:wrap;gap:8px}
 @media(max-width:640px){.voice-button{width:32px;height:34px}.voice-capture p{max-height:64px}}

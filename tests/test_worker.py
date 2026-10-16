@@ -28,7 +28,8 @@ class FakeArk:
         self.calls.append(deepcopy(messages))
         self.thinker_modes.append(thinker)
         self.options.append({'tools': deepcopy(tools), **options})
-        assert tools == THINKER_TOOLS if thinker else all(tool in QUICK_TOOLS for tool in tools)
+        allowed = THINKER_TOOLS if thinker else QUICK_TOOLS
+        assert all(tool['function']['name'] in {item['function']['name'] for item in allowed} for tool in tools)
         if not self.responses:
             raise AssertionError("Fake script exhausted")
         response = self.responses.pop(0)
@@ -486,7 +487,7 @@ async def test_model_timeout_is_bounded_and_task_failed(db):
         return message("finish_task", {"summary": "不应到达"})
 
     current = task(db)
-    await ThinkerWorker(db, FakeArk(slow), FakeTavily(), timeout_seconds=0.04).run_task(current)
+    await ThinkerWorker(db, FakeArk(slow, slow), FakeTavily(), timeout_seconds=0.04).run_task(current)
     saved = db.get_task(current["id"])
     assert saved["status"] == "failed"
     assert "时间上限" in saved["error"]
@@ -922,7 +923,7 @@ async def test_quick_clarification_wait_does_not_spend_execution_budget_but_repl
         return message('lookup_web', {'query': '巴黎'})
 
     current = task(db, context={'query_mode': 'quick'})
-    worker = ThinkerWorker(db, FakeArk(clarify, slow_lookup), FakeTavily(), quick_timeout_seconds=.5)
+    worker = ThinkerWorker(db, FakeArk(clarify, slow_lookup, slow_lookup), FakeTavily(), quick_timeout_seconds=.5)
     await worker.run_task(current)
     assert db.get_task(current['id'])['status'] == 'waiting_clarification'
     # Model a minute spent waiting for the user, still within global five minutes.
@@ -1157,7 +1158,7 @@ async def test_quick_old_two_lookups_cannot_force_unsupported_completion_for_new
     await ThinkerWorker(db, ark, tavily).run_task(current)
     saved = db.get_task(current['id'])
     assert saved['status'] == 'failed' and saved['revision'] == 2
-    assert saved['result'] is None and len(saved['sources']) == 1
+    assert saved['result']['partial'] is True and len(saved['sources']) == 1
     assert [call[1] for call in tavily.calls if call[0] == 'search'] == ['旧版本第一次', '旧版本第二次']
     traces = db.traces_after('test-session', task_id=current['id'])
     assert any(row['kind'] == 'tool.completed' and row['status'] == 'stale' and row['revision'] == 1 for row in traces)
@@ -1416,7 +1417,7 @@ async def test_declared_weather_source_gate_stops_at_existing_lookup_and_model_b
     assert all({t['function']['name'] for t in option['tools']} == {'lookup_web', 'ask_clarification'}
                for option in ark.options[1:3])
     assert ark.options[3]['tool_choice'] == {'type': 'function', 'function': {'name': 'finish_task'}}
-    assert worker.quick_max_steps == 4 and worker.quick_timeout_seconds == 45 and worker.timeout_seconds == 300
+    assert worker.quick_max_steps == 4 and worker.quick_timeout_seconds == 60 and worker.timeout_seconds == 60
 
 
 async def weather_guard_evidence(db):

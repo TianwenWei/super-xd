@@ -3,17 +3,21 @@ from contextlib import asynccontextmanager
 from uuid import uuid4
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import Response, FileResponse
 from pydantic import BaseModel, Field
 from backend.tts import VolcanoTTS
 from backend.asr import VolcanoASR
 from backend.asr_endpoint import recognize_socket
+from backend.handsfree_endpoint import listen_socket
+from backend.vad import vad_info
 from backend.catalog import TOOLS, SKILLS, HOT_TOOL_NAMES, COLD_TOOL_NAMES
 from backend.db import Database
 from backend.models import ArkClient
 from backend.persona import PERSONAS
 from backend.session import SessionActor
 from backend.google_maps import GoogleMapsClient
+from backend.web_search import WebSearchClient
+from backend.manual_search import ManualSearchClient
 from backend.settings import TALKER_MODEL, THINKER_MODEL, VEHICLE_CONTROL_MODEL
 
 actors = {}
@@ -23,6 +27,9 @@ async def lifespan(app):
     app.state.db, app.state.ark, app.state.tts = Database(), ArkClient(), VolcanoTTS()
     app.state.asr = VolcanoASR()
     app.state.maps = GoogleMapsClient()
+    app.state.web = WebSearchClient()
+    app.state.manual = ManualSearchClient()
+    await app.state.manual.prepare()
     app.state.prewarm = {'ok': None, 'status': 'warming'}
     async def warm_model():
         app.state.prewarm = await app.state.ark.prewarm()
@@ -37,16 +44,18 @@ async def lifespan(app):
     await app.state.tts.aclose()
     await app.state.asr.aclose()
     await app.state.maps.aclose()
+    await app.state.web.aclose()
+    await app.state.manual.aclose()
 
 app = FastAPI(title='Super XD Talker–Thinker', lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=['http://localhost:5173', 'http://127.0.0.1:5173'], allow_methods=['GET', 'POST'], allow_headers=['Content-Type'])
 
 @app.get('/api/health')
 def health():
-    return {'ok': True, 'sessions': len(actors), 'model_prewarm': app.state.prewarm, 'retrieval': retrieval_status(), 'tts': app.state.tts.info(), 'asr': app.state.asr.info()}
+    return {'ok': True, 'sessions': len(actors), 'model_prewarm': app.state.prewarm, 'retrieval': retrieval_status(), 'manual': app.state.manual.info(), 'tts': app.state.tts.info(), 'asr': app.state.asr.info()}
 
 def retrieval_status():
-    return {'status': 'disabled', 'model': None, 'reason': '本版不实现检索；按skill分类直接加载。'}
+    return {'status': 'disabled', 'model': None, 'reason': '车控目录按skill直接加载；车书检索状态见manual字段。'}
 
 @app.get('/api/config')
 def config():
@@ -55,14 +64,37 @@ def config():
             'model': {'talker': TALKER_MODEL, 'thinker': THINKER_MODEL, 'vehicle_planner': VEHICLE_CONTROL_MODEL},
             'vehicle_control': {'mode': 'progressive_pro', 'hot_count': len(HOT_TOOL_NAMES),
                                 'delegated_count': len(COLD_TOOL_NAMES)},
-            'maps': app.state.maps.info(),
-            'retrieval': retrieval_status(), 'tts': app.state.tts.info(), 'asr': app.state.asr.info()}
+            'maps': app.state.maps.info(), 'web_search': app.state.web.info(), 'manual': app.state.manual.info(),
+            'retrieval': retrieval_status(), 'tts': app.state.tts.info(), 'asr': app.state.asr.info(),
+            'vad': vad_info()}
 
 @app.post('/api/sessions')
 async def create_session():
     session_id = uuid4().hex[:16]
-    actors[session_id] = SessionActor(session_id, app.state.db, app.state.ark, app.state.tts, maps=app.state.maps)
+    actors[session_id] = SessionActor(session_id, app.state.db, app.state.ark, app.state.tts,
+                                    maps=app.state.maps, web=app.state.web, manual=app.state.manual)
     return {'session_id': session_id}
+
+
+@app.get('/api/manual/pdf')
+async def manual_pdf():
+    try:
+        path = await app.state.manual.document()
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from None
+    return FileResponse(path, media_type='application/pdf', filename=path.name,
+                        content_disposition_type='inline', headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/api/manual/{manual_id}/pages/{page}.png')
+async def manual_page_image(manual_id: str, page: int):
+    try:
+        path = await app.state.manual.page_image(manual_id, page)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from None
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from None
+    return FileResponse(path, media_type='image/png', headers={'Cache-Control': 'private, max-age=3600'})
 
 @app.get('/api/sessions/{session_id}')
 def get_session(session_id):
@@ -173,6 +205,11 @@ async def audio_websocket(ws: WebSocket, session_id: str):
 @app.websocket('/ws/{session_id}/asr')
 async def asr_websocket(ws: WebSocket, session_id: str):
     await recognize_socket(ws, actors.get(session_id), app.state.asr)
+
+
+@app.websocket('/ws/{session_id}/listen')
+async def handsfree_websocket(ws: WebSocket, session_id: str):
+    await listen_socket(ws, actors.get(session_id), app.state.asr)
 
 
 class TTSRequest(BaseModel):

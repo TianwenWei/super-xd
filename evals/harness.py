@@ -96,9 +96,18 @@ def grade(expect, observed):
     for spec in expect.get('talker_calls', []):
         if not any(matches(spec, item) for item in talker):
             failures.append(f'missing talker call {spec}')
+    for options in expect.get('talker_call_options', []):
+        if not any(matches(spec, item) for spec in options for item in talker):
+            failures.append(f'missing talker call from accepted structured options {options}')
     for name in expect.get('forbid_lookups', []):
         if name in observed.get('lookups', []):
             failures.append(f'forbidden lookup executed: {name}')
+    if expect.get('manual_pages_any'):
+        pages = {hit['page'] for record in observed.get('lookup_results', [])
+                 if record.get('tool') == 'search_manual' and record.get('result', {}).get('ok')
+                 for hit in record['result'].get('hits', [])}
+        if not pages.intersection(expect['manual_pages_any']):
+            failures.append(f'manual source pages {sorted(pages)} do not include expected evidence')
     for name in expect.get('forbid_talker_calls', []):
         if any(item['name'] == name for item in talker):
             failures.append(f'forbidden talker call {name}')
@@ -128,7 +137,7 @@ async def _drive_turn(actor, outgoing, text):
     """Send one input and play the device role until the turn completes."""
     before = copy.deepcopy(actor.vehicle)
     await actor.post({'type': 'input', 'text': text})
-    commands, cards, turn_id, receipts, lookups = [], [], None, [], []
+    commands, cards, turn_id, receipts, lookups, lookup_results = [], [], None, [], [], []
 
     async def execute(event):
         receipt = await actor.simulator.execute(event['command_id'])
@@ -147,6 +156,7 @@ async def _drive_turn(actor, outgoing, text):
                 receipts.append(asyncio.create_task(execute(event)))
             elif kind == 'lookup.result' and event.get('turn_id') == turn_id:
                 lookups.append(event['tool'])
+                lookup_results.append({'tool': event['tool'], 'result': copy.deepcopy(event['result'])})
             elif kind == 'ui.card' and event.get('origin_turn_id') == turn_id:
                 cards.append(event['task'])
             elif kind == 'stream.done' and event['turn_id'] == turn_id:
@@ -162,7 +172,7 @@ async def _drive_turn(actor, outgoing, text):
             except ValueError:
                 arguments = {'_raw': call['function'].get('arguments')}
             talker.append({'name': call['function']['name'], 'arguments': arguments})
-    return {'commands': commands, 'talker_calls': talker, 'lookups': lookups, 'vehicle': copy.deepcopy(actor.vehicle),
+    return {'commands': commands, 'talker_calls': talker, 'lookups': lookups, 'lookup_results': lookup_results, 'vehicle': copy.deepcopy(actor.vehicle),
             'vehicle_before': before, 'tasks_created': len(cards), 'route': done['metrics'].get('route'),
             'error': done['metrics'].get('error'), 'text': done['text'], 'preface': done['metrics'].get('preface'),
             'model_calls': done['metrics'].get('model_calls'), 'total_ms': done['metrics'].get('total_ms'),
@@ -182,6 +192,8 @@ async def run_case(case, ark, *, persona='warm', planner=None, maps=None, repeat
                 set_state_value(actor.simulator.state, path, value)
             for task in case.get('tasks', []):
                 created = await asyncio.to_thread(db.create_task, actor.id, task['goal'], task.get('context', {}))
+                if task.get('state'):
+                    await asyncio.to_thread(db.save_task, created['id'], created['revision'], **task['state'])
                 if task.get('question'):
                     claimed = await asyncio.to_thread(db.claim_next)
                     await asyncio.to_thread(db.save_task, claimed['id'], claimed['revision'],
@@ -196,6 +208,9 @@ async def run_case(case, ark, *, persona='warm', planner=None, maps=None, repeat
                 await actor.post({'type': 'persona.set', 'preset': persona})
             turns = []
             for spec in case['turns']:
+                if spec.get('speaker_seat') or case.get('speaker_seat'):
+                    await actor.post({'type': 'speaker.set', 'seat': spec.get('speaker_seat') or case['speaker_seat']})
+                    await actor.queue.join()
                 started = time.perf_counter()
                 try:
                     observed = await _drive_turn(actor, outgoing, spec['input'])
@@ -212,8 +227,15 @@ async def run_case(case, ark, *, persona='warm', planner=None, maps=None, repeat
 
 
 def persona_signature(result):
-    return [[(c['name'], json.dumps(c['arguments'], sort_keys=True, ensure_ascii=False)) for c in turn.get('talker_calls', [])]
-            + [(c['name'], json.dumps(c['arguments'], sort_keys=True, ensure_ascii=False)) for c in turn.get('commands', [])]
+    def canonical(value):
+        if isinstance(value, dict):
+            return {key: canonical(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [canonical(item) for item in value]
+        # JSON numbers share value semantics; 24 and 24.0 are the same setting.
+        return int(value) if type(value) is float and value.is_integer() else value
+    return [[(c['name'], json.dumps(canonical(c['arguments']), sort_keys=True, ensure_ascii=False)) for c in turn.get('talker_calls', [])]
+            + [(c['name'], json.dumps(canonical(c['arguments']), sort_keys=True, ensure_ascii=False)) for c in turn.get('commands', [])]
             for turn in result['turns']]
 
 
