@@ -44,7 +44,8 @@
 - 上述验收发现未注册能力被包装成普通故障；已修为保留 `unsupported_capability/retryable=false` 并记录全部查询失败的脱敏原始回执。200项相关回归通过，固定用户提示不会包含设备原始异常。
 - 最终8001服务另做真实LLM请求与显式负向设备协议验证：trace保留实际109 messages、26 tools、模型/推理/预算请求体及真实SSE终止状态；设备即使错误标记retryable=true，unsupported能力仍不可重试，原始诊断仅进trace。证据 `data/final-live-request-audit.json`。
 - 真实Google地点候选支持设置起点、开始模拟导航、增删途经点和取消。导航设备仍是模拟；没有推断GPS。
-- Google Routes返回实际403 `PERMISSION_DENIED / SERVICE_DISABLED`，说明所用项目尚未启用该API。新导航失败话术正确，路线保持空，不编造距离/ETA。启用与Key权限由项目维护者操作，再用现有配置复测。
+- 首次Google Routes返回实际403 `PERMISSION_DENIED / SERVICE_DISABLED`；导航失败话术正确，路线保持空。维护者随后手动启用Routes API，现有Key复测成功：真实卢浮宫至埃菲尔铁塔5236米、1204秒、polyline非空，证据 `data/routes-enabled-live.json`。请求为 `TRAFFIC_UNAWARE`，不表示实时路况用时；查询本身不启动设备导航。
+- 启用后的5174真实UI再次验收成功：来源、起点/目的地、路线请求和实际回执连通，显示5.2km、预计21分钟；backend仍保留5236m/1204s与来源证据。报告 `data/cockpit-browser-routes-enabled.json`，截图 `data/pluggable-routes-enabled.png`，控制台无错误。
 - 真实火山ASR/TTS：同一免按键连接连续两轮识别，均有非零24kHz PCM，第二轮VAD打断仍在生成的首轮音频。两次真实方舟流均正常收到终止标记，无model.error。
 - 未测试物理麦克风、AEC、扬声器或量产车机SDK。FireRed/vLLM和外部音乐/视频/电台/车书网关目前只有适配协议与离线契约验收，尚无用户提供的真实自建端点或CP授权资料。
 - 一次端侧搜索的模型文字回复附带内部内容ID；该轮TTS关闭，没有将这类回复误报为已通过口语验收。内容路由和播放器行为已验证，表达仍有改进空间。

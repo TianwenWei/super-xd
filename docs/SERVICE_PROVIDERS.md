@@ -77,6 +77,8 @@ radio = "radio_gateway"
 
 内容 ID 带 kind 与 profile 作用域，避免不同 CP 同名 ID 串播。模型只能选择真实搜索结果 ID，适配器或端侧 SDK 解析播放 URL。导航地点保留 provider、原始 ID 和坐标系。
 
+当前Web验证台只调用云侧Routes API并模拟导航设备，不需要Navigation SDK。后续真实车机的逐向导航、GPS位置和偏航事件由端侧导航适配器提供，可以接车机已有导航服务；选择Google原生导航时再集成对应Navigation SDK。
+
 ## HTTP 内容网关协议
 
 请求均为 POST JSON，按配置使用 Bearer Key；基础 URL 后追加：
