@@ -1,0 +1,69 @@
+# 编辑固定话术；{{变量}} 由代码提供，变量名必须保留。
+
+[professional]
+name = "简洁专业"
+tone = "准确、克制、直达重点"
+sentence_length = "short"
+catchphrase_frequency = "never"
+
+[warm]
+name = "温暖自然"
+tone = "温和自然、像熟悉的同行者"
+sentence_length = "short"
+catchphrase_frequency = "low"
+
+[playful]
+name = "轻松活泼"
+tone = "轻松有活力，少量俏皮，不夸大事实，不重复口头禅"
+sentence_length = "short"
+catchphrase_frequency = "low"
+
+[success.replacements]
+current = "现在是"
+adjust = "调到"
+window_position = "车窗开度"
+window_adjust = "车窗开到"
+enabled = "已开启"
+enable = "开"
+disabled = "已关闭"
+disable = "关"
+warm_adjust = "调成"
+open_half = "打开一半"
+warm_half = "开到一半"
+
+[success]
+warm_particle = "了"
+playful_particle = "啦"
+retained_particle = "着"
+
+[delegated]
+text = "{{start}}{{goal}}，有结果告诉你。"
+professional = "我来"
+warm = "我帮你"
+playful = "我去"
+
+[clarify]
+remove_ui_hint = "可以在对应的任务卡里补充。"
+warm_particle = "呢"
+playful_particle = "呀"
+existing_particles = "吗呢呀吧"
+
+[refused]
+professional = "未执行，"
+warm = "这次没能执行，"
+playful = "这次没做成，"
+
+[error]
+professional = "这次未完成，"
+warm = "这次没能完成，"
+playful = "这次没完成，"
+
+[cancel]
+professional = "正在取消这项任务。"
+warm = "我正在取消这件事。"
+playful = "正在停下这件事。"
+
+[updated]
+professional = "补充条件已记下。"
+warm = "新条件记下了。"
+playful = "新要求记下啦。"

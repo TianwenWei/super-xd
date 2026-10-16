@@ -9,6 +9,8 @@
 
 架构约束、不变量和改动规范见 [AGENTS.md](AGENTS.md)。
 
+提示词、模型工具说明和固定播报话术统一在根目录 [prompts/](prompts/README.md)，按 Talker、Planner、Thinker、车控和语音分组。修改入口、模板变量、校验及重启方法见 [配置索引](prompts/README.md)。
+
 ## 准备
 
 需要 Python 3.12、Node.js 22+，推荐安装 [uv](https://github.com/astral-sh/uv)。

@@ -19,11 +19,13 @@ from backend.google_maps import GoogleMapsClient
 from backend.web_search import WebSearchClient
 from backend.manual_search import ManualSearchClient
 from backend.settings import TALKER_MODEL, THINKER_MODEL, VEHICLE_CONTROL_MODEL
+from backend.prompt_config import validate_all
 
 actors = {}
 
 @asynccontextmanager
 async def lifespan(app):
+    validate_all()
     app.state.db, app.state.ark, app.state.tts = Database(), ArkClient(), VolcanoTTS()
     app.state.asr = VolcanoASR()
     app.state.maps = GoogleMapsClient()

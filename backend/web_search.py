@@ -1,4 +1,6 @@
 """Read-only foreground search using the existing Tavily transport."""
+from backend.speech_config import feedback_text
+from backend.tool_text_config import tool_text
 import os
 
 from backend.models import TavilyClient
@@ -8,7 +10,7 @@ WEB_TOOLS = [{
     'type': 'function',
     'function': {
         'name': 'web_search',
-        'description': '用Tavily直接搜索网页，在本轮回答简单实时事实或用户明确要求的网页搜索。返回搜索摘要、来源URL和查询时间，不代表已读取或核实网页全文。复杂比较、多步调研和指定来源深入核验交给delegate_task；天气用get_weather，地点用search_places。',
+        'description': tool_text('web_search.description'),
         'parameters': {
             'type': 'object',
             'properties': {
@@ -17,7 +19,7 @@ WEB_TOOLS = [{
                 'include_domains': {
                     'type': 'array', 'minItems': 1, 'maxItems': 5, 'uniqueItems': True,
                     'items': {'type': 'string', 'minLength': 3, 'maxLength': 253},
-                    'description': '仅在用户明确指定来源且确知域名时填写，不猜测域名。',
+                    'description': tool_text('web_search.parameters.include_domains.description'),
                 },
             },
             'required': ['query'],
@@ -41,7 +43,7 @@ class WebSearchClient:
             raise RuntimeError('Tavily search 返回的结果格式无效，未取得可用搜索结果。')
         return {**result, 'ok': True, 'kind': 'web_search', 'provider': 'Tavily',
                 'query': query, 'evidence': 'search_snippets',
-                'notice': '以下为网页搜索摘要，未读取或核实页面全文。'}
+                'notice': feedback_text('web_search.notice')}
 
     async def aclose(self):
         await self.tavily.aclose()

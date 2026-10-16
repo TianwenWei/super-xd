@@ -5,6 +5,7 @@ browser geolocation and user GPS are not used as fallback data sources.
 """
 from __future__ import annotations
 
+from backend.speech_config import feedback_text
 from datetime import date as Date, datetime, timezone
 import math
 import unicodedata
@@ -131,7 +132,7 @@ class WeatherClient:
         raw = {"geocoding": geocoding, "forecast": None}
         if len(candidates) != 1 or not exact:
             return {"ok": False, "needs_clarification": True,
-                    "reason": "请明确城市所在的国家或行政区。" if candidates else "没有找到可确认的城市，请提供国家或更完整城市名称。",
+                    "reason": feedback_text('weather.city_clarification') if candidates else feedback_text('weather.city_not_found'),
                     "candidates": candidates, "date": date, "queried_at": self._now().isoformat(),
                     "source_url": geocoding_source_url, "geocoding_source_url": geocoding_source_url, "raw": raw}
         location = candidates[0]

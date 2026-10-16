@@ -10,6 +10,7 @@ from backend.settings import DATABASE_PATH
 from backend.models import utcnow
 from backend.textutil import redact_bearer, redact_known_secrets
 from backend.task_feedback import partial_result, task_user_detail
+from backend.speech_config import feedback_text
 
 JSON_FIELDS = {'constraints', 'result', 'sources', 'transcript', 'context', 'checkpoint', 'progress'}
 TERMINAL = {'completed', 'failed', 'cancelled'}
@@ -22,7 +23,7 @@ def task_card(task):
 
 def step_summary(step):
     """Generic per-step progress text; the actor recognises it by equality, not parsing."""
-    return f'正在推理，第 {step} 步。'
+    return feedback_text('task.db.step', step=step)
 
 
 def _trace_data(value):
@@ -49,7 +50,7 @@ class Database:
             CREATE TABLE IF NOT EXISTS tasks (
               id TEXT PRIMARY KEY, session_id TEXT NOT NULL, goal TEXT NOT NULL,
               constraints TEXT NOT NULL DEFAULT '[]', context TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'queued',
-              revision INTEGER NOT NULL DEFAULT 1, summary TEXT NOT NULL DEFAULT '排队等待后台处理',
+              revision INTEGER NOT NULL DEFAULT 1, summary TEXT NOT NULL DEFAULT '',
               result TEXT, sources TEXT NOT NULL DEFAULT '[]', transcript TEXT NOT NULL DEFAULT '[]',
               question TEXT, error TEXT, steps INTEGER NOT NULL DEFAULT 0,
               created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
@@ -198,8 +199,8 @@ class Database:
         task_id, at = uuid4().hex[:12], utcnow()
         deadline = (datetime.fromisoformat(at) + timedelta(seconds=60)).isoformat()
         with self.connection() as con:
-            con.execute('INSERT INTO tasks(id,session_id,goal,context,created_at,updated_at,deadline_at) VALUES(?,?,?,?,?,?,?)',
-                        (task_id, session_id, goal, json.dumps(context or {}, ensure_ascii=False), at, at, deadline))
+            con.execute('INSERT INTO tasks(id,session_id,goal,context,created_at,updated_at,deadline_at,summary) VALUES(?,?,?,?,?,?,?,?)',
+                        (task_id, session_id, goal, json.dumps(context or {}, ensure_ascii=False), at, at, deadline, feedback_text('task.db.queued')))
             task = self._get(con, task_id)
             self._event(con, task, 'created')
             return task
@@ -222,7 +223,8 @@ class Database:
             task = self.decode(row)
             if task['status'] == 'queued':
                 self._transition_clock(con, task, 'running')
-                con.execute("UPDATE tasks SET status='running',summary='正在分析任务',updated_at=? WHERE id=?", (utcnow(), task['id']))
+                con.execute("UPDATE tasks SET status='running',summary=?,updated_at=? WHERE id=?",
+                            (feedback_text('task.db.running'), utcnow(), task['id']))
                 task = self._get(con, task['id'])
                 self._event(con, task, 'running')
             return task
@@ -247,13 +249,13 @@ class Database:
             constraints = task['constraints'] or []
             context = task.get('context') or {}
             if action == 'reply':
-                clarification = {'question': task.get('question') or '用户补充', 'answer': text.strip(), 'revision': revision}
+                clarification = {'question': task.get('question') or feedback_text('task.db.clarification_label'), 'answer': text.strip(), 'revision': revision}
                 context.setdefault('clarification_history', []).append(clarification)
             if action != 'cancel':
                 constraints.append(text.strip())
             status = 'cancelling' if action == 'cancel' else ('running' if task['status'] == 'running' else 'queued')
             self._transition_clock(con, task, status)
-            summary = '正在取消，等待当前步骤边界' if action == 'cancel' else '已接收新条件，后台将在步骤边界应用'
+            summary = feedback_text('task.db.cancel_pending') if action == 'cancel' else feedback_text('task.db.update_pending')
             con.execute("UPDATE tasks SET revision=?,constraints=?,context=?,status=?,summary=?,result=NULL,question=NULL,error=NULL,error_code=NULL,progress='{}',updated_at=? WHERE id=?",
                         (revision, json.dumps(constraints, ensure_ascii=False), json.dumps(context, ensure_ascii=False), status, summary, utcnow(), task_id))
             con.execute('INSERT INTO inbox(task_id,action,text,revision,created_at) VALUES(?,?,?,?,?)',

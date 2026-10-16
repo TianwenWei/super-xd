@@ -1,4 +1,6 @@
 """Read-only car-manual retrieval; model chooses when to use it."""
+from backend.tool_text_config import tool_text
+from backend.speech_config import feedback_text
 import asyncio
 from collections import OrderedDict
 import json
@@ -17,14 +19,14 @@ from backend.prompt_templates import load_prompt
 from backend.settings import ROOT
 
 DEFAULT_INDEX = ROOT / 'data/manuals/denza_d9.sqlite3'
-PAGE_IMAGES_PENDING = '页面预览正在准备，可先打开原始 PDF 查看。'
+PAGE_IMAGES_PENDING = feedback_text('manual.images_pending')
 MANUAL_TOOLS = [{
     'type': 'function', 'function': {
         'name': 'search_manual',
-        'description': '检索已导入的腾势D9中文右舵版车书原文。车辆功能的使用方法、条件、限制、保养及说明书知识用此工具，不能凭记忆回答。返回章节、页码和原文，仅供问答，不执行任何车控。当前车况看会话快照；要求实际操作仍走车控工具。其他车型不能视为与本手册相同。',
+        'description': tool_text('search_manual.description'),
         'parameters': {'type': 'object', 'properties': {
             'query': {'type': 'string', 'minLength': 1, 'maxLength': 800,
-                      'description': '完整独立的车书问题照抄本轮原句；仅追问时结合近期对话补全被指代的功能。'},
+                      'description': tool_text('search_manual.parameters.query.description')},
             'max_results': {'type': 'integer', 'minimum': 1, 'maximum': 5}},
             'required': ['query'], 'additionalProperties': False}}}]
 MANUAL_BY_NAME = {tool['function']['name']: tool for tool in MANUAL_TOOLS}
@@ -83,7 +85,7 @@ class ManualSearchClient:
         self._page_locks = {}
 
     def info(self):
-        return {'provider': '车书', 'configured': bool(os.getenv('ARK_EMBEDDING_API_KEY')),
+        return {'provider': feedback_text('manual.provider'), 'configured': bool(os.getenv('ARK_EMBEDDING_API_KEY')),
                 'model': self.embeddings.model, **self._status}
 
     async def _load(self):
@@ -198,7 +200,7 @@ class ManualSearchClient:
         # caller attaches them afterwards with with_page_images().
         for hit in hits:
             hit['images'] = []
-        return {'ok': True, 'kind': 'manual', 'provider': '车书', 'query': query,
+        return {'ok': True, 'kind': 'manual', 'provider': feedback_text('manual.provider'), 'query': query,
                 'manual': {'title': Path(meta['source_pdf']).stem, 'pages': meta['pages'],
                            'id': manual_id, 'pdf_url': '/api/manual/pdf'},
                 'hits': hits, 'evidence': 'manual_text', 'notice': meta['notice'],
@@ -217,13 +219,13 @@ class ManualSearchClient:
             except (RuntimeError, ValueError):
                 return []
             return [{'url': f'/api/manual/{manual_id}/pages/{page}.png', 'page': page,
-                     'caption': f'说明书第 {page} 页（原始 PDF 整页预览）'}]
+                     'caption': feedback_text('manual.page_caption', page=page)}]
 
         pages = list(dict.fromkeys(hit['page'] for hit in result['hits']))
         images = dict(zip(pages, await asyncio.gather(*(image_for_page(page) for page in pages))))
         hits = [{**hit, 'images': images[hit['page']]} for hit in result['hits']]
         return {**result, 'hits': hits,
-                'image_notice': '' if all(images.values()) else '部分页面预览暂不可用，可打开原始 PDF 查看。'}
+                'image_notice': '' if all(images.values()) else feedback_text('manual.images_unavailable')}
 
     async def aclose(self):
         if self.owns_embeddings:

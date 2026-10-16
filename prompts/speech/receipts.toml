@@ -1,0 +1,372 @@
+# 编辑固定话术；{{变量}} 由代码提供，变量名必须保留。
+
+[labels.seat]
+driver = "主驾"
+front_passenger = "副驾"
+rear_left = "左后排"
+rear_right = "右后排"
+
+[labels.zone]
+all = "所有"
+driver = "主驾"
+front_passenger = "副驾"
+rear = "后排"
+front = "前排"
+
+[labels]
+enabled = "开启"
+disabled = "关闭"
+all = "全部"
+left = "左"
+right = "右"
+front = "前"
+rear = "后"
+locked = "锁定"
+unlocked = "解锁"
+folded = "折叠"
+unfolded = "展开"
+
+[set_climate_power]
+text = "空调已{{enabled}}。"
+
+[set_temperature]
+text = "{{zone}}空调调到{{temperature}}度了。"
+
+[adjust_temperature]
+uniform = "{{zone}}空调调到{{temperature}}度了。"
+mixed = "空调已调整为{{temperatures}}。"
+item = "{{zone}}{{temperature}}度"
+
+[set_fan_speed]
+text = "风量设为{{level}}档。"
+
+[set_window_position]
+closed = "关好了"
+open = "全打开了"
+half = "打开一半了"
+partial = "开到百分之{{position}}了"
+text = "{{seat}}车窗{{detail}}。"
+
+[close_all_windows]
+text = "全部车窗已关闭。"
+
+[set_window_child_lock]
+text = "后排车窗童锁已{{enabled}}。"
+
+[set_seat_heating]
+level = "{{seat}}座椅加热设为{{level}}档。"
+off = "{{seat}}座椅加热已关闭。"
+
+[set_seat_ventilation]
+level = "{{seat}}座椅通风设为{{level}}档。"
+off = "{{seat}}座椅通风已关闭。"
+
+[set_seat_massage]
+off = "{{seat}}座椅按摩已关闭。"
+mode = "{{seat}}座椅按摩设为{{mode}}模式。"
+
+[set_seat_massage.modes]
+relax = "放松"
+lumbar = "腰部"
+wave = "波浪"
+off = "关闭"
+
+[set_seat_position.axes]
+fore_aft = "前后位置"
+height = "高度"
+backrest = "靠背角度"
+lumbar = "腰托位置"
+
+[set_seat_position]
+degrees = "{{value}}度"
+percent = "百分之{{value}}"
+text = "{{seat}}座椅{{axis}}设为{{target}}。"
+
+[set_interior_light]
+text = "{{zone}}车内灯已{{enabled}}。"
+
+[set_volume]
+text = "音量调到百分之{{volume}}了。"
+
+[control_playback]
+play = "已开始播放。"
+pause = "已暂停播放。"
+next = "已切到下一首。"
+previous = "已切到上一首。"
+stop = "已停止播放。"
+default = "播放状态已更新。"
+
+[set_navigation_destination]
+text = "模拟导航目的地已设为{{destination}}。"
+
+[set_mirror_heating]
+text = "后视镜加热已{{enabled}}。"
+
+[set_mirror_fold]
+text = "左右后视镜已{{folded}}。"
+
+[set_steering_heating]
+text = "方向盘加热已{{enabled}}。"
+
+[set_reading_light]
+text = "{{seat}}阅读灯已{{enabled}}。"
+
+[set_ambient_light]
+text = "氛围灯已{{enabled}}。"
+
+[set_ambient_color]
+text = "氛围灯颜色设为{{color}}。"
+
+[set_ambient_color.colors]
+white = "白色"
+warm = "暖色"
+red = "红色"
+blue = "蓝色"
+green = "绿色"
+purple = "紫色"
+
+[set_ambient_brightness]
+text = "氛围灯亮度设为百分之{{brightness}}。"
+
+[set_child_lock]
+text = "{{side}}后门儿童安全锁已{{enabled}}。"
+
+[set_door_lock]
+text = "{{door}}车门已{{locked}}。"
+
+[lock_all_doors]
+text = "全部车门已锁定。"
+
+[unlock_all_doors]
+text = "全部车门已解锁。"
+
+[set_tailgate_open]
+text = "尾门已{{enabled}}。"
+
+[set_tailgate_height]
+text = "尾门下次开启高度设为百分之{{height}}。"
+
+[set_wiper_mode]
+off = "前雨刷已关闭。"
+text = "前雨刷设为{{mode}}模式。"
+
+[set_wiper_mode.modes]
+auto = "自动"
+intermittent = "间歇"
+low = "低速"
+high = "高速"
+
+[set_wiper_interval]
+text = "间歇雨刷间隔设为{{seconds}}秒。"
+
+[set_rain_sensitivity]
+text = "自动雨刷雨量灵敏度设为{{level}}档。"
+
+[set_rear_wiper]
+text = "后雨刷已{{enabled}}。"
+
+[wash_windshield]
+text = "{{target}}挡风玻璃已清洗。"
+
+[set_sunroof_position]
+text = "天窗开度设为百分之{{position}}。"
+
+[set_sunshade_position]
+text = "遮阳帘开度设为百分之{{position}}。"
+
+
+# 没有专用短回执的函数也独立配置，工具说明的修改不会顺带改播报。
+[get_climate_state]
+text = "读取空调与空气管理全部状态已完成，可在车况面板核对。"
+
+[adjust_fan_speed]
+text = "相对调整空调风量已完成，可在车况面板核对。"
+
+[set_airflow_mode]
+text = "设置吹面、吹脚、挡风除雾或混合送风已完成，可在车况面板核对。"
+
+[set_recirculation]
+text = "设置内循环、外循环或自动循环已完成，可在车况面板核对。"
+
+[set_auto_climate]
+text = "开关自动空调模式已完成，可在车况面板核对。"
+
+[set_front_defrost]
+text = "开关前挡风玻璃除雾已完成，可在车况面板核对。"
+
+[set_rear_defrost]
+text = "开关后挡风玻璃加热除雾已完成，可在车况面板核对。"
+
+[set_air_purifier]
+text = "开关车内空气净化器已完成，可在车况面板核对。"
+
+[set_fragrance]
+text = "设置香氛浓度，0关闭，3最高已完成，可在车况面板核对。"
+
+[set_humidity]
+text = "设置模拟车内目标相对湿度已完成，可在车况面板核对。"
+
+[set_temperature_unit]
+text = "设置温度显示单位，控制温度仍使用摄氏度已完成，可在车况面板核对。"
+
+[sync_climate_zones]
+text = "开关温区同步，打开时所有温区跟随主驾温度已完成，可在车况面板核对。"
+
+[set_rear_climate_power]
+text = "开关后排独立空调已完成，可在车况面板核对。"
+
+[get_air_quality]
+text = "读取模拟PM2.5与CO2空气质量数值已完成，可在车况面板核对。"
+
+[get_seat_state]
+text = "读取指定座位状态已完成，可在车况面板核对。"
+
+[adjust_seat_position]
+text = "相对调整座椅位置，主驾停车才可调已完成，可在车况面板核对。"
+
+[save_seat_memory]
+text = "保存座椅设置到指定记忆槽位已完成，可在车况面板核对。"
+
+[recall_seat_memory]
+text = "停车后恢复指定座椅记忆槽位已完成，可在车况面板核对。"
+
+[set_steering_position]
+text = "停车后调节方向盘伸缩或高度已完成，可在车况面板核对。"
+
+[set_easy_entry]
+text = "开关座椅迎宾模式已完成，可在车况面板核对。"
+
+[set_seat_occupancy]
+text = "模拟指定座椅乘员占用状态，供车控状态验收已完成，可在车况面板核对。"
+
+[get_seat_memory]
+text = "读取指定座椅记忆槽位已完成，可在车况面板核对。"
+
+[set_seat_cushion_length]
+text = "设置座垫长度已完成，可在车况面板核对。"
+
+[set_seat_side_support]
+text = "设置座椅侧翼支撑档位已完成，可在车况面板核对。"
+
+[set_seat_headrest]
+text = "设置头枕高度已完成，可在车况面板核对。"
+
+[get_window_state]
+text = "读取指定车窗开度，0全关，100全开已完成，可在车况面板核对。"
+
+[adjust_window_position]
+text = "相对调整单扇车窗开度百分比已完成，可在车况面板核对。"
+
+[open_all_windows]
+text = "打开全部四门车窗，任一车窗不安全则整条拒绝已完成，可在车况面板核对。"
+
+[set_window_anti_pinch]
+text = "停车后开关指定车窗防夹模拟设置已完成，可在车况面板核对。"
+
+[set_rain_close_windows]
+text = "开关雨天自动关闭车窗的模拟偏好已完成，可在车况面板核对。"
+
+[get_mirror_state]
+text = "读取指定后视镜位置及公共设置已完成，可在车况面板核对。"
+
+[set_mirror_angle]
+text = "设置指定后视镜水平和垂直角度，范围-20至20度已完成，可在车况面板核对。"
+
+[adjust_mirror_angle]
+text = "相对调整指定后视镜单轴角度已完成，可在车况面板核对。"
+
+[set_reverse_mirror_tilt]
+text = "开关倒车时后视镜自动下翻偏好已完成，可在车况面板核对。"
+
+[save_mirror_memory]
+text = "保存左右后视镜角度记忆已完成，可在车况面板核对。"
+
+[recall_mirror_memory]
+text = "恢复左右后视镜角度记忆已完成，可在车况面板核对。"
+
+[get_light_state]
+text = "读取车内外灯光全部状态已完成，可在车况面板核对。"
+
+[set_headlight_mode]
+text = "设置大灯关闭、自动或近光模式已完成，可在车况面板核对。"
+
+[set_high_beam]
+text = "开关远光灯已完成，可在车况面板核对。"
+
+[set_front_fog_lights]
+text = "开关前雾灯已完成，可在车况面板核对。"
+
+[set_rear_fog_light]
+text = "开关后雾灯已完成，可在车况面板核对。"
+
+[set_follow_me_home]
+text = "设置伴我回家大灯延时，0关闭已完成，可在车况面板核对。"
+
+[set_hazard_lights]
+text = "开关双闪危险警告灯已完成，可在车况面板核对。"
+
+[get_lock_state]
+text = "读取全部门锁和安全锁状态已完成，可在车况面板核对。"
+
+[set_auto_lock]
+text = "开关行车自动落锁偏好已完成，可在车况面板核对。"
+
+[set_walk_away_lock]
+text = "开关离车自动上锁偏好已完成，可在车况面板核对。"
+
+[set_charge_port_lock]
+text = "锁定或解锁充电口，充电中拒绝解锁已完成，可在车况面板核对。"
+
+[get_tailgate_state]
+text = "读取尾门开合与高度状态已完成，可在车况面板核对。"
+
+[stop_tailgate]
+text = "停止模拟尾门运动并保留当前位置已完成，可在车况面板核对。"
+
+[get_wiper_state]
+text = "读取雨刷与玻璃水状态已完成，可在车况面板核对。"
+
+[get_media_state]
+text = "读取模拟媒体状态已完成，可在车况面板核对。"
+
+[adjust_volume]
+text = "相对调高或调低媒体音量已完成，可在车况面板核对。"
+
+[set_mute]
+text = "开关媒体静音已完成，可在车况面板核对。"
+
+[set_media_source]
+text = "切换蓝牙、广播、USB或在线模拟音源已完成，可在车况面板核对。"
+
+[play_media]
+text = "按名称播放模拟曲目；不进行真实版权内容搜索或音频播放已完成，可在车况面板核对。"
+
+[set_radio_frequency]
+text = "设置模拟FM广播频率，单位MHz已完成，可在车况面板核对。"
+
+[set_audio_balance]
+text = "设置音响左右平衡和前后声场，负数偏左或前，正数偏右或后已完成，可在车况面板核对。"
+
+[set_equalizer]
+text = "设置模拟音效均衡器预设已完成，可在车况面板核对。"
+
+[get_navigation_state]
+text = "读取模拟导航目的地、途经点与偏好，不含真实路线已完成，可在车况面板核对。"
+
+[add_navigation_waypoint]
+text = "追加一个模拟途经点，最多10个，不计算真实路线已完成，可在车况面板核对。"
+
+[remove_navigation_waypoint]
+text = "删除指定索引的模拟途经点，索引从0开始已完成，可在车况面板核对。"
+
+[set_navigation_preferences]
+text = "保存模拟避收费、避高速与优先最快偏好；不计算真实路线已完成，可在车况面板核对。"
+
+[cancel_navigation]
+text = "结束模拟导航并清空当前目的地和途经点已完成，可在车况面板核对。"
+
+[set_home_destination]
+text = "保存家的模拟导航地址已完成，可在车况面板核对。"
+
+[set_work_destination]
+text = "保存公司的模拟导航地址已完成，可在车况面板核对。"

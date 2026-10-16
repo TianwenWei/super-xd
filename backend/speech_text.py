@@ -3,6 +3,7 @@
 Markdown is parsed with markdown-it-py and rendered to plain sentences; the
 statements themselves (facts, negation, conditions) are never edited.
 """
+from backend.speech_config import feedback_text
 import json
 
 from markdown_it import MarkdownIt
@@ -32,14 +33,13 @@ def spoken_number(value):
 
 def _json_words(value):
     if isinstance(value, dict):
-        labels = {'summary': '结论', 'answer': '回答', 'spoken_summary': '结论',
-                  'reason': '原因', 'error': '问题', 'temperature': '温度', 'status': '状态'}
-        return '；'.join(f'{labels.get(str(k), str(k))}是{_json_words(v)}' for k, v in value.items())
+        labels = {key: feedback_text('format.labels.' + key) for key in ('summary', 'answer', 'spoken_summary', 'reason', 'error', 'temperature', 'status')}
+        return '；'.join(feedback_text('format.json_item', label=labels.get(str(k), str(k)), value=_json_words(v)) for k, v in value.items())
     if isinstance(value, list):
         return '、'.join(_json_words(item) for item in value)
-    if value is True: return '是'
-    if value is False: return '否'
-    if value is None: return '未提供'
+    if value is True: return feedback_text('format.true')
+    if value is False: return feedback_text('format.false')
+    if value is None: return feedback_text('format.none')
     return str(value)
 
 
@@ -127,7 +127,7 @@ def _blocks(text):
         elif token.type == 'table_close':
             headers = table['head'][0] if table['head'] else []
             for cells in table['body']:
-                lines.append('，'.join(f'{headers[i]}是{value}' if i < len(headers) and headers[i] else value
+                lines.append('，'.join(feedback_text('format.json_item', label=headers[i], value=value) if i < len(headers) and headers[i] else value
                                       for i, value in enumerate(cells) if value) + '。')
             table = None
         elif token.type == 'thead_open':
@@ -230,7 +230,7 @@ def speech_text(text: str) -> str:
             output.append(line if line[-1] in '。！？!?；;' else line + '。')
     text = _collapse_stops(_spoken_units(''.join(output)))
     if text: return text + ('' if text[-1] in '。！？!?' else '。')
-    return '相关链接在详情里。' if had_url else ''
+    return feedback_text('format.url_fallback') if had_url else ''
 
 
 def brief_result(text: str, max_chars: int = 120, max_sentences: int = 3) -> str:

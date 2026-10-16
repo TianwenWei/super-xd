@@ -1,0 +1,26 @@
+# 编辑固定话术；{{变量}} 由代码提供，变量名必须保留。
+
+cancelled = "任务已取消。"
+quick_budget_exhausted = "快速查询预算已用尽，新条件尚未进行真实核实；任务未完成，请新建任务重新查询。"
+lookup_no_sources = "真实搜索没有获得可读取来源，无法确认实时事实。"
+processing = "正在处理任务。"
+suggestion_saved = "建议已记录，尚未执行；会话层将依据最新车况校验。"
+source_heading = "\n来源：\n"
+source_item = "- [{{title}}]({{url}})"
+
+[forecast]
+record = "{{location}}{{date}}最低{{minimum}}度，最高{{maximum}}度"
+record_separator = "；"
+source_suffix = "，数据来自Open-Meteo预报。"
+official_not_verified = "指定的官方来源没能核实。"
+source_title = "Open-Meteo结构化天气预报"
+geocoding_title = "Open-Meteo城市地理编码"
+
+[restrictions]
+search_only = "\n限制：部分来源仅有搜索摘要，页面未成功提取，相关信息尚未核实。"
+no_sources = "\n限制：真实信息工具未取得可核实来源，不能据此确认实时事实。"
+
+[spoken]
+search_only = "部分内容仅有搜索摘要，尚未核实。"
+no_sources = "没有查到可核实来源，无法确认实时信息。"
+suggestions = "这些是动作建议，尚未执行。"

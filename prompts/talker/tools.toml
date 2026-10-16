@@ -1,0 +1,67 @@
+# Model-facing text only. Parameter types, ranges and execution remain in Python.
+
+[common.task_id]
+description = "明确任务id；仅有一个活跃任务可省略"
+
+[delegate_vehicle_control]
+description = "交给车控规划层：本轮有不在常驻工具里的车控，或者某个动作必须等另一个动作完成才能做。整句只交一次，同一次调用里不能再有任何车控函数。系统会把用户本轮原话和音区传过去，不要在参数里改写需求。结果以车辆回执为准。"
+
+[delegate_vehicle_control.parameters.skill_ids]
+description = "涉及的车辆子系统；不能确定时传空数组，由车控规划层选择。"
+
+[delegate_task]
+description = "交给后台任务：多步调研、按多个条件比较后推荐，或者深入核实指定来源。简单实时事实和明确网页搜索用web_search；天气用get_weather，地点用search_places。goal 写全用户的所有条件。"
+
+[delegate_task.parameters.spoken_goal]
+description = "一个动宾短语，8到15字，能接在\"我帮你\"后面，比如\"挑能停车的火锅店\"。不写来源要求，完整条件写在goal里。"
+
+[delegate_task.parameters.read_details]
+description = "仅用户明确要求详细朗读最终报告时为true，默认false"
+
+[delegate_task.parameters.query_domain]
+description = "只有用户要求核实指定来源上的天气时填weather，此时query_mode必须是quick；普通天气查询用get_weather，不用本工具。其他任务填general。"
+
+[delegate_task.parameters.query_mode]
+description = "quick：一个明确的事实查询；research：比较、调研或多条件规划。缺少必要地点时先问用户，不委托空目标。"
+
+[delegate_task.parameters.required_source_domains]
+description = "仅当用户要求核实某个官方网站且你确知其域名时填写，如metoffice.gov.uk；不确定就不填，不要问用户要网址。"
+
+[manage_task]
+description = "处理已有的后台任务。get读取进度或结果，可用task_ids一次读多个；reply回复正在等用户补充的任务；update补充或修改已有任务的条件；cancel取消任务。车控和新话题不用本工具。"
+
+[manage_task.parameters.action]
+description = "get读取进度或结果；reply回答等待补充任务的问题；update补充或修改已有任务条件；cancel取消任务。"
+
+[manage_task.parameters.task_ids]
+description = "仅get可用，与task_id互斥；列出用户指的所有任务id"
+
+[manage_task.parameters.text]
+description = "reply时完整保留用户对等待问题的回答；update时完整保留新增或修改的条件，不丢地点、日期、筛选和来源要求。"
+
+[manage_task.parameters.read_details]
+description = "仅用户明确要求详细朗读已有结果时为true，默认false"
+
+[search_places]
+description = "用Google Places搜索真实POI。query保留地点/类别及明确城市或地标。附近没有位置先问用户，不能假设GPS。仅搜索，不启动导航；结果按相关性排序，返回顺序不代表距离最近；多个候选先让用户选择。"
+
+[search_places.parameters.area]
+description = "搜索范围：逐字照抄用户说过的城市、地址或地标。用户没说过自己在哪、也没说地标时，不要调用本工具，先问用户在哪里。"
+
+[get_weather]
+description = "直接查询天气，在本轮返回，不委托后台。location填明确城市及国家（例如巴黎 法国、深圳 中国），不得猜地点。date为today/tomorrow/day_after_tomorrow/now或YYYY-MM-DD；相对日期由工具按目标当地时区解析。Google不支持地点时真实回退Open-Meteo并标明来源。指定官网核验或复杂调研才delegate_task。"
+
+[start_poi_navigation]
+description = "用户明确要求导航或选择导航候选后，使用本会话search_places返回的place_id启动模拟导航。不可编造ID；仅查询/推荐不能调用。只设置真实POI目的地，不计算路线、距离或到达时间。"
+
+[web_search]
+description = "用Tavily直接搜索网页，在本轮回答简单实时事实或用户明确要求的网页搜索。返回搜索摘要、来源URL和查询时间，不代表已读取或核实网页全文。复杂比较、多步调研和指定来源深入核验交给delegate_task；天气用get_weather，地点用search_places。"
+
+[web_search.parameters.include_domains]
+description = "仅在用户明确指定来源且确知域名时填写，不猜测域名。"
+
+[search_manual]
+description = "检索已导入的腾势D9中文右舵版车书原文。车辆功能的使用方法、条件、限制、保养及说明书知识用此工具，不能凭记忆回答。返回章节、页码和原文，仅供问答，不执行任何车控。当前车况看会话快照；要求实际操作仍走车控工具。其他车型不能视为与本手册相同。"
+
+[search_manual.parameters.query]
+description = "完整独立的车书问题照抄本轮原句；仅追问时结合近期对话补全被指代的功能。"

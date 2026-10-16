@@ -19,6 +19,7 @@ from backend.catalog import HOT_TOOL_NAMES, SKILLS, TOOLS, execute_tool, load_sk
 from backend.speaker import DEFAULT_SPEAKER_SEAT, speaker_context
 from backend.models import sanitized_error, utcnow
 from backend.prompt_templates import render_prompt
+from backend.prompt_config import config_text, validate_config
 from backend.settings import VEHICLE_CONTROL_MODEL
 
 MAX_MODEL_CALLS = 4
@@ -29,6 +30,15 @@ PLAN_METADATA_FIELDS = {'ok', 'executed', 'loaded_skills', 'model_calls', 'plan_
 ID = {'type': 'string', 'minLength': 1, 'maxLength': 100, 'pattern': r'[\s\S]*\S[\s\S]*'}
 IDS = {'type': 'array', 'items': ID, 'uniqueItems': True, 'maxItems': 64}
 PROMPT = render_prompt('vehicle_planner')
+validate_config('planner/tools.toml', {
+    key: set() for key in (
+        'submit_vehicle_plan.description', 'load_skill.description',
+        'submit_vehicle_plan.parameters.actions.arguments',
+        'submit_vehicle_plan.parameters.intents.source_text',
+        'submit_vehicle_plan.parameters.keep_paths',
+        'submit_vehicle_plan.parameters.intents.keep_paths',
+    )
+})
 
 
 def _canonical(value):
@@ -112,20 +122,19 @@ def _submission_schema(allowed_names, request_text, vehicle):
     schema = plan_schema(allowed_names, request_text, vehicle)
     schema['properties']['actions']['items'] = _object({
         'id': ID, 'intent_id': ID, 'name': {'type': 'string', 'enum': list(allowed_names)},
-        'arguments': {'type': 'object', 'description': '严格按 action_schemas 中该函数的参数 schema 填写'},
+        'arguments': {'type': 'object', 'description': config_text('planner/tools.toml', 'submit_vehicle_plan.parameters.actions.arguments')},
         'depends_on': IDS})
     schema['properties']['keep_paths'] = deepcopy(schema['properties']['keep_paths'])
     intent = schema['properties']['intents']['items']
     for name in ('source_start', 'source_end'):
         intent['properties'].pop(name)
         intent['required'].remove(name)
-    intent['properties']['source_text']['description'] = '逐字引用本轮原句中唯一出现的连续片段；不填下标，不增删文字或标点。'
+    intent['properties']['source_text']['description'] = config_text('planner/tools.toml', 'submit_vehicle_plan.parameters.intents.source_text')
     for keep in (schema['properties']['keep_paths'], intent['properties']['keep_paths']):
         keep['items'].pop('enum')
         keep['items']['minLength'] = 1
-        keep['description'] = '只记录用户本轮显式保持的真实状态点路径；服务器校验路径。无显式保持则空。'
-    schema['properties']['keep_paths']['description'] += '必须恰为各status=keep意图keep_paths的并集。'
-    intent['properties']['keep_paths']['description'] += 'status=planned时必须为空；保持须独立status=keep意图。'
+    schema['properties']['keep_paths']['description'] = config_text('planner/tools.toml', 'submit_vehicle_plan.parameters.keep_paths')
+    intent['properties']['keep_paths']['description'] = config_text('planner/tools.toml', 'submit_vehicle_plan.parameters.intents.keep_paths')
     return schema
 
 
@@ -457,10 +466,10 @@ class VehicleControlPlanner:
                                   action_schemas={name: TOOLS[name].parameters for name in allowed})
             planning_message['content'] = json.dumps(planning_input, ensure_ascii=False)
             submit = {'type': 'function', 'function': {'name': 'submit_vehicle_plan',
-                       'description': '提交整组结构化车辆计划；仅校验/模拟副本，不执行真实车辆。',
+                       'description': config_text('planner/tools.toml', 'submit_vehicle_plan.description'),
                        'parameters': _submission_schema(allowed, request_text, vehicle)}}
             loader = {'type': 'function', 'function': {'name': 'load_skill',
-                       'description': '仅为本Pro规划加载实际能力；不会执行，也不扩展Talker。',
+                       'description': config_text('planner/tools.toml', 'load_skill.description'),
                        'parameters': _object({'skill_id': {'type': 'string', 'enum': list(SKILLS)}})}}
             # Catalog schemas travel as data (action_schemas). Offering them as
             # native tools would contradict the plan-only protocol and invite

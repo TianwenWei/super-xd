@@ -1,0 +1,39 @@
+# 编辑固定话术；{{变量}} 由代码提供，变量名必须保留。
+
+[speaker]
+driver = "主驾"
+front_passenger = "副驾"
+rear_left = "左后排"
+rear_right = "右后排"
+
+[rejections]
+vehicle_moving = "车辆行驶中，需停车后操作"
+temperature_range = "目标温度超出16至30摄氏度，已保留原温度"
+fan_range = "风量调整后超出0至7档，已保留原档位"
+steering_moving = "驾驶中禁止调节方向盘位置"
+window_range = "车窗目标开度超出0至100，已保留原开度"
+rear_window_locked = "后排车窗童锁已开启，拒绝打开后排车窗"
+window_speed = "车速超过80公里/小时，拒绝将车窗打开超过50%"
+anti_pinch_moving = "行驶中禁止更改车窗防夹设置"
+mirror_folded = "后视镜已折叠，请先展开"
+child_lock_moving = "行驶中禁止更改儿童安全锁"
+washer_empty = "玻璃水已耗尽，清洗被拒绝"
+volume_range = "音量调整后超出0至100，已保留原音量"
+waypoint_limit = "最多支持10个模拟途经点"
+waypoint_missing = "该索引不存在途经点，已保留原列表"
+driver_seat_moving = "驾驶中禁止调整主驾座椅位置"
+seat_memory_moving = "行驶中禁止恢复座椅记忆"
+sunroof_speed = "高速行驶时天窗开度不能超过50%"
+mirror_speed = "行驶中拒绝折叠后视镜"
+mirror_range = "后视镜角度超出-20至20度，已保留原角度"
+unlock_moving = "车辆行驶中拒绝解锁车门"
+charge_port_busy = "充电中拒绝解锁充电口"
+tailgate_moving = "车辆行驶中拒绝打开尾门"
+default = "模拟车端拒绝执行"
+seat_axis_range = "{{axis}}允许范围为{{lower}}至{{upper}}，已保留原位置"
+
+[state]
+preferences_notice = "偏好已保存，未计算真实路线"
+initial_track = "模拟曲目 1"
+navigation_notice = "仅保存模拟目的地、途经点与偏好；未计算真实路线"
+track = "模拟曲目 {{index}}"

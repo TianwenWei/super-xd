@@ -25,6 +25,7 @@ from jsonschema import Draft202012Validator
 
 from .catalog import SKILLS
 from .prompt_templates import render_prompt
+from .prompt_config import config_text, validate_config
 from .speech_text import brief_result, spoken_number
 from .textutil import find_urls, is_domain, redact
 from .task_feedback import PHASES, partial_result, task_user_detail
@@ -32,6 +33,28 @@ from .speaker import speaker_context
 
 logger = logging.getLogger(__name__)
 SKILL_GUIDE = "；".join(f"{skill_id}：{SKILLS[skill_id].name}" for skill_id in sorted(SKILLS))
+
+
+validate_config("speech/thinker.toml", {
+    "cancelled": set(),
+    "quick_budget_exhausted": set(),
+    "lookup_no_sources": set(),
+    "processing": set(),
+    "suggestion_saved": set(),
+    "source_heading": set(),
+    "source_item": {"title", "url"},
+    "forecast.record": {"date", "location", "maximum", "minimum"},
+    "forecast.record_separator": set(),
+    "forecast.source_suffix": set(),
+    "forecast.official_not_verified": set(),
+    "forecast.source_title": set(),
+    "forecast.geocoding_title": set(),
+    "restrictions.search_only": set(),
+    "restrictions.no_sources": set(),
+    "spoken.search_only": set(),
+    "spoken.no_sources": set(),
+    "spoken.suggestions": set(),
+})
 
 
 def _weather_task(task):
@@ -106,11 +129,15 @@ def _weather_finish_guard(args, task, sources, observations):
 
 
 def _forecast_sentence(records, official_status):
-    parts = [f"{(record.get('location') or {}).get('name', '')}{record['date']}最低{spoken_number(record['temperature_min'])}度，"
-             f"最高{spoken_number(record['temperature_max'])}度" for record in records]
-    sentence = "；".join(parts) + "，数据来自Open-Meteo预报。" if parts else ""
+    parts = [config_text("speech/thinker.toml", "forecast.record",
+                         location=str((record.get('location') or {}).get('name', '')),
+                         date=str(record['date']),
+                         minimum=spoken_number(record['temperature_min']),
+                         maximum=spoken_number(record['temperature_max'])) for record in records]
+    sentence = (config_text("speech/thinker.toml", "forecast.record_separator").join(parts)
+                + config_text("speech/thinker.toml", "forecast.source_suffix")) if parts else ""
     if official_status == "not_verified":
-        sentence += "指定的官方来源没能核实。"
+        sentence += config_text("speech/thinker.toml", "forecast.official_not_verified")
     return sentence
 
 
@@ -128,28 +155,47 @@ def _tool(name: str, description: str, parameters: dict[str, Any]) -> dict[str, 
         "name": name, "description": description, "parameters": parameters}}
 
 
+validate_config("thinker/tools.toml", {
+    "search_web.description": set(),
+    "extract_web.description": set(),
+    "load_skill.description": set(),
+    "ask_clarification.description": set(),
+    "suggest_vehicle_action.description": set(),
+    "finish_task.description": set(),
+    "finish_task.parameters.spoken_summary": set(),
+    "finish_task.parameters.reuse_prior_evidence": set(),
+    "finish_task.parameters.forecast_claims": set(),
+    "finish_task.parameters.official_source_status": set(),
+    "finish_task.parameters.source_urls": set(),
+    "get_weather_forecast.description": set(),
+    "get_weather_forecast.parameters.date": set(),
+    "get_weather_forecast.parameters.country_code": set(),
+    "lookup_web.description": set(),
+})
+
+
 THINKER_TOOLS = [
-    _tool("search_web", "真实 Tavily 网络搜索。返回来源 URL 和本次查询时间；不能用记忆替代实时检索。",
+    _tool("search_web", config_text("thinker/tools.toml", "search_web.description"),
           _object({"query": {"type": "string", "minLength": 1, "maxLength": 1500},
                    "max_results": {"type": "integer", "minimum": 1, "maximum": 5}}, ["query"])),
-    _tool("extract_web", "真实 Tavily Extract 读取已经搜索获得的页面，核实与任务相关的信息。",
+    _tool("extract_web", config_text("thinker/tools.toml", "extract_web.description"),
           _object({"urls": {"type": "array", "items": {"type": "string", "minLength": 8},
                             "minItems": 1, "maxItems": 5, "uniqueItems": True}}, ["urls"])),
-    _tool("load_skill", "查看一个车辆子系统的详细说明、函数和参数schema。",
+    _tool("load_skill", config_text("thinker/tools.toml", "load_skill.description"),
           _object({"skill_id": {"type": "string", "enum": sorted(SKILLS)}}, ["skill_id"])),
-    _tool("ask_clarification", "必要条件不足时只问一个关键问题，用简短自然口语提问并暂停任务；释放并发名额，收到答复后继续。",
+    _tool("ask_clarification", config_text("thinker/tools.toml", "ask_clarification.description"),
           _object({"question": {"type": "string", "minLength": 1, "maxLength": 1500}}, ["question"])),
-    _tool("suggest_vehicle_action", "提出一个模拟车辆动作建议。只保存建议，由会话层结合最新车况重新校验执行。",
+    _tool("suggest_vehicle_action", config_text("thinker/tools.toml", "suggest_vehicle_action.description"),
           _object({"name": {"type": "string", "minLength": 1, "maxLength": 120},
                    "arguments": {"type": "object"},
                    "reason": {"type": "string", "minLength": 1, "maxLength": 1500}},
                   ["name", "arguments", "reason"])),
-    _tool("finish_task", "同时提交完整报告summary与简短口语spoken_summary，不增加润色步骤。只能引用本任务真实搜索/读取过的来源。",
+    _tool("finish_task", config_text("thinker/tools.toml", "finish_task.description"),
           _object({"summary": {"type": "string", "minLength": 1, "maxLength": 12000},
                    "spoken_summary": {"type": "string", "minLength": 1, "maxLength": 2000,
-                                      "description": "中性自然口语，先说最有用的结论，1至3句。不要Markdown、列表、表格、URL、引用标记、JSON或任务/工具编号。保留必要的未核实、尚未执行等限制。"},
-                   "reuse_prior_evidence": {"type": "boolean", "description": "仅在核对已有真实资料仍完整支持本次补充条件后为true；否则必须补查。"},
-                   "forecast_claims": {"type": "array", "maxItems": 7, "description": "仅context.query_domain=weather的任务使用：逐项照抄get_weather_forecast返回的date、source_url、temperature_min、temperature_max。系统据此播报温度，summary与spoken_summary不要再写温度数字。其他任务不填，温度照常写进summary和spoken_summary。",
+                                      "description": config_text("thinker/tools.toml", "finish_task.parameters.spoken_summary")},
+                   "reuse_prior_evidence": {"type": "boolean", "description": config_text("thinker/tools.toml", "finish_task.parameters.reuse_prior_evidence")},
+                   "forecast_claims": {"type": "array", "maxItems": 7, "description": config_text("thinker/tools.toml", "finish_task.parameters.forecast_claims"),
                                        "items": {"type": "object", "additionalProperties": False,
                                                  "required": ["date", "source_url", "temperature_min", "temperature_max"],
                                                  "properties": {"date": {"type": "string", "pattern": DATE_PATTERN},
@@ -157,18 +203,18 @@ THINKER_TOOLS = [
                                                                 "temperature_min": {"type": "number"},
                                                                 "temperature_max": {"type": "number"}}}},
                    "official_source_status": {"type": "string", "enum": ["verified", "not_verified"],
-                                              "description": "任务指定官方来源时必填：真实读到官方页面且含答案为verified，否则not_verified。"},
+                                              "description": config_text("thinker/tools.toml", "finish_task.parameters.official_source_status")},
                    "source_urls": {"type": "array", "items": {"type": "string"}, "maxItems": 20,
-                                   "description": "只列实际读取过的页面或工具返回的source_url；只在搜索结果里出现、没读过的页面不要列。",
+                                   "description": config_text("thinker/tools.toml", "finish_task.parameters.source_urls"),
                                    "uniqueItems": True}}, ["summary"])),
 ]
-FORECAST_TOOL = _tool("get_weather_forecast", "查询明确城市和日期的真实结构化天气预报（Open-Meteo），只提供日最低/最高气温，不提供雨晴、降水或风力，不得由温度推断这些现象。未来温度优先此工具，历史记录或气候平均值不能当未来预报。城市不明确需澄清；本工具不能冒充用户指定的气象局官网。",
+FORECAST_TOOL = _tool("get_weather_forecast", config_text("thinker/tools.toml", "get_weather_forecast.description"),
     _object({"city": {"type": "string", "minLength": 1, "maxLength": 120},
-             "date": {"type": "string", "pattern": DATE_PATTERN, "description": "目标城市当地日期YYYY-MM-DD；按当前时间与用户所指日期填写"},
-             "country_code": {"type": "string", "pattern": r"^[A-Za-z]{2}$", "description": "用户已明确的ISO两字母国家代码，用于区分同名城市；不猜测"}}, ["city", "date"]))
+             "date": {"type": "string", "pattern": DATE_PATTERN, "description": config_text("thinker/tools.toml", "get_weather_forecast.parameters.date")},
+             "country_code": {"type": "string", "pattern": r"^[A-Za-z]{2}$", "description": config_text("thinker/tools.toml", "get_weather_forecast.parameters.country_code")}}, ["city", "date"]))
 THINKER_TOOLS.append(FORECAST_TOOL)
 TOOL_SCHEMAS = {tool["function"]["name"]: tool["function"]["parameters"] for tool in THINKER_TOOLS}
-LOOKUP_TOOL = _tool("lookup_web", "快速实时核实：真实Search后按相关性排序读取前两个实际来源页面，一次返回完整搜索和Extract材料。",
+LOOKUP_TOOL = _tool("lookup_web", config_text("thinker/tools.toml", "lookup_web.description"),
     _object({"query": {"type": "string", "minLength": 1, "maxLength": 1500},
              "max_results": {"type": "integer", "minimum": 1, "maximum": 3}}, ["query"]))
 QUICK_TOOLS = [FORECAST_TOOL, LOOKUP_TOOL] + [tool for tool in THINKER_TOOLS
@@ -260,7 +306,7 @@ class ThinkerWorker:
         if not task:
             raise RuntimeError("Task no longer exists")
         if task["status"] in ("cancelling", "cancelled"):
-            self.db.save_task(task_id, task["revision"], status="cancelled", summary="任务已取消。", question=None)
+            self.db.save_task(task_id, task["revision"], status="cancelled", summary=config_text("speech/thinker.toml", "cancelled"), question=None)
             raise TaskCancelled()
         if task["status"] in ("completed", "failed"):
             # A concurrent deadline sweep may have closed this task while an
@@ -506,8 +552,9 @@ class ThinkerWorker:
                     call_id=call['id'], model_call_id=call_id, status='running')
         result = await self._execute_tool('finish_task', args, sources, suggestions, observations, adopted_forecasts=adopted)
         if selected:
-            result['result']['summary'] += '\n来源：\n' + '\n'.join(
-                f"- [{source.get('title') or source['url']}]({source['url']})" for source in selected)
+            result['result']['summary'] += config_text("speech/thinker.toml", "source_heading") + '\n'.join(
+                config_text("speech/thinker.toml", "source_item",
+                            title=str(source.get('title') or source['url']), url=str(source['url'])) for source in selected)
         self._trace(task, 'tool.completed', {'name': 'finish_task', 'arguments': args, 'result': result},
                     call_id=call['id'], model_call_id=call_id, status=self._response_status(task_id, revision, 'completed'))
         self._boundary(task_id, revision)
@@ -596,7 +643,7 @@ class ThinkerWorker:
                         tools = [tool for tool in QUICK_TOOLS if tool["function"]["name"] in available]
                 if mode == "quick" and lookup_count >= 2 and not sources and not self._has_current_attempt(observations) and (
                         not _weather_task(current) or step == step_limit):
-                    error = "快速查询预算已用尽，新条件尚未进行真实核实；任务未完成，请新建任务重新查询。"
+                    error = config_text("speech/thinker.toml", "quick_budget_exhausted")
                     self._trace(current, "task.budget_exhausted", {"reason": "quick_lookup_budget",
                         "lookup_limit": 2, "current_revision_attempts": 0}, revision=revision,
                         step=current.get("steps"), status="failed")
@@ -840,7 +887,7 @@ class ThinkerWorker:
                 break
         if not urls:
             return {"ok": True, "search": search, "extract": None,
-                    "notice": "真实搜索没有获得可读取来源，无法确认实时事实。"}
+                    "notice": config_text("speech/thinker.toml", "lookup_no_sources")}
         try:
             extract = await invoke("extract_web", {"urls": urls})
         except (RevisionChanged, TaskCancelled):
@@ -851,7 +898,7 @@ class ThinkerWorker:
 
     @staticmethod
     def _progress(name: str, arguments: dict[str, Any]) -> str:
-        return PHASES.get(name, '正在处理任务。')
+        return PHASES.get(name, config_text("speech/thinker.toml", "processing"))
 
     async def _execute_tool(self, name: str, args: dict[str, Any], sources: dict[str, Any],
                             suggestions: list[dict[str, Any]], observations: list[dict[str, Any]], *,
@@ -883,11 +930,11 @@ class ThinkerWorker:
                 if geo.scheme not in ("http", "https") or not geo.netloc:
                     raise ValueError("天气工具的地理编码来源 URL 无效。")
             record = {key: deepcopy(data[key]) for key in ("date", "location", "timezone", "temperature_min", "temperature_max", "unit", "source_url", "queried_at")}
-            sources[url] = {"url": url, "title": "Open-Meteo结构化天气预报", "queried_at": data["queried_at"],
+            sources[url] = {"url": url, "title": config_text("speech/thinker.toml", "forecast.source_title"), "queried_at": data["queried_at"],
                             "kind": "forecast", "verified": True, "extracted": False,
                             "forecast_date": data["date"], "timezone": data["timezone"], "unit": data["unit"]}
             if geo_url:
-                sources[geo_url] = {"url": geo_url, "title": "Open-Meteo城市地理编码", "queried_at": data["queried_at"],
+                sources[geo_url] = {"url": geo_url, "title": config_text("speech/thinker.toml", "forecast.geocoding_title"), "queried_at": data["queried_at"],
                                     "kind": "geocoding", "verified": True, "extracted": False,
                                     "supports": "location"}
             observations.append({"tool": name, "ok": True, "attempted": True,
@@ -929,7 +976,7 @@ class ThinkerWorker:
                 raise ValueError("模拟动作参数无效：" + errors[0].message)
             suggestions.append(deepcopy(args))
             return {"ok": True, "status": "suggested_only", "executed": False,
-                    "message": "建议已记录，尚未执行；会话层将依据最新车况校验。"}
+                    "message": config_text("speech/thinker.toml", "suggestion_saved")}
         if name == "finish_task":
             urls = args.get("source_urls", list(sources)[:20])
             unknown = [url for url in urls if url not in sources]
@@ -957,9 +1004,9 @@ class ThinkerWorker:
                 evidence = "verified" if any(source.get("kind") == "forecast" for source in used_sources) else "extracted"
             if used_sources and evidence == "none":
                 evidence = "search_only"
-                summary += "\n限制：部分来源仅有搜索摘要，页面未成功提取，相关信息尚未核实。"
+                summary += config_text("speech/thinker.toml", "restrictions.search_only")
             elif not used_sources and web_attempts:
-                summary += "\n限制：真实信息工具未取得可核实来源，不能据此确认实时事实。"
+                summary += config_text("speech/thinker.toml", "restrictions.no_sources")
             # Produce the concise spoken form in the same finish call. The
             # shared guard only removes display syntax; legacy reports without
             # a generated spoken summary retain every statement and condition,
@@ -975,11 +1022,11 @@ class ThinkerWorker:
                 summary = forecast + "\n" + summary
                 spoken_summary = forecast + spoken_summary
             if evidence == "search_only":
-                spoken_summary += "部分内容仅有搜索摘要，尚未核实。"
+                spoken_summary += config_text("speech/thinker.toml", "spoken.search_only")
             elif not used_sources and web_attempts:
-                spoken_summary += "没有查到可核实来源，无法确认实时信息。"
+                spoken_summary += config_text("speech/thinker.toml", "spoken.no_sources")
             if suggestions:
-                spoken_summary += "这些是动作建议，尚未执行。"
+                spoken_summary += config_text("speech/thinker.toml", "spoken.suggestions")
             queried = [source.get("queried_at") for source in used_sources if source.get("queried_at")]
             return {"ok": True, "result": {"summary": summary, "spoken_summary": spoken_summary,
                     "sources": used_sources,
@@ -1013,6 +1060,8 @@ class ThinkerWorker:
 
 
 async def _main() -> None:
+    from .prompt_config import validate_all
+    validate_all()
     from dotenv import load_dotenv
     load_dotenv()
     from .db import Database

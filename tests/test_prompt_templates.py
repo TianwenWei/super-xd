@@ -10,6 +10,7 @@ from scripts.validate_structured_prompts import capture_case, import_runtime
 @pytest.fixture
 def template_directory(tmp_path, monkeypatch):
     monkeypatch.setattr(prompt_templates, 'PROMPT_DIRECTORY', tmp_path)
+    monkeypatch.setattr(prompt_templates, 'PROMPT_FILES', {'sample': ('sample.md', {'value'})})
     prompt_templates.load_prompt.cache_clear()
     prompt_templates._parts.cache_clear()
     yield tmp_path
@@ -18,7 +19,12 @@ def template_directory(tmp_path, monkeypatch):
 
 
 def write_template(directory, name, text):
-    (directory / f'{name}.txt').write_text(text)
+    (directory / f'{name}.md').write_text(text)
+    # Each test declares its own exact variable contract independently of parsing.
+    if '{{other}}' in text:
+        prompt_templates.PROMPT_FILES[name] = (f'{name}.md', {'value', 'other'})
+    elif '{{' not in text:
+        prompt_templates.PROMPT_FILES[name] = (f'{name}.md', set())
 
 
 def test_template_variables_are_exact_and_nonrecursive(template_directory):
@@ -57,17 +63,17 @@ def test_template_rejects_invalid_placeholders(template_directory, text):
 def test_template_read_is_cached(template_directory):
     write_template(template_directory, 'sample', '# First version')
     assert prompt_templates.load_prompt('sample') == '# First version'
-    (template_directory / 'sample.txt').unlink()
+    (template_directory / 'sample.md').unlink()
     assert prompt_templates.load_prompt('sample') == '# First version'
 
 
 def test_production_templates_include_instruction_sections_and_plain_data_wrappers():
-    templates = list(prompt_templates.PROMPT_DIRECTORY.glob('*.txt'))
-    assert templates
-    for path in templates:
-        text = prompt_templates.load_prompt(path.stem)
+    assert prompt_templates.PROMPT_FILES
+    for name, (path, _) in prompt_templates.PROMPT_FILES.items():
+        assert (prompt_templates.PROMPT_DIRECTORY / path).is_file()
+        text = prompt_templates.load_prompt(name)
         assert text
-        assert prompt_templates._parts(path.stem)
+        assert prompt_templates._parts(name)
     for name in ('talker', 'vehicle_planner', 'thinker_research', 'thinker_quick', 'persona'):
         assert prompt_templates.load_prompt(name).startswith('# ')
     assert prompt_templates.load_prompt('session_snapshot').startswith('当前会话快照')

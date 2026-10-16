@@ -29,7 +29,7 @@
 | `backend/models.py` | 火山方舟 LLM 客户端（OpenAI 兼容）、Tavily 客户端 |
 | `backend/asr.py`、`asr_endpoint.py` | 火山流式 ASR |
 | `backend/tts.py`、`speech_stream.py` | 火山双向流式 TTS（PCM 24kHz） |
-| `backend/persona.py` | 人设配置与回执话术模板 |
+| `backend/persona.py`、`backend/speech_config.py` | 人设与回执话术的取值、格式化和变量契约；文案在 `prompts/speech/` |
 | `backend/speech_text.py` | 送 TTS 之前的展示语法清理 |
 | `backend/google_maps.py`、`maps_tools.py`、`weather.py` | POI 搜索、天气（Google，回退 Open-Meteo） |
 | `backend/web_search.py` | Talker 当前轮的 Tavily 网页搜索 |
@@ -39,7 +39,9 @@
 | `backend/vehicle_simulator.py` | 车端模拟器：独立持有车况，执行命令并返回回执（执行权威） |
 | `backend/vehicle_feedback.py` | 车控下发时的“正在为你……”话术 |
 | `backend/model_context.py` | 历史消息与工具结果进入模型前的压缩 |
-| `backend/prompt_templates.py`、`backend/prompts/` | prompt 模板加载；全部 prompt 文本与 Talker 原生示例（`talker_examples.json`） |
+| `prompts/README.md`、`prompts/` | 集中的文案配置与索引：模块主提示词 `.md`、工具说明和固定话术 `.toml`、Talker 原生示例 `talker/examples.json` |
+| `backend/prompt_templates.py`、`backend/prompt_config.py`、`backend/tool_text_config.py` | 启动时读取、校验和缓存 prompt 与文字配置；请求时只取值、填变量 |
+| `scripts/validate_prompt_config.py` | 无需外部服务的完整配置校验 CLI |
 | `backend/textutil.py` | 不用正则的格式工具：ID/域名校验、URL 提取、密钥脱敏、空白归一 |
 | `evals/` | 行为评测：`harness.py` 与 `cases/*.json` |
 | `/frontend/src/App.tsx` | 主界面、控制通道消息处理、模拟车机 |
@@ -89,7 +91,7 @@
 ### 诚实性
 4. **说的和做的分开**：模型可以自由组织调用工具时说的那句话，但只能用进行时或将来时（"这就调到二十三度""我去查一下"），不得声称已经完成。做没做成以车端回执或任务登记结果为准：成功不重复播报，失败、澄清和用户要的信息由回执生成（`receipt_feedback`，`failures_only`）。为了延迟，模型文字边生成边播（第一段到逗号、之后按整句送 TTS），不等工具校验；校验退回的那组，用户会先听到那句话，再听到重试后的回答，这是有意的取舍。模型没说话时回退到模板（`dispatch_feedback`、`receipt_detail` 加人设模板）。时态只能靠 prompt 和原生示例保证，代码不做文本判断（第 3 节）；用 `evals/speech_review.py` 抽查。
 5. **车端是执行权威**：车控动作的最终成功或失败以车端回执为准。模拟、预检只用于提前拒绝，不能当作回执。
-6. **人设只改说法**：同一输入在不同人设下，工具调用序列和参数必须完全一致。人设不能影响路由、工具选择、参数和权限。实现方式：每次 Talker 调用一次完成决定和回答，人设放在固定规则之后（persona.txt 声明它只影响说法）；不再为闲聊单独发第二次调用。这条由评测保证：`evals/harness.py` 对带 `personas` 的用例比较不同人设下的工具调用，多次重复里没有一次一致就判失败。文字模式与语音模式发的请求完全相同。
+6. **人设只改说法**：同一输入在不同人设下，工具调用序列和参数必须完全一致。人设不能影响路由、工具选择、参数和权限。实现方式：每次 Talker 调用一次完成决定和回答，人设放在固定规则之后（`prompts/talker/persona.md` 声明它只影响说法）；不再为闲聊单独发第二次调用。这条由评测保证：`evals/harness.py` 对带 `personas` 的用例比较不同人设下的工具调用，多次重复里没有一次一致就判失败。文字模式与语音模式发的请求完全相同。
 7. **Thinker 只输出中性内容**：Thinker 不知道人设存在，只产出 `summary` 和 `spoken_summary`，由 Talker 侧负责表达。替用户写的内容（邮件、消息）用用户本人的口吻。
 
 ### 异步任务
@@ -105,7 +107,9 @@
 
 ## 5. Prompt 规范
 
-- prompt 位置：全部文本在 `backend/prompts/*.txt`，Talker 的原生 tool_calls 示例在 `backend/prompts/talker_examples.json`；拼装在 `session.py` 的 `messages_for` / `launch_model`、`vehicle_planner.py` 的 `plan`、`worker.py` 的 `_messages`。
+- prompt 位置：统一放在根目录 `prompts/`，索引和变量说明见 `prompts/README.md`。主提示词按 Talker / Planner / Thinker / Manual 分目录，使用 `.md`；给模型看的工具与参数说明在各模块 `tools.toml` 和 `vehicle/functions.toml`；固定用户话术在 `speech/*.toml`；原生 tool_calls 示例在 `talker/examples.json`。拼装仍在 `session.py` 的 `messages_for` / `launch_model`、`vehicle_planner.py` 的 `plan`、`worker.py` 的 `_messages`。
+- 文字配置只提供文字，不得携带参数类型、范围、枚举、执行或权限逻辑。新增文字 key 或 `{{变量}}` 时同步更新所属 Python 模块的严格契约；缺 key、多 key、变量不一致均应在 API 和 Worker 启动时直接报错。内部参数诊断、异常及日志仍留在代码中。
+- 修改后运行 `.venv/bin/python -m scripts.validate_prompt_config`，再重启 API 和 Worker。配置只在启动时读入并缓存，请求路径不得读文件；车书 embedding 指令修改后还必须重建索引。
 - **排列顺序：稳定的在前，动态的在后。** 固定规则 → 人设 → 原生示例 → 历史 → 会话快照（车况、任务、`current_utc`）→ 本轮输入。动态内容不要插在历史前面，否则缓存命不中。方舟的前缀缓存是自动的（usage 里的 `cached_tokens`），前缀一变就要重新预填充。
 - **延迟是硬指标。** 不要为了行为加串行的模型调用或"失败后重问"的环节；先看评测报告里的 `latency`（首句可播时间、平均调用次数）。2026-10-15 的基线：首句可播 P50 约 2.1 秒，平均每轮 1.04 次调用。
 - 修复错误优先补 **few-shot 示例**，其次是一句通用规则。规则必须能覆盖一类情况，不能只写给某一句话。影响工具选择的示例优先写成原生的 user / assistant tool_calls / tool 消息：实测比写在 prompt 正文里的箭头示例明显更稳。

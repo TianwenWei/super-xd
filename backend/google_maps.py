@@ -3,6 +3,7 @@
 No model chooses coordinates, no implicit device location and no vehicle writes.
 Every answer preserves provider, requested local date, units and query time.
 """
+from backend.speech_config import feedback_text
 from datetime import date as Date, datetime, timedelta, timezone
 import math
 import os
@@ -21,14 +22,7 @@ def finite(value):
     return type(value) in (int, float) and math.isfinite(value)
 
 
-WMO_CONDITIONS = {
-    0: '晴', 1: '大部晴朗', 2: '局部多云', 3: '阴', 45: '雾', 48: '雾凇',
-    51: '小毛毛雨', 53: '中等毛毛雨', 55: '强毛毛雨', 56: '小冻毛毛雨', 57: '强冻毛毛雨',
-    61: '小雨', 63: '中雨', 65: '大雨', 66: '小冻雨', 67: '强冻雨',
-    71: '小雪', 73: '中雪', 75: '大雪', 77: '雪粒',
-    80: '小阵雨', 81: '中等阵雨', 82: '强阵雨', 85: '小阵雪', 86: '强阵雪',
-    95: '雷暴', 96: '雷暴伴小冰雹', 99: '雷暴伴大冰雹',
-}
+WMO_CONDITIONS = {code: feedback_text('maps.conditions.code_' + str(code)) for code in (0, 1, 2, 3, 45, 48, 51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 71, 73, 75, 77, 80, 81, 82, 85, 86, 95, 96, 99)}
 
 
 NEAR_RADIUS_M = 50000  # Bias radius; a city's airports can be 30+ km from its centre.
@@ -93,7 +87,7 @@ class GoogleMapsClient:
             found = await self.search_places(near, max_results=1)
             if not found['places']:
                 return {'ok': False, 'code': 'area_not_found', 'provider': 'Google Maps', 'kind': 'places',
-                        'reason': f'没有找到“{near}”这个位置，请换个说法。', 'places': []}
+                        'reason': feedback_text('maps.area_not_found', near=near), 'places': []}
             anchor = found['places'][0]
             body['locationBias'] = {'circle': {'center': anchor['location'], 'radius': NEAR_RADIUS_M}}
         data = await self._request('POST', 'https://places.googleapis.com/v1/places:searchText', body=body,
@@ -115,7 +109,7 @@ class GoogleMapsClient:
         return {'ok': True, 'provider': 'Google Maps', 'kind': 'places', 'query': query,
                 'near': {'name': anchor['name'], 'place_id': anchor['place_id']} if anchor else None,
                 'queried_at': self.now().isoformat(), 'places': places,
-                'notice': '搜索相关性排序，不代表驾车距离最近。' if places else '没有找到匹配地点，请提供更明确的位置或名称。'}
+                'notice': feedback_text('maps.relevance_notice') if places else feedback_text('maps.no_places')}
 
     @staticmethod
     def target_date(value, today):
@@ -130,7 +124,7 @@ class GoogleMapsClient:
         places = found['places']
         if len(places) != 1:
             return {'ok': False, 'code': 'ambiguous_location', 'needs_clarification': True,
-                    'reason': '请明确城市和国家或地区。', 'candidates': places,
+                    'reason': feedback_text('maps.city_clarification'), 'candidates': places,
                     'provider': 'Google Maps', 'kind': 'weather'}
         place = places[0]
         coords = place['location']
@@ -176,7 +170,7 @@ class GoogleMapsClient:
                 'date': target.isoformat(), 'timezone': zone, 'mode': 'current' if current else 'forecast',
                 'summary': summary, 'details': selected, 'queried_at': self.now().isoformat(),
                 'source_url': 'https://weather.googleapis.com/v1/' + endpoint,
-                'notice': '每日预报区间为当地07:00至次日07:00。' if not current else ''}
+                'notice': feedback_text('maps.forecast_interval') if not current else ''}
 
     async def _fallback_weather(self, place, date):
         # A single real forecast request resolves both target time zone and data.
@@ -209,10 +203,10 @@ class GoogleMapsClient:
                            'rain_probability_percent': selected['precipitation_probability_max']}
         except (KeyError, TypeError, ValueError, AssertionError, IndexError):
             raise MapsError('invalid_response', '备用天气未返回所请求日期的有效天气数据。') from None
-        summary['condition'] = WMO_CONDITIONS.get(selected['weather_code'], '未知天气状况')
+        summary['condition'] = WMO_CONDITIONS.get(selected['weather_code'], feedback_text('maps.unknown_condition'))
         return {'ok': True, 'kind': 'weather', 'provider': 'Open-Meteo', 'place': place,
                 'date': target.isoformat(), 'timezone': zone, 'mode': 'current' if date == 'now' else 'forecast',
                 'summary': summary, 'details': selected, 'units': units,
                 'source_url': str(httpx.URL(url, params=params)), 'queried_at': self.now().isoformat(),
                 'fallback_reason': 'google_unsupported_location',
-                'notice': 'Google天气不覆盖该地点；已改用Open-Meteo天气数据。'}
+                'notice': feedback_text('maps.fallback_notice')}

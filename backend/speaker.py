@@ -1,8 +1,10 @@
 """Physical speaker metadata and the simulator's supported control regions."""
 from copy import deepcopy
 from backend.settings import DEFAULT_SPEAKER_SEAT
+from backend.prompt_config import config_text
 
-SPEAKER_NAMES = {'driver': '主驾', 'front_passenger': '副驾', 'rear_left': '左后排', 'rear_right': '右后排'}
+SPEAKER_NAMES = {seat: config_text('speech/vehicle.toml', 'speaker.' + seat)
+                 for seat in ('driver', 'front_passenger', 'rear_left', 'rear_right')}
 SPEAKER_TARGETS = {
     'driver': {'seat': 'driver', 'window': 'driver', 'door': 'driver',
                'temperature_zone': 'driver', 'interior_light_zone': 'front', 'mirror': 'left'},

@@ -1,0 +1,17 @@
+# Vehicle Planner 原生工具和结构化计划字段说明；Schema 结构与校验仍由代码维护。
+
+[submit_vehicle_plan]
+description = "提交整组结构化车辆计划；仅校验/模拟副本，不执行真实车辆。"
+
+[load_skill]
+description = "仅为本Pro规划加载实际能力；不会执行，也不扩展Talker。"
+
+[submit_vehicle_plan.parameters.actions]
+arguments = "严格按 action_schemas 中该函数的参数 schema 填写"
+
+[submit_vehicle_plan.parameters.intents]
+source_text = "逐字引用本轮原句中唯一出现的连续片段；不填下标，不增删文字或标点。"
+keep_paths = "只记录用户本轮显式保持的真实状态点路径；服务器校验路径。无显式保持则空。status=planned时必须为空；保持须独立status=keep意图。"
+
+[submit_vehicle_plan.parameters]
+keep_paths = "只记录用户本轮显式保持的真实状态点路径；服务器校验路径。无显式保持则空。必须恰为各status=keep意图keep_paths的并集。"

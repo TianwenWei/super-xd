@@ -1,0 +1,183 @@
+# 编辑固定话术；{{变量}} 由代码提供，变量名必须保留。
+
+[dispatch]
+grouped = "正在为你执行这组车控操作。"
+text = "正在为你{{action}}。"
+close_all_windows = "关闭全部车窗"
+set_navigation_destination = "设置模拟导航目的地为{{destination}}"
+set_temperature = "将空调温度调到{{temperature}}度"
+fallback = "调整车辆设置"
+
+[dispatch.seat]
+driver = "主驾"
+front_passenger = "副驾"
+rear_left = "左后"
+rear_right = "右后"
+all = "全部"
+
+[dispatch.set_window_position]
+closed = "关闭{{seat}}车窗"
+open = "打开{{seat}}车窗"
+partial = "将{{seat}}车窗调到百分之{{position}}"
+
+[task.phases]
+search_web = "正在查找相关资料。"
+lookup_web = "正在查找并核实资料。"
+extract_web = "正在读取来源页面，核实关键信息。"
+get_weather_forecast = "正在查询目标日期的天气预报。"
+load_skill = "正在查看车辆设置说明。"
+suggest_vehicle_action = "正在整理车辆设置建议，还没有执行。"
+finish_task = "正在整理已有资料和未核实的部分。"
+model = "还在分析已有资料。"
+
+[task.errors]
+deadline = "已到这次查询的时间上限，完整结果还没能整理好。"
+step_budget = "这次查询还没能得到完整结果，已停止继续检索。"
+clarification_timeout = "等待补充条件的时间已过，请重新发起任务。"
+execution_failed = "查询过程中遇到问题，暂时没能完成。"
+finalization_failed = "已有资料还没能整理成可靠的完整结果，已停止这次查询。"
+
+[task]
+sources_retained = "已找到的来源保留在任务卡里，尚未形成完整答案。"
+needs_condition = "还需要你补充一个条件。"
+cancelled = "任务已取消。"
+cancelling = "正在取消这项任务。"
+queued = "任务还在排队，尚未开始查询。"
+read_sources = "已读取{{count}}个来源页面，"
+partial_prefix = "先给你部分结果，完整需求还没有全部核实。"
+updated = "新条件记下了，会按这些要求继续。"
+suggestions = "这些只是建议，还没有调整车辆。你想先做哪一项？"
+not_found = "此会话没有该任务"
+select = "请明确指哪个任务"
+select_question = "你是指哪项任务？可以在对应的任务卡里补充。"
+
+[places]
+two = "两"
+single = "找到一个地方：{{name}}。要去这里吗？"
+few = "找到{{count}}个地方：{{names}}。要去哪一个？"
+many = "找到{{count}}个地方，前三个是{{names}}。要去哪一个？"
+navigation_started = "导航设好了，去{{name}}。"
+
+[errors]
+audio_receiver_slow = "音频接收过慢，请重新连接"
+lookup_timeout = "查询超时，未取得结果。"
+lookup_failed = "查询服务返回异常，未取得结果。"
+vehicle_unclear = "车控需求还不能可靠确认。"
+dependency_no_receipt = "依赖动作未取得成功回执，本动作没有执行。"
+keep_changed = "要求保持的设置在等待期间发生了变化，本动作没有执行。"
+keep_write = "按最新车况执行会写入要求保持的设置，本动作没有执行。"
+keep_mutation = "按最新车况执行会改变要求保持的设置，本动作没有执行。"
+dependency_failed = "依赖动作未成功，未执行本动作。"
+keep_unconfirmed = "要求保持的设置在等待期间发生了变化，不能确认保持成功。"
+no_receipt = "未取得实际执行回执。"
+parameters = "设置参数没确认清楚，这次没有调整。请把要求说具体一点。"
+unavailable_tool = "这项功能暂时没能执行，请换个说法再试。"
+temperature_unit = "度"
+range = "{{label}}只能在{{minimum}}到{{maximum}}{{unit}}之间。"
+instruction_format = "这次的执行指令格式出了问题，没有调整。可以再试一次。"
+model_connection_pending = "后续处理时连接出了问题，还有请求没确认。请稍后再试。"
+model_connection = "连接出了问题，暂时没能回答。请稍后再试。"
+no_function = "这次没能确认可用的功能，请把需求再具体一点。"
+planner_unverified = "这次车控计划未能核实，没有下发其中的动作。请稍后重试。"
+planner_incomplete = "车控规划没有完成，计划中的动作没有下发。"
+planner_group_rejected = "车控计划没有通过整组核对，其中的动作都没有下发。"
+destination_unconfirmed = "目的地还没确认，暂时没有修改。你要去哪里？"
+area_unconfirmed = "你现在在哪个城市或者哪条路附近？"
+receipt_timeout = "未在时限内收到车端回执，执行状态尚未确认；请检查连接。"
+vehicle_rejected = "车端未能执行该操作。"
+followup_not_executed = "后续操作没有执行。"
+vehicle_failure = "抱歉，{{reasons}}"
+action_not_executed = "动作未执行"
+plan_not_executed = "车控计划未执行。"
+executor_rejected = "执行器拒绝"
+
+[errors.field]
+volume = "音量"
+temperature = "温度"
+level = "档位"
+position = "车窗开度"
+default = "这个数值"
+
+[vehicle]
+kept_settings = "要求保持的设置没动。"
+
+[maps]
+area_not_found = "没有找到“{{near}}”这个位置，请换个说法。"
+relevance_notice = "搜索相关性排序，不代表驾车距离最近。"
+no_places = "没有找到匹配地点，请提供更明确的位置或名称。"
+city_clarification = "请明确城市和国家或地区。"
+forecast_interval = "每日预报区间为当地07:00至次日07:00。"
+unknown_condition = "未知天气状况"
+fallback_notice = "Google天气不覆盖该地点；已改用Open-Meteo天气数据。"
+
+[weather]
+city_clarification = "请明确城市所在的国家或行政区。"
+city_not_found = "没有找到可确认的城市，请提供国家或更完整城市名称。"
+
+[manual]
+images_pending = "页面预览正在准备，可先打开原始 PDF 查看。"
+provider = "车书"
+page_caption = "说明书第 {{page}} 页（原始 PDF 整页预览）"
+images_unavailable = "部分页面预览暂不可用，可打开原始 PDF 查看。"
+
+[format.labels]
+summary = "结论"
+answer = "回答"
+spoken_summary = "结论"
+reason = "原因"
+error = "问题"
+temperature = "温度"
+status = "状态"
+
+[format]
+json_item = "{{label}}是{{value}}"
+true = "是"
+false = "否"
+none = "未提供"
+url_fallback = "相关链接在详情里。"
+
+[simulator]
+stale_command = "请求已失效，车辆未执行。"
+keep_changed = "要求保持的设置已改变，请重新确认。"
+keep_mutation = "动作会改变要求保持的设置。"
+
+[maps.conditions]
+code_0 = "晴"
+code_1 = "大部晴朗"
+code_2 = "局部多云"
+code_3 = "阴"
+code_45 = "雾"
+code_48 = "雾凇"
+code_51 = "小毛毛雨"
+code_53 = "中等毛毛雨"
+code_55 = "强毛毛雨"
+code_56 = "小冻毛毛雨"
+code_57 = "强冻毛毛雨"
+code_61 = "小雨"
+code_63 = "中雨"
+code_65 = "大雨"
+code_66 = "小冻雨"
+code_67 = "强冻雨"
+code_71 = "小雪"
+code_73 = "中雪"
+code_75 = "大雪"
+code_77 = "雪粒"
+code_80 = "小阵雨"
+code_81 = "中等阵雨"
+code_82 = "强阵雨"
+code_85 = "小阵雪"
+code_86 = "强阵雪"
+code_95 = "雷暴"
+code_96 = "雷暴伴小冰雹"
+code_99 = "雷暴伴大冰雹"
+
+[web_search]
+notice = "以下为网页搜索摘要，未读取或核实页面全文。"
+
+[task.db]
+step = "正在推理，第 {{step}} 步。"
+queued = "排队等待后台处理"
+running = "正在分析任务"
+cancel_pending = "正在取消，等待当前步骤边界"
+update_pending = "已接收新条件，后台将在步骤边界应用"
+clarification_label = "用户补充"

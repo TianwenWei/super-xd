@@ -1,22 +1,26 @@
 """Dispatch acknowledgements describe a request, never its completion."""
 from backend.catalog import TOOLS
+from backend.speech_config import feedback_text
 
 
 def dispatch_feedback(name, arguments, grouped=False):
     if TOOLS[name].state_mapping.get('operation') == 'read':
         return ''
     if grouped:
-        return '正在为你执行这组车控操作。'
+        return feedback_text('dispatch.grouped')
     if name == 'set_window_position':
-        seat = {'driver': '主驾', 'front_passenger': '副驾', 'rear_left': '左后', 'rear_right': '右后', 'all': '全部'}[arguments['window']]
+        seat = feedback_text('dispatch.seat.' + arguments['window'])
         position = arguments['position']
-        action = ('关闭' if position == 0 else '打开') + seat + '车窗' if position in (0, 100) else f'将{seat}车窗调到百分之{position}'
+        if position in (0, 100):
+            action = feedback_text('dispatch.set_window_position.closed' if position == 0 else 'dispatch.set_window_position.open', seat=seat)
+        else:
+            action = feedback_text('dispatch.set_window_position.partial', seat=seat, position=position)
     elif name == 'close_all_windows':
-        action = '关闭全部车窗'
+        action = feedback_text('dispatch.close_all_windows')
     elif name == 'set_navigation_destination':
-        action = '设置模拟导航目的地为' + arguments['destination']
+        action = feedback_text('dispatch.set_navigation_destination', destination=arguments['destination'])
     elif name == 'set_temperature':
-        action = f'将空调温度调到{arguments["temperature"]}度'
+        action = feedback_text('dispatch.set_temperature', temperature=arguments['temperature'])
     else:
-        action = '调整车辆设置'
-    return '正在为你' + action + '。'
+        action = feedback_text('dispatch.fallback')
+    return feedback_text('dispatch.text', action=action)

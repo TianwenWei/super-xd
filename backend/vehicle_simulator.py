@@ -1,4 +1,5 @@
 """Device-side authority, separate from the Talker's vehicle snapshot."""
+from backend.speech_config import feedback_text
 import asyncio
 from copy import deepcopy
 import math
@@ -76,16 +77,16 @@ class VehicleSimulator:
         result = {'ok': False, 'executed': False, 'name': wire['name'],
                   'arguments': deepcopy(wire['arguments']), 'resume_condition': None}
         if wire['turn_id'] in self.invalid_turns or command_id in self.expired_commands:
-            result.update(reason_code='stale_command', reason='请求已失效，车辆未执行。')
+            result.update(reason_code='stale_command', reason=feedback_text('simulator.stale_command'))
         else:
             try:
                 if any(_canonical(_value(self.state, path)) != _canonical(value) for path, value in keep.items()):
-                    raise ValueError('要求保持的设置已改变，请重新确认。')
+                    raise ValueError(feedback_text('simulator.keep_changed'))
                 validate_vehicle_action_keep(wire['name'], wire['arguments'], self.state, list(keep))
                 candidate = deepcopy(self.state)
                 outcome = execute_tool(wire['name'], wire['arguments'], candidate)
                 if outcome['ok'] and any(_canonical(_value(candidate, path)) != _canonical(value) for path, value in keep.items()):
-                    raise ValueError('动作会改变要求保持的设置。')
+                    raise ValueError(feedback_text('simulator.keep_mutation'))
                 result.update(outcome, executed=outcome['ok'])
                 if outcome['ok']:
                     if entry['place']:

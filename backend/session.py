@@ -1,4 +1,5 @@
 """Single-writer session actor. Network/model callbacks only enqueue events."""
+from backend.tool_text_config import tool_text
 import asyncio
 import copy
 import json
@@ -6,7 +7,6 @@ import logging
 import math
 import time
 import unicodedata
-from pathlib import Path
 from dataclasses import dataclass, field
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -15,7 +15,7 @@ from backend.catalog import TOOLS, SKILLS, HOT_TOOL_NAMES, initial_vehicle_state
 from backend.vehicle_planner import (VehicleControlPlanner, destination_grounded, validate_vehicle_plan,
                                      validate_vehicle_action_keep, _write_paths, _overlap)
 from backend.persona import PERSONAS, style_prompt, render
-from backend.prompt_templates import render_prompt
+from backend.prompt_templates import render_prompt, load_examples
 from backend.types import PersonaConfig, SessionSnapshot
 from backend.settings import TOOL_TIMEOUT
 from backend.models import utcnow, sanitized_error
@@ -26,6 +26,7 @@ from backend.web_search import WebSearchClient, WEB_TOOLS, WEB_BY_NAME
 from backend.manual_search import ManualSearchClient, MANUAL_TOOLS, MANUAL_BY_NAME
 from backend.vehicle_simulator import VehicleSimulator
 from backend.vehicle_feedback import dispatch_feedback
+from backend.speech_config import count_words, places_sentence, receipt_detail, spoken_reason, validation_feedback, feedback_text
 from backend.maps_tools import MAPS_TOOLS, MAPS_BY_NAME, READ_TOOLS
 from backend.textutil import halfwidth_alnum, is_domain, is_identifier, is_snake_code
 from backend.db import TERMINAL as TERMINAL_TASK, task_card
@@ -39,26 +40,26 @@ def function(name, description, properties=None, required=None):
             'parameters': {'type': 'object', 'properties': properties or {}, 'required': required or [], 'additionalProperties': False}}}
 
 STR = {'type': 'string', 'minLength': 1, 'maxLength': 4000}
-TASK_ID = {'type': 'string', 'minLength': 1, 'pattern': r'[\s\S]*\S[\s\S]*', 'description': '明确任务id；仅有一个活跃任务可省略'}
+TASK_ID = {'type': 'string', 'minLength': 1, 'pattern': r'[\s\S]*\S[\s\S]*', 'description': tool_text('common.task_id.description')}
 CONTROL_TOOLS = [
-    function('delegate_vehicle_control', '交给车控规划层：本轮有不在常驻工具里的车控，或者某个动作必须等另一个动作完成才能做。整句只交一次，同一次调用里不能再有任何车控函数。系统会把用户本轮原话和音区传过去，不要在参数里改写需求。结果以车辆回执为准。',
+    function('delegate_vehicle_control', tool_text('delegate_vehicle_control.description'),
              {'skill_ids': {'type': 'array', 'items': {'type': 'string', 'enum': list(SKILLS)},
                             'maxItems': 10, 'uniqueItems': True,
-                            'description': '涉及的车辆子系统；不能确定时传空数组，由车控规划层选择。'}}, ['skill_ids']),
-    function('delegate_task', '交给后台任务：多步调研、按多个条件比较后推荐，或者深入核实指定来源。简单实时事实和明确网页搜索用web_search；天气用get_weather，地点用search_places。goal 写全用户的所有条件。',
+                            'description': tool_text('delegate_vehicle_control.parameters.skill_ids.description')}}, ['skill_ids']),
+    function('delegate_task', tool_text('delegate_task.description'),
              {'goal': STR,
-              'spoken_goal': {'type': 'string', 'maxLength': 80, 'description': '一个动宾短语，8到15字，能接在"我帮你"后面，比如"挑能停车的火锅店"。不写来源要求，完整条件写在goal里。'},
-              'read_details': {'type': 'boolean', 'description': '仅用户明确要求详细朗读最终报告时为true，默认false'},
-              'query_domain': {'type': 'string', 'enum': ['weather', 'general'], 'description': '只有用户要求核实指定来源上的天气时填weather，此时query_mode必须是quick；普通天气查询用get_weather，不用本工具。其他任务填general。'},
-              'query_mode': {'type': 'string', 'enum': ['quick', 'research'], 'description': 'quick：一个明确的事实查询；research：比较、调研或多条件规划。缺少必要地点时先问用户，不委托空目标。'},
+              'spoken_goal': {'type': 'string', 'maxLength': 80, 'description': tool_text('delegate_task.parameters.spoken_goal.description')},
+              'read_details': {'type': 'boolean', 'description': tool_text('delegate_task.parameters.read_details.description')},
+              'query_domain': {'type': 'string', 'enum': ['weather', 'general'], 'description': tool_text('delegate_task.parameters.query_domain.description')},
+              'query_mode': {'type': 'string', 'enum': ['quick', 'research'], 'description': tool_text('delegate_task.parameters.query_mode.description')},
               'required_source_domains': {'type': 'array', 'maxItems': 5, 'uniqueItems': True,
                                           'items': {'type': 'string', 'minLength': 3, 'maxLength': 253},
-                                          'description': '仅当用户要求核实某个官方网站且你确知其域名时填写，如metoffice.gov.uk；不确定就不填，不要问用户要网址。'}}, ['goal']),
-    function('manage_task', '处理已有的后台任务。get读取进度或结果，可用task_ids一次读多个；reply回复正在等用户补充的任务；update补充或修改已有任务的条件；cancel取消任务。车控和新话题不用本工具。',
-             {'action': {'type':'string','enum':['get','reply','update','cancel'], 'description':'get读取进度或结果；reply回答等待补充任务的问题；update补充或修改已有任务条件；cancel取消任务。'}, 'task_id': TASK_ID,
-              'task_ids': {'type':'array','items':TASK_ID,'minItems':1,'maxItems':8,'uniqueItems':True,'description':'仅get可用，与task_id互斥；列出用户指的所有任务id'},
-              'text': {**STR, 'description':'reply时完整保留用户对等待问题的回答；update时完整保留新增或修改的条件，不丢地点、日期、筛选和来源要求。'},
-              'read_details': {'type':'boolean','description':'仅用户明确要求详细朗读已有结果时为true，默认false'}}, ['action']),
+                                          'description': tool_text('delegate_task.parameters.required_source_domains.description')}}, ['goal']),
+    function('manage_task', tool_text('manage_task.description'),
+             {'action': {'type':'string','enum':['get','reply','update','cancel'], 'description':tool_text('manage_task.parameters.action.description')}, 'task_id': TASK_ID,
+              'task_ids': {'type':'array','items':TASK_ID,'minItems':1,'maxItems':8,'uniqueItems':True,'description':tool_text('manage_task.parameters.task_ids.description')},
+              'text': {**STR, 'description':tool_text('manage_task.parameters.text.description')},
+              'read_details': {'type':'boolean','description':tool_text('manage_task.parameters.read_details.description')}}, ['action']),
 ]
 CONTROL_BY_NAME = {t['function']['name']: t for t in CONTROL_TOOLS}
 CORE_PROMPT = render_prompt(
@@ -69,34 +70,24 @@ TASK_SNAPSHOT_NOTICE = render_prompt('task_snapshot_notice')
 # Native tool-call few-shots for decisions. In live A/B runs prose examples
 # still dropped one of several requested actions (87/100 exact), and "先别开"
 # was sometimes sent as an "off" command; these examples gave 100/100.
-TALKER_EXAMPLES = json.loads((Path(__file__).parent / 'prompts' / 'talker_examples.json').read_text(encoding='utf-8'))
+TALKER_EXAMPLES = load_examples()
 
 
 DESTINATION_NOT_GROUNDED = {
     'ok': False, 'executed': False, 'retry_model': True, 'code': 'destination_not_in_request',
     'reason': '目的地必须逐字取自用户原话、近期对话或本会话查到的地点名，不能改写、补全或猜测；未执行。'
               '用户说的是相对地点（附近、最近）且没有给出位置时，直接问用户在哪里。',
-    'spoken_reason': '目的地还没确认，暂时没有修改。你要去哪里？'}
+    'spoken_reason': feedback_text('errors.destination_unconfirmed')}
 
 
 AREA_NOT_GROUNDED = {
     'ok': False, 'executed': False, 'retry_model': True, 'code': 'area_not_from_user',
     'reason': '搜索范围必须逐字取自用户说过的城市、地址或地标；没有定位能力，未搜索。请直接问用户现在在哪个城市或地址。',
-    'spoken_reason': '你现在在哪个城市或者哪条路附近？'}
+    'spoken_reason': feedback_text('errors.area_unconfirmed')}
 
 
-def count_words(n):
-    return '两' if n == 2 else spoken_number(n)
 
 
-def places_sentence(names):
-    """Spoken summary of search results; ordinals match the result card."""
-    names = [halfwidth_alnum(name) for name in names]  # Full-width letters read badly.
-    if len(names) == 1:
-        return f'找到一个地方：{names[0]}。要去这里吗？'
-    if len(names) <= 3:
-        return f'找到{count_words(len(names))}个地方：{"、".join(names)}。要去哪一个？'
-    return f'找到{count_words(len(names))}个地方，前三个是{"、".join(names[:3])}。要去哪一个？'
 
 
 FIRST_CLAUSE_MIN_CHARS = 8  # Shorter openers ("好，") wait for the rest of the sentence.
@@ -121,83 +112,10 @@ def same_state_value(left, right):
         right, ensure_ascii=False, sort_keys=True, allow_nan=False)
 
 
-def receipt_detail(name, args, result):
-    seat = {'driver': '主驾', 'front_passenger': '副驾', 'rear_left': '左后排', 'rear_right': '右后排'}
-    zone = {'all': '所有', 'driver': '主驾', 'front_passenger': '副驾', 'rear': '后排', 'front': '前排'}
-    enabled = '开启' if args.get('enabled') else '关闭'
-    if name == 'set_climate_power': return f'空调已{enabled}。'
-    if name == 'set_temperature': return f"{'' if args['zone'] == 'all' else zone.get(args['zone'], args['zone'])}空调调到{spoken_number(args['temperature'])}度了。"
-    if name == 'adjust_temperature':
-        temperatures = result['value']
-        selected = temperatures if args['zone'] == 'all' else {args['zone']: temperatures[args['zone']]}
-        if len(set(selected.values())) == 1:
-            label = '所有' if args['zone'] == 'all' else zone[args['zone']]
-            return f"{label}空调调到{spoken_number(next(iter(selected.values())))}度了。"
-        return '空调已调整为' + '、'.join(f"{zone[key]}{spoken_number(value)}度" for key, value in selected.items()) + '。'
-    if name == 'set_fan_speed': return f"风量设为{args['level']}档。"
-    if name == 'set_window_position':
-        position = args['position']
-        detail = '关好了' if position == 0 else '全打开了' if position == 100 else '打开一半了' if position == 50 else f'开到百分之{position:g}了'
-        return f"{seat.get(args['window'],args['window'])}车窗{detail}。"
-    if name == 'close_all_windows': return '全部车窗已关闭。'
-    if name == 'set_window_child_lock': return f"后排车窗童锁已{'开启' if result['value'] else '关闭'}。"
-    if name == 'set_seat_heating': return f"{seat.get(args['seat'],args['seat'])}座椅加热" + (f"设为{args['level']}档。" if args['level'] else '已关闭。')
-    if name == 'set_seat_ventilation': return f"{seat.get(args['seat'],args['seat'])}座椅通风" + (f"设为{args['level']}档。" if args['level'] else '已关闭。')
-    if name == 'set_seat_massage':
-        mode = {'relax': '放松', 'lumbar': '腰部', 'wave': '波浪', 'off': '关闭'}[args['mode']]
-        return f"{seat.get(args['seat'],args['seat'])}座椅按摩已关闭。" if args['mode'] == 'off' else f"{seat.get(args['seat'],args['seat'])}座椅按摩设为{mode}模式。"
-    if name == 'set_seat_position':
-        axis = {'fore_aft': '前后位置', 'height': '高度', 'backrest': '靠背角度', 'lumbar': '腰托位置'}[args['axis']]
-        value = spoken_number(result['value'])
-        target = f'{value}度' if args['axis'] == 'backrest' else f'百分之{value}'
-        return f"{seat.get(args['seat'], args['seat'])}座椅{axis}设为{target}。"
-    if name == 'set_interior_light': return f"{zone.get(args.get('zone'), '')}车内灯已{enabled}。"
-    if name == 'set_volume': return f"音量调到百分之{args['volume']}了。"
-    if name == 'control_playback': return {'play':'已开始播放。','pause':'已暂停播放。','next':'已切到下一首。','previous':'已切到上一首。','stop':'已停止播放。'}.get(args.get('action'), '播放状态已更新。')
-    if name == 'set_navigation_destination': return f"模拟导航目的地已设为{args['destination']}。"
-    if name == 'set_mirror_heating': return f'后视镜加热已{enabled}。'
-    if name == 'set_mirror_fold': return f"左右后视镜已{'折叠' if result['value'] else '展开'}。"
-    if name == 'set_steering_heating': return f'方向盘加热已{enabled}。'
-    if name == 'set_reading_light': return f"{seat.get(args['seat'], args['seat'])}阅读灯已{enabled}。"
-    if name == 'set_ambient_light': return f'氛围灯已{enabled}。'
-    if name == 'set_ambient_color': return '氛围灯颜色设为' + {'white':'白色','warm':'暖色','red':'红色','blue':'蓝色','green':'绿色','purple':'紫色'}[args['color']] + '。'
-    if name == 'set_ambient_brightness': return f"氛围灯亮度设为百分之{args['brightness']}。"
-    if name == 'set_child_lock': return f"{'左' if args['side'] == 'left' else '右'}后门儿童安全锁已{enabled}。"
-    if name == 'set_door_lock': return f"{'全部' if args['door'] == 'all' else seat.get(args['door'],args['door'])}车门已{'锁定' if args['locked'] else '解锁'}。"
-    if name in {'lock_all_doors', 'unlock_all_doors'}: return f"全部车门已{'锁定' if name == 'lock_all_doors' else '解锁'}。"
-    if name == 'set_tailgate_open': return f"尾门已{'开启' if args['open'] else '关闭'}。"
-    if name == 'set_tailgate_height': return f"尾门下次开启高度设为百分之{args['height']}。"
-    if name == 'set_wiper_mode': return '前雨刷已关闭。' if args['mode'] == 'off' else '前雨刷设为' + {'auto':'自动','intermittent':'间歇','low':'低速','high':'高速'}[args['mode']] + '模式。'
-    if name == 'set_wiper_interval': return f"间歇雨刷间隔设为{args['seconds']}秒。"
-    if name == 'set_rain_sensitivity': return f"自动雨刷雨量灵敏度设为{spoken_number(result['value'])}档。"
-    if name == 'set_rear_wiper': return f'后雨刷已{enabled}。'
-    if name == 'wash_windshield': return f"{'前' if args['target'] == 'front' else '后'}挡风玻璃已清洗。"
-    if name in {'set_sunroof_position', 'set_sunshade_position'}: return f"{'天窗' if name == 'set_sunroof_position' else '遮阳帘'}开度设为百分之{args['position']}。"
-    description = TOOLS[name].description.replace('（模拟车控）', '')
-    if name.startswith('get_'): return description + '已完成，可在车况面板核对。'
-    return description + '已完成，可在车况面板核对。'
 
 
-def spoken_reason(reason):
-    """Keep physical refusal conditions; move protocol/schema detail to trace."""
-    text = str(reason)
-    if text.startswith('参数校验失败'):
-        return '设置参数没确认清楚，这次没有调整。请把要求说具体一点。'
-    if any(marker in text for marker in ('load_skill', 'skill_id', '未知工具', '未知函数')):
-        return '这项功能暂时没能执行，请换个说法再试。'
-    return text
 
 
-def validation_feedback(exc, name):
-    if isinstance(exc, ValidationError):
-        field_name = next(iter(exc.path), None)
-        spec = TOOLS[name].parameters.get('properties', {}).get(field_name, {}) if name in TOOLS else {}
-        if exc.validator in {'minimum', 'maximum'} and 'minimum' in spec and 'maximum' in spec:
-            label = {'volume': '音量', 'temperature': '温度', 'level': '档位', 'position': '车窗开度'}.get(field_name, '这个数值')
-            unit = '度' if field_name == 'temperature' else ''
-            return f'{label}只能在{spoken_number(spec["minimum"])}到{spoken_number(spec["maximum"])}{unit}之间。'
-        return '这次的执行指令格式出了问题，没有调整。可以再试一次。'
-    return spoken_reason(f'参数校验失败：{str(exc).splitlines()[0][:180]}')
 
 
 @dataclass
@@ -341,7 +259,7 @@ class SessionActor:
             if client.qsize() >= 256:
                 self.audio_clients.discard(client)
                 while not client.empty(): client.get_nowait()
-                client.put_nowait({'type': 'audio.error', 'message': '音频接收过慢，请重新连接'})
+                client.put_nowait({'type': 'audio.error', 'message': feedback_text('errors.audio_receiver_slow')})
                 client.put_nowait(None)
             else:
                 client.put_nowait(message)
@@ -707,7 +625,7 @@ class SessionActor:
                 verified = self.receipt_feedback(turn, mutations_only=True, failures_only=bool(turn.preface))
                 if verified:
                     self.append_text(turn, verified, speak=not turn.dispatch_announced, source='verified_partial_receipts')
-                self.append_text(turn, render(turn.persona, 'error', '后续处理时连接出了问题，还有请求没确认。请稍后再试。' if verified else '连接出了问题，暂时没能回答。请稍后再试。'),
+                self.append_text(turn, render(turn.persona, 'error', feedback_text('errors.model_connection_pending') if verified else feedback_text('errors.model_connection')),
                                  source='error_template', original_text=e['error'])
                 self.finish(turn, error=e['error'])
         elif kind == '_tool_result':
@@ -725,7 +643,7 @@ class SessionActor:
                        call_id=call['id'], status='failed' if self.is_current(turn) else 'stale')
             self.tool_result(turn, call, {'ok': False, 'executed': False, 'source': 'vehicle_plan',
                 'code': 'vehicle_planning_failed', 'reason': e['error'],
-                'spoken_reason': '这次车控计划未能核实，没有下发其中的动作。请稍后重试。'})
+                'spoken_reason': feedback_text('errors.planner_unverified')})
         elif kind == 'vehicle.configure':
             self.vehicle = self.simulator.configure(e.get('settings', {}))
             self.vehicle_version = self.simulator.version
@@ -861,7 +779,7 @@ class SessionActor:
             verified = self.receipt_feedback(turn, mutations_only=True)
             if verified:
                 self.append_text(turn, verified, speak=not turn.dispatch_announced, source='verified_partial_receipts')
-            self.append_text(turn, '这次没能确认可用的功能，请把需求再具体一点。')
+            self.append_text(turn, feedback_text('errors.no_function'))
             self.finish(turn, error='model_step_limit')
             return
         # One streamed call both decides and speaks; a separate routing call cost
@@ -1073,11 +991,11 @@ class SessionActor:
             except MapsError as exc:
                 result = {'ok': False, 'code': exc.code, 'reason': str(exc)}
             except TimeoutError:
-                result = {'ok': False, 'code': 'timeout', 'reason': '查询超时，未取得结果。'}
+                result = {'ok': False, 'code': 'timeout', 'reason': feedback_text('errors.lookup_timeout')}
             except RuntimeError as exc:
                 result = {'ok': False, 'code': 'lookup_error', 'reason': sanitized_error(exc)}
             except Exception:
-                result = {'ok': False, 'code': 'lookup_error', 'reason': '查询服务返回异常，未取得结果。'}
+                result = {'ok': False, 'code': 'lookup_error', 'reason': feedback_text('errors.lookup_failed')}
             result['elapsed_ms'] = round((time.perf_counter() - started) * 1000, 1)
             await self.post({'type': '_lookup_result', 'turn': turn, 'call': call, 'result': result})
         turn.lookup_tasks[call['id']] = self.spawn(lookup())
@@ -1222,7 +1140,7 @@ class SessionActor:
                 'plan_call_id': plan.get('plan_call_id'), 'model_call_id': plan.get('model_call_id'),
                 'model_calls': plan.get('model_calls'), 'intents': [], 'action_receipts': [],
                 'keep_paths': [], 'read_results': [],
-                'spoken_reason': '车控规划没有完成，计划中的动作没有下发。'})
+                'spoken_reason': feedback_text('errors.planner_incomplete')})
             return
         try:
             # This is a fresh-state, whole-plan preflight. Simulation is never
@@ -1241,7 +1159,7 @@ class SessionActor:
                        call_id=call['id'], status='rejected')
             self.tool_result(turn, call, {'ok': False, 'executed': False, 'source': 'vehicle_plan',
                 'code': 'vehicle_plan_invalid', 'reason': str(exc),
-                'spoken_reason': '车控计划没有通过整组核对，其中的动作都没有下发。'})
+                'spoken_reason': feedback_text('errors.planner_group_rejected')})
             return
         if validated.get('status') != 'planned':
             question = validated.get('question') or next((item.get('question') for item in validated.get('intents', []) if item.get('question')), None)
@@ -1251,7 +1169,7 @@ class SessionActor:
                 'intents': validated.get('intents', []), 'action_receipts': [],
                 'keep_paths': validated.get('keep_paths', []), 'read_results': [],
                 'plan_call_id': validated.get('plan_call_id'),
-                'reason': question or reason or '车控需求还不能可靠确认。'})
+                'reason': question or reason or feedback_text('errors.vehicle_unclear')})
             return
         self.trace('vehicle.plan.accepted', {'agent': 'vehicle_planner', 'source': 'vehicle_planner',
                    'parent_call_id': call['id'], 'plan': validated, 'executed': False}, turn,
@@ -1283,20 +1201,20 @@ class SessionActor:
             outcomes = {item['action_id']: item['status'] for item in execution['action_receipts']}
             if any(outcomes.get(dependency) != 'completed' for dependency in action.get('depends_on', [])):
                 return {**base, 'code': 'vehicle_plan_dependency_failed',
-                        'reason': '依赖动作未取得成功回执，本动作没有执行。', 'state': copy.deepcopy(self.vehicle)}
+                        'reason': feedback_text('errors.dependency_no_receipt'), 'state': copy.deepcopy(self.vehicle)}
             constraints = [{'path': path, 'expected': copy.deepcopy(expected),
                             'actual': state_path_value(self.vehicle, path)}
                            for path, expected in execution['keep_baseline'].items()]
             if any(not same_state_value(item['expected'], item['actual']) for item in constraints):
                 return {**base, 'code': 'vehicle_plan_keep_changed', 'keep_constraints': constraints,
-                        'reason': '要求保持的设置在等待期间发生了变化，本动作没有执行。',
+                        'reason': feedback_text('errors.keep_changed'),
                         'state': copy.deepcopy(self.vehicle)}
             try:
                 validate_vehicle_action_keep(action['name'], action['arguments'], self.vehicle,
                                              execution['plan'].get('keep_paths', []))
             except ValueError as exc:
                 return {**base, 'code': 'vehicle_plan_keep_conflict', 'validation_reason': str(exc),
-                        'reason': '按最新车况执行会写入要求保持的设置，本动作没有执行。',
+                        'reason': feedback_text('errors.keep_write'),
                         'state': copy.deepcopy(self.vehicle)}
             self.validate_planned_action(turn, execution['plan'], action, self.vehicle)
             candidate = copy.deepcopy(self.vehicle)
@@ -1311,7 +1229,7 @@ class SessionActor:
                        if not same_state_value(expected, state_path_value(candidate, path))]
             if changed:
                 return {**base, 'code': 'vehicle_plan_keep_conflict', 'keep_constraints': changed,
-                        'reason': '按最新车况执行会改变要求保持的设置，本动作没有执行。',
+                        'reason': feedback_text('errors.keep_mutation'),
                         'state': copy.deepcopy(self.vehicle)}
             self.vehicle.clear()
             self.vehicle.update(candidate)
@@ -1351,7 +1269,7 @@ class SessionActor:
                 continue
             if any(outcomes.get(dependency) != 'completed' for dependency in action.get('depends_on', [])):
                 execution['action_receipts'].append({**receipt, 'status': 'blocked',
-                    'result': {'ok': False, 'executed': False, 'reason': '依赖动作未成功，未执行本动作。'}})
+                    'result': {'ok': False, 'executed': False, 'reason': feedback_text('errors.dependency_failed')}})
                 continue
             try:
                 self.validate_planned_action(turn, execution['plan'], action, self.vehicle)
@@ -1409,12 +1327,12 @@ class SessionActor:
                                 for path in intent['keep_paths'])
                 intent['status'] = 'kept' if unchanged else 'failed'
                 if not unchanged:
-                    intent['reason'] = '要求保持的设置在等待期间发生了变化，不能确认保持成功。'
+                    intent['reason'] = feedback_text('errors.keep_unconfirmed')
             elif bound and all(item['status'] == 'completed' for item in bound):
                 intent['status'] = 'completed'
             else:
                 intent['status'] = next((item['status'] for item in bound if item['status'] != 'completed'), 'failed')
-                intent['reason'] = next((item['result'].get('reason') for item in bound if not item['result'].get('ok')), '未取得实际执行回执。')
+                intent['reason'] = next((item['result'].get('reason') for item in bound if not item['result'].get('ok')), feedback_text('errors.no_receipt'))
             intents.append(intent)
         reads = [copy.deepcopy(item) for item in receipts if TOOLS[item['name']].state_mapping.get('operation') == 'read'
                  and item['result'].get('ok')]
@@ -1444,15 +1362,15 @@ class SessionActor:
                 feedback.append(render(turn.persona, 'success', receipt_detail(name, item['arguments'], body)))
             elif not mutations_only:
                 kind = 'result' if body.get('reason_code') == 'receipt_timeout' else 'refused'
-                feedback.append(render(turn.persona, kind, body.get('spoken_reason') or spoken_reason(body.get('reason', '动作未执行'))))
+                feedback.append(render(turn.persona, kind, body.get('spoken_reason') or spoken_reason(body.get('reason', feedback_text('errors.action_not_executed')))))
         if not mutations_only:
             if not failures_only and any(item.get('status') == 'kept' for item in result.get('intents', [])):
-                feedback.append('要求保持的设置没动。')
+                feedback.append(feedback_text('vehicle.kept_settings'))
             feedback.extend(item['reason'] for item in result.get('intents', [])
                             if item.get('status') == 'failed' and item.get('keep_paths') and item.get('reason'))
             if not result.get('action_receipts') and not result.get('ok'):
                 feedback.append(render(turn.persona, 'clarify' if result.get('needs_clarification') else 'refused',
-                    result.get('spoken_reason') or spoken_reason(result.get('reason', '车控计划未执行。'))))
+                    result.get('spoken_reason') or spoken_reason(result.get('reason', feedback_text('errors.plan_not_executed')))))
         return feedback
 
     def vehicle_plan_error(self, turn):
@@ -1475,13 +1393,13 @@ class SessionActor:
                           'reason': '本会话尚无后台任务，不能manage_task。请根据本轮原句重新选择直接回答或实际可用功能；车控缺功能时delegate_vehicle_control，不要创建无关后台任务。'}
         if task_id:
             found = next((t for t in tasks if t['id'] == task_id), None)
-            return found, None if found else {'ok': False, 'reason': '此会话没有该任务'}
+            return found, None if found else {'ok': False, 'reason': feedback_text('task.not_found')}
         active = [t for t in tasks if t['status'] not in {'completed', 'failed', 'cancelled'}]
         if len(active) == 1:
             return active[0], None
         if not active and len(tasks) == 1:
             return tasks[0], None
-        return None, {'ok': False, 'needs_clarification': True, 'reason': '请明确指哪个任务',
+        return None, {'ok': False, 'needs_clarification': True, 'reason': feedback_text('task.select'),
                       'candidates': [{'id': t['id'], 'goal': t['goal'], 'status': t['status']} for t in (active or tasks)[-8:]]}
 
     def task_context(self, origin_turn_id=None, read_details=False, query_mode='research', spoken_goal=None,
@@ -1568,7 +1486,7 @@ class SessionActor:
             if task['status'] == 'completed' and isinstance(result, dict):
                 detail = result.get('summary', '') if args.get('read_details') is True else result.get('spoken_summary') or brief_result(result.get('summary', ''))
                 if result.get('partial') is True:
-                    detail = '先给你部分结果，完整需求还没有全部核实。' + detail
+                    detail = feedback_text('task.partial_prefix') + detail
             else:
                 detail = task_user_detail(task)
             return {'ok': True, 'task': task, 'feedback_kind': 'progress', 'detail': detail}
@@ -1576,7 +1494,7 @@ class SessionActor:
         self.launch_task_write(self.db.mutate_task, (task['id'], action, args.get('text', ''), args.get('expected_revision')),
                                turn=turn, call=call,
                                meta={'kind': 'cancel' if action == 'cancel' else 'updated',
-                                     'detail': '正在取消这项任务。' if action == 'cancel' else '新条件记下了，会按这些要求继续。'})
+                                     'detail': feedback_text('task.cancelling') if action == 'cancel' else feedback_text('task.updated')})
         return None
 
     def launch_task_write(self, operation, arguments, *, turn=None, call=None, meta=None):
@@ -1681,7 +1599,7 @@ class SessionActor:
         if result.get('ok') and poi:
             self.vehicle['navigation']['destination_place'] = copy.deepcopy(poi)
             result['state'] = copy.deepcopy(self.vehicle)
-            result.update(feedback_kind='result', detail=f'导航设好了，去{halfwidth_alnum(poi["name"])}。',
+            result.update(feedback_kind='result', detail=feedback_text('places.navigation_started', name=halfwidth_alnum(poi["name"])),
                           place=copy.deepcopy(poi))
         latency = (time.perf_counter() - turn.started) * 1000
         self.completed_commands[command_id] = result
@@ -1710,7 +1628,7 @@ class SessionActor:
                        call_id=command['call']['id'], status='stale')
             return
         result = {'ok': False, 'reason_code': 'receipt_timeout', 'resume_condition': None,
-                  'reason': '未在时限内收到车端回执，执行状态尚未确认；请检查连接。'}
+                  'reason': feedback_text('errors.receipt_timeout')}
         self.completed_commands[command_id] = result
         attribution = {key: command['wire'][key] for key in ('source', 'parent_call_id', 'plan_call_id', 'action_id', 'intent_id') if key in command['wire']}
         self.trace('vehicle.receipt', {**attribution, 'command_id': command_id, 'result': result, 'timeout': True,
@@ -1807,13 +1725,13 @@ class SessionActor:
         for command in turn.commands:
             result = self.completed_commands.get(command['command_id'])
             if result and not result.get('ok'):
-                failures.append(result.get('reason') or '车端未能执行该操作。')
+                failures.append(result.get('reason') or feedback_text('errors.vehicle_rejected'))
         for execution in turn.vehicle_plans.values():
             for receipt in execution['action_receipts']:
                 if receipt['status'] not in {'completed'} and not receipt.get('command_id'):
-                    failures.append(receipt['result'].get('reason') or '后续操作没有执行。')
+                    failures.append(receipt['result'].get('reason') or feedback_text('errors.followup_not_executed'))
         if failures:
-            self.feed_audio(turn, '抱歉，' + '；'.join(dict.fromkeys(failures)), 'vehicle_failure')
+            self.feed_audio(turn, feedback_text('errors.vehicle_failure', reasons='；'.join(dict.fromkeys(failures))), 'vehicle_failure')
 
     def receipt_feedback(self, turn, mutations_only=False, failures_only=False):
         """Spoken results from receipts. failures_only drops plain success
@@ -1844,9 +1762,9 @@ class SessionActor:
                     # Values are from the verified receipt, never generated claims.
                     feedback.append(render(turn.persona, 'success', receipt_detail(item['function']['name'], json.loads(item['function']['arguments']), body)))
             else:
-                detail = body.get('spoken_reason') or spoken_reason(body.get('reason', body.get('error', '执行器拒绝')))
+                detail = body.get('spoken_reason') or spoken_reason(body.get('reason', body.get('error', feedback_text('errors.executor_rejected'))))
                 if body.get('candidates'):
-                    detail = '你是指哪项任务？可以在对应的任务卡里补充。'
+                    detail = feedback_text('task.select_question')
                 kind = ('clarify' if body.get('needs_clarification') else
                         'result' if body.get('reason_code') == 'receipt_timeout' else 'refused')
                 feedback.append(render(turn.persona, kind, detail))
@@ -1924,7 +1842,7 @@ class SessionActor:
         selected = full_report if read_details else (result.get('spoken_summary') if isinstance(result, dict) else None) or brief_result(str(full_report))
         detail = task_user_detail(task) if progress_notice or task['status'] != 'completed' else selected
         if task['status'] == 'completed' and isinstance(result, dict) and result.get('partial') is True:
-            detail = '先给你部分结果，完整需求还没有全部核实。' + detail
+            detail = feedback_text('task.partial_prefix') + detail
         # Suggestions are validated against the latest state. They are not auto-applied based on old context.
         suggestions = result.get('actions', result.get('suggested_actions', [])) if isinstance(result, dict) and task['status'] == 'completed' else []
         if suggestions:
@@ -1934,7 +1852,7 @@ class SessionActor:
                 probe = execute_tool(name, args, copy.deepcopy(self.vehicle)) if name in TOOLS else {'ok': False, 'reason': '未知函数'}
                 checks.append({'name': name, 'arguments': args, 'valid': probe['ok'], 'reason': probe.get('reason')})
             self.emit('ui.card', task={**task, 'validated_actions': checks})
-            detail += '这些只是建议，还没有调整车辆。你想先做哪一项？'
+            detail += feedback_text('task.suggestions')
         turn = Turn(uuid4().hex[:12], '', self.persona.model_copy(deep=True), self.persona_version)
         turn.proactive, turn.task_id = True, task_id
         self.current = turn
