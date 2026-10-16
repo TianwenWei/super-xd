@@ -871,3 +871,19 @@ def test_first_clause_is_fed_at_a_comma_later_ones_at_sentence_ends(tmp_path):
     turn.sentence_buffer = '好，这就把主驾调到二十三度，音量调到三十五，副驾不动。'
     actor.feed_sentences(turn)
     assert fed == ['好，这就把主驾调到二十三度，', '音量调到三十五，副驾不动。']
+
+
+async def test_voice_activity_stops_speech_but_keeps_dispatched_vehicle_command(make_actor):
+    actor, q, _ = await make_actor([{'content': '这就关车窗。', 'tool_calls': [call('close_all_windows', id='w')]}])
+    actor.vehicle['windows']['positions']['driver'] = 40
+    actor.simulator.state['windows']['positions']['driver'] = 40
+    await actor.post({'type': 'input', 'text': '关上车窗'})
+    command, _ = await wait_for(q, 'vehicle.command')
+    turn = actor.current
+    await actor.post({'type': 'asr.capture', 'capture_id': 'cough', 'active': True, 'interrupt': True})
+    await actor.queue.join()
+    assert turn.audio_cancelled.is_set() and not turn.interrupted
+    receipt = await actor.simulator.execute(command['command_id'])
+    await actor.post({'type': 'vehicle.receipt', 'command_id': command['command_id'], 'receipt_id': receipt['receipt_id']})
+    done, _ = await wait_for(q, 'stream.done')
+    assert receipt['ok'] and actor.vehicle['windows']['positions']['driver'] == 0

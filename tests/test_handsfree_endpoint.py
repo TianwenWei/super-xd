@@ -122,7 +122,7 @@ async def start_speech(socket, asr):
     return capture
 
 
-async def test_silence_has_no_asr_and_speech_interrupts_model_before_final(voice):
+async def test_silence_has_no_asr_and_speech_only_stops_playback_before_final(voice):
     actor, socket, asr = voice
     await actor.post({'type': 'input', 'text': '讲个故事'})
     await actor.queue.join()
@@ -130,7 +130,8 @@ async def test_silence_has_no_asr_and_speech_interrupts_model_before_final(voice
     vehicle = deepcopy(actor.vehicle)
     capture = await start_speech(socket, asr)
     await actor.queue.join()
-    assert old.finished and old.interrupted and old.audio_cancelled.is_set()
+    # Noise must not void the turn's work; only a final transcript starts a new turn.
+    assert not old.interrupted and old.audio_cancelled.is_set()
     assert actor.asr_capture_id == capture
     assert len(actor.turns) == 1 and actor.vehicle == vehicle
     assert len(asr.connections) == 1

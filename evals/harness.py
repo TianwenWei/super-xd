@@ -226,7 +226,27 @@ async def run_case(case, ark, *, persona='warm', planner=None, maps=None, repeat
             await actor.close()
 
 
+def free_text_fields():
+    """Per tool, string parameters without an enum (queries, goals, free text)."""
+    from backend.catalog import TOOLS
+    from backend.session import CONTROL_TOOLS
+    from backend.maps_tools import MAPS_TOOLS
+    from backend.web_search import WEB_TOOLS
+    from backend.manual_search import MANUAL_TOOLS
+    schemas = {name: spec.parameters for name, spec in TOOLS.items()}
+    schemas.update({t['function']['name']: t['function']['parameters']
+                    for t in CONTROL_TOOLS + MAPS_TOOLS + WEB_TOOLS + MANUAL_TOOLS})
+    return {name: {key for key, prop in schema.get('properties', {}).items()
+                   if prop.get('type') == 'string' and 'enum' not in prop}
+            for name, schema in schemas.items()}
+
+
+FREE_TEXT = free_text_fields()
+
+
 def persona_signature(result):
+    """Tool names plus structured arguments. Free-text wording (a search query,
+    a task goal) varies with sampling and is not what invariant 6 is about."""
     def canonical(value):
         if isinstance(value, dict):
             return {key: canonical(item) for key, item in value.items()}
@@ -234,8 +254,12 @@ def persona_signature(result):
             return [canonical(item) for item in value]
         # JSON numbers share value semantics; 24 and 24.0 are the same setting.
         return int(value) if type(value) is float and value.is_integer() else value
-    return [[(c['name'], json.dumps(canonical(c['arguments']), sort_keys=True, ensure_ascii=False)) for c in turn.get('talker_calls', [])]
-            + [(c['name'], json.dumps(canonical(c['arguments']), sort_keys=True, ensure_ascii=False)) for c in turn.get('commands', [])]
+
+    def key(call):
+        arguments = {k: v for k, v in call['arguments'].items() if k not in FREE_TEXT.get(call['name'], ())} \
+            if isinstance(call['arguments'], dict) else call['arguments']
+        return (call['name'], json.dumps(canonical(arguments), sort_keys=True, ensure_ascii=False))
+    return [[key(c) for c in turn.get('talker_calls', [])] + [key(c) for c in turn.get('commands', [])]
             for turn in result['turns']]
 
 

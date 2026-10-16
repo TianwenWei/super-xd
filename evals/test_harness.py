@@ -79,3 +79,15 @@ async def test_runner_drives_simulated_device_and_checks_persona_invariance():
     assert {k: summary[k] for k in ('total', 'passed', 'pass_rate', 'failed')} == {'total': 2, 'passed': 2, 'pass_rate': 1.0, 'failed': {}}
     assert summary['latency']['all']['turns'] == 2
     assert results[0]['turns'][0]['commands'] == [{'name': 'set_volume', 'arguments': {'volume': 35}, 'source': 'talker'}]
+
+
+def test_persona_signature_ignores_free_text_but_not_structured_arguments():
+    from evals.harness import persona_signature
+    def run(calls):
+        return {'turns': [{'talker_calls': calls, 'commands': []}]}
+    a = run([{'name': 'web_search', 'arguments': {'query': '最新的Python版本'}}])
+    b = run([{'name': 'web_search', 'arguments': {'query': '现在最新的Python正式版'}}])
+    c = run([{'name': 'set_temperature', 'arguments': {'zone': 'driver', 'temperature': 23}}])
+    d = run([{'name': 'set_temperature', 'arguments': {'zone': 'all', 'temperature': 23}}])
+    assert persona_signature(a) == persona_signature(b)
+    assert persona_signature(c) != persona_signature(d)

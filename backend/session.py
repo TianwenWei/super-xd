@@ -545,10 +545,12 @@ class SessionActor:
                 if self.asr_capture_id == capture_id:
                     return
                 self.asr_capture_id = capture_id
-                if e.get('interrupt') is True:
-                    self.interrupt_current('voice_activity')
+                # Voice activity only stops playback. VAD cannot tell speech from a
+                # cough, road noise or our own speaker echo, so cancelling the turn
+                # here would also void already-dispatched vehicle commands. A real
+                # utterance arrives as input and start_turn interrupts the old turn.
                 if self.current:
-                    self.cancel_audio(self.current, 'asr_capture')
+                    self.cancel_audio(self.current, 'voice_activity' if e.get('interrupt') is True else 'asr_capture')
                 self.speaking = False
                 async def expire_capture():
                     await asyncio.sleep(90)
@@ -712,6 +714,8 @@ class SessionActor:
             self.tool_result(e['turn'], e['call'], e['result'])
         elif kind == '_lookup_result':
             self.accept_lookup(e['turn'], e['call'], e['result'])
+        elif kind == '_manual_images':
+            self.manual_images_done(e['turn'], e['call_id'], e['result'])
         elif kind == '_vehicle_plan_done':
             self.accept_vehicle_plan(e['turn'], e['call'], e['plan'])
         elif kind == '_vehicle_plan_error':
@@ -1093,7 +1097,28 @@ class SessionActor:
             record = {'call_id': call['id'], 'tool': call['function']['name'], 'result': copy.deepcopy(result)}
             turn.lookup_results.append(record)
             self.emit('lookup.result', turn_id=turn.id, **record)
+            if call['function']['name'] in MANUAL_BY_NAME and result.get('ok') and hasattr(self.manual, 'with_page_images'):
+                self.launch_manual_images(turn, call, copy.deepcopy(result))
         self.tool_result(turn, call, result)
+
+    def launch_manual_images(self, turn, call, result):
+        async def render():
+            try:
+                updated = await self.manual.with_page_images(result)
+            except Exception as exc:  # The card keeps its text evidence and PDF link.
+                self.trace('manual.images.error', {'error': sanitized_error(exc)}, turn, call_id=call['id'], status='failed')
+                return
+            await self.post({'type': '_manual_images', 'turn': turn, 'call_id': call['id'], 'result': updated})
+        self.spawn(render())
+
+    def manual_images_done(self, turn, call_id, result):
+        # Display-only card data; an interrupted turn's card is not updated.
+        if turn.interrupted:
+            return
+        for record in turn.lookup_results:
+            if record['call_id'] == call_id:
+                record['result'] = copy.deepcopy(result)
+                self.emit('lookup.result', turn_id=turn.id, **record)
 
     def poi_error(self, turn, place_id):
         if place_id not in self.places:

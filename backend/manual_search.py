@@ -17,6 +17,7 @@ from backend.prompt_templates import load_prompt
 from backend.settings import ROOT
 
 DEFAULT_INDEX = ROOT / 'data/manuals/denza_d9.sqlite3'
+PAGE_IMAGES_PENDING = '页面预览正在准备，可先打开原始 PDF 查看。'
 MANUAL_TOOLS = [{
     'type': 'function', 'function': {
         'name': 'search_manual',
@@ -192,6 +193,23 @@ class ManualSearchClient:
 
         hits, local_ms = await asyncio.to_thread(rank)
         manual_id = meta['source_sha256'][:16]
+        # Page images are for the result card only. Rendering them (pdftoppm,
+        # up to seconds per cold page) must not delay the spoken answer, so the
+        # caller attaches them afterwards with with_page_images().
+        for hit in hits:
+            hit['images'] = []
+        return {'ok': True, 'kind': 'manual', 'provider': '车书', 'query': query,
+                'manual': {'title': Path(meta['source_pdf']).stem, 'pages': meta['pages'],
+                           'id': manual_id, 'pdf_url': '/api/manual/pdf'},
+                'hits': hits, 'evidence': 'manual_text', 'notice': meta['notice'],
+                'queried_at': utcnow(), 'embedding_ms': embedding_ms,
+                'local_search_ms': local_ms, 'cache_hit': cached is not None,
+                'image_notice': PAGE_IMAGES_PENDING,
+                '_embedding_trace': embedding_trace}
+
+    async def with_page_images(self, result):
+        """Copy of a search result whose hits list only pages that actually rendered."""
+        manual_id = result['manual']['id']
 
         async def image_for_page(page):
             try:
@@ -201,18 +219,11 @@ class ManualSearchClient:
             return [{'url': f'/api/manual/{manual_id}/pages/{page}.png', 'page': page,
                      'caption': f'说明书第 {page} 页（原始 PDF 整页预览）'}]
 
-        pages = list(dict.fromkeys(hit['page'] for hit in hits))
+        pages = list(dict.fromkeys(hit['page'] for hit in result['hits']))
         images = dict(zip(pages, await asyncio.gather(*(image_for_page(page) for page in pages))))
-        for hit in hits:
-            hit['images'] = images[hit['page']]
-        return {'ok': True, 'kind': 'manual', 'provider': '车书', 'query': query,
-                'manual': {'title': Path(meta['source_pdf']).stem, 'pages': meta['pages'],
-                           'id': manual_id, 'pdf_url': '/api/manual/pdf'},
-                'hits': hits, 'evidence': 'manual_text', 'notice': meta['notice'],
-                'queried_at': utcnow(), 'embedding_ms': embedding_ms,
-                'local_search_ms': local_ms, 'cache_hit': cached is not None,
-                'image_notice': '' if all(images.values()) else '部分页面预览暂不可用，可打开原始 PDF 查看。',
-                '_embedding_trace': embedding_trace}
+        hits = [{**hit, 'images': images[hit['page']]} for hit in result['hits']]
+        return {**result, 'hits': hits,
+                'image_notice': '' if all(images.values()) else '部分页面预览暂不可用，可打开原始 PDF 查看。'}
 
     async def aclose(self):
         if self.owns_embeddings:

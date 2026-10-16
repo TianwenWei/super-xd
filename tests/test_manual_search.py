@@ -188,3 +188,51 @@ async def test_invalid_manual_arguments_never_execute(manual_actor, arguments):
     await actor.post({'type': 'input', 'text': '查车书'})
     await wait_for(queue, 'stream.done')
     assert not manual.requests
+
+
+async def test_search_returns_before_page_images_and_lists_only_rendered_pages(index_file, monkeypatch):
+    path, _ = index_file
+    client = ManualSearchClient(path, Embeddings())
+    rendered = []
+
+    async def page_image(manual_id, page):
+        rendered.append(page)
+        if page == 3:
+            raise RuntimeError('render failed')
+        return path
+
+    monkeypatch.setattr(client, 'page_image', page_image)
+    result = await client.search_manual('查询', 2)
+    assert not rendered and all(hit['images'] == [] for hit in result['hits']) and result['image_notice']
+    updated = await client.with_page_images(result)
+    images = {hit['page']: hit['images'] for hit in updated['hits']}
+    assert images[2][0]['url'].endswith('/pages/2.png') and images[3] == []
+    assert updated['image_notice'] and result['hits'][0]['images'] == []  # original untouched
+
+
+class ImagingManual(FakeManual):
+    def __init__(self):
+        super().__init__()
+        self.release_images = asyncio.Event()
+
+    async def with_page_images(self, result):
+        await self.release_images.wait()
+        return {**result, 'hits': [{**hit, 'images': [{'url': '/api/manual/x/pages/8.png', 'page': 8}]}
+                                   for hit in result['hits']], 'image_notice': ''}
+
+
+async def test_answer_is_not_held_for_page_images_and_card_is_updated_later(manual_actor):
+    manual = ImagingManual()
+    actor, ark, _ = manual_actor([
+        {'tool_calls': [call('search_manual', {'query': '功能使用方法'})]},
+        {'content': '根据车书原文，可以这样使用。'}], manual)
+    queue = await actor.attach()
+    await queue.get()
+    await actor.post({'type': 'input', 'text': '看看车书怎么说'})
+    done, events = await wait_for(queue, 'stream.done')  # Images still blocked here.
+    first = [e for e in events if e['type'] == 'lookup.result']
+    assert done['text'] == '根据车书原文，可以这样使用。' and first[0]['result']['hits'][0]['images'] == []
+    manual.release_images.set()
+    update, _ = await wait_for(queue, 'lookup.result')
+    assert update['call_id'] == first[0]['call_id'] and update['result']['hits'][0]['images'][0]['page'] == 8
+    assert all(m.get('role') != 'tool' or '/pages/8.png' not in m['content'] for m in ark.requests[-1]['messages'])
