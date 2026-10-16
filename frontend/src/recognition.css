@@ -1,4 +1,4 @@
-/* Voice input stays inside the composer and never monitors the microphone. */
+/* Continuous capture starts only after the user enables voice input. */
 .voice-button{display:grid;place-items:center;flex-shrink:0;width:36px;height:36px;border:1px solid #d9e5e8;background:#f6fafb;border-radius:8px;color:#6b949f}
 .voice-button:hover{background:#eaf4f5}.voice-button.recording{color:#b36253;background:#fff2ee;border-color:#eaccc4}
 .voice-capture{padding:11px 13px;margin:0 0 10px;border:1px solid #d9e9eb;border-radius:9px;background:#f1f8f8;font-size:11px;color:#64858d}
