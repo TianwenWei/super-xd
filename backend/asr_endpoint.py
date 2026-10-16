@@ -7,12 +7,14 @@ from fastapi import WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
 from backend.textutil import is_identifier
+from backend.services.audio import PCM16K_ASR
+from backend.services.contracts import ProviderError, redact
+from backend.settings import allowed_origins
 
-MAX_PCM_BYTES = 16000 * 2 * 60
-MAX_FRAME_BYTES = 6400
+MAX_PCM_BYTES = int(PCM16K_ASR.bytes_per_ms * 60000)
+MAX_FRAME_BYTES = int(PCM16K_ASR.bytes_per_ms * 200)
 CAPTURE_TIMEOUT_SECONDS = 90
-ALLOWED_ORIGINS = {'http://localhost:5173', 'http://127.0.0.1:5173',
-                   'http://localhost:8000', 'http://127.0.0.1:8000'}
+ALLOWED_ORIGINS = allowed_origins()
 _active = {}
 
 
@@ -46,6 +48,7 @@ async def recognize_socket(ws: WebSocket, actor, asr):
         await ws.close(code=4403)
         return
     await ws.accept()
+    audio_format = getattr(asr, 'input_format', PCM16K_ASR)
     capture_id, connection = None, None
     claimed, completed, ready = False, False, False
     started = time.perf_counter()
@@ -101,7 +104,7 @@ async def recognize_socket(ws: WebSocket, actor, asr):
         connection = await asr.open(capture_id)
         ready = True
         await ws.send_json({'type': 'asr.ready', 'capture_id': capture_id,
-                            'format': 'pcm_s16le', 'sample_rate': 16000, 'channels': 1,
+                            **audio_format.to_dict(),
                             'metrics': dict(getattr(connection, 'metrics', {}))})
         sender = asyncio.create_task(send_audio())
         jobs.append(sender)
@@ -121,7 +124,7 @@ async def recognize_socket(ws: WebSocket, actor, asr):
                     await sender  # All queued PCM and the terminal request must have been sent successfully.
                 metrics = {**getattr(connection, 'metrics', {}), **item.get('metrics', {}),
                            'capture_elapsed_ms': (time.perf_counter() - started) * 1000,
-                           'pcm_bytes': pcm_bytes, 'audio_duration_ms': pcm_bytes / 32}
+                           'pcm_bytes': pcm_bytes, 'audio_duration_ms': audio_format.duration_ms(pcm_bytes)}
                 await ws.send_json({'type': f'asr.{kind}', 'capture_id': capture_id,
                                     'text': text, 'metrics': metrics})
                 if kind == 'final':
@@ -150,9 +153,9 @@ async def recognize_socket(ws: WebSocket, actor, asr):
                 or not is_identifier(capture_id, max_length=80)):
             capture_id = None
             raise ASRInputError('请先发送有效的语音开始消息。')
-        if (body.get('format') != 'pcm_s16le' or type(body.get('sample_rate')) is not int
-                or body['sample_rate'] != 16000 or type(body.get('channels')) is not int
-                or body['channels'] != 1):
+        if (body.get('format') != audio_format.format or type(body.get('sample_rate')) is not int
+                or body['sample_rate'] != audio_format.sample_rate or type(body.get('channels')) is not int
+                or body['channels'] != audio_format.channels):
             raise ASRInputError('语音识别仅接受16kHz单声道16位PCM。')
         if actor.id in _active:
             raise ASRInputError('这个会话正在识别另一段语音，请先结束或取消。')
@@ -160,7 +163,7 @@ async def recognize_socket(ws: WebSocket, actor, asr):
         claimed = True
         await actor.post({'type': 'asr.capture', 'capture_id': capture_id, 'active': True})
         actor.trace('asr.started', {'capture_id': capture_id, 'provider': asr.info().get('provider'),
-                                  'sample_rate': 16000, 'channels': 1}, call_id=capture_id, status='running')
+                                  **audio_format.to_dict()}, call_id=capture_id, status='running')
         receiver = asyncio.create_task(receive_audio())
         provider = asyncio.create_task(provider_flow())
         jobs.extend([receiver, provider])
@@ -180,10 +183,14 @@ async def recognize_socket(ws: WebSocket, actor, asr):
         if isinstance(exc, TimeoutError):
             message = '语音识别等待超时，本次内容没有发送，请重试。'
         if capture_id and claimed:
-            actor.trace('asr.error', {'capture_id': capture_id, 'error': message}, call_id=capture_id, status='failed')
+            actor.trace('asr.error', {'capture_id': capture_id, 'error': message,
+                                    'provider_error': redact(exc.public()) if isinstance(exc, ProviderError) else None,
+                                    'diagnostics': redact(exc.details) if isinstance(exc, ProviderError) else None},
+                        call_id=capture_id, status='failed')
         if ws.client_state == WebSocketState.CONNECTED:
             try:
-                await ws.send_json({'type': 'asr.error', 'capture_id': capture_id, 'code': code, 'message': message})
+                await ws.send_json({'type': 'asr.error', 'capture_id': capture_id, 'code': code, 'message': message,
+                                    'provider_code': exc.code if isinstance(exc, ProviderError) else None})
             except (RuntimeError, WebSocketDisconnect):
                 pass
     finally:

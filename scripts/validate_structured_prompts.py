@@ -86,6 +86,10 @@ async def capture_case(runtime, case, fixed_time):
     for path, value in case.get('vehicle_overrides', {}).items():
         set_path(actor.vehicle, path, value)
     actor.recent_places = deepcopy(case.get('recent_places', []))
+    from backend.cockpit import initial_cockpit_state
+    actor.cockpit = None
+    actor.cockpit_state = initial_cockpit_state()
+    actor.media_choices = {}
     actor.persona = runtime.persona.PERSONAS[case.get('persona', 'warm')].model_copy(deep=True)
     actor.ark = CaptureArk()
     actor.turns = []

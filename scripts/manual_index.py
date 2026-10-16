@@ -10,8 +10,9 @@ import time
 import numpy as np
 from pypdf import PdfReader
 
-from backend.manual_embeddings import ManualEmbeddingClient
+from backend.services.factory import create_embedding_provider
 from backend.prompt_templates import load_prompt
+from backend.manual_search import load_index
 from backend.settings import ROOT
 
 DEFAULT_PDF = ROOT / 'output/pdf/腾势D9用户手册-中文右舵版.pdf'
@@ -70,13 +71,14 @@ def read_index(path):
 
 def initialize(pdf, path, client):
     meta = {'source_pdf': str(pdf.resolve()), 'source_sha256': sha256(pdf.read_bytes()).hexdigest(),
-            'embedding_model': client.model, 'dimensions': client.dimensions,
+            'embedding_model': client.model, 'embedding_provider': getattr(client, 'provider', 'ark'), 'dimensions': client.dimensions,
             'query_instruction': load_prompt('manual_embedding_query'),
             'document_instruction': load_prompt('manual_embedding_document'),
             'chunk_size': 600, 'overlap': 100,
             'notice': '来源为腾势 D9 中文右舵版手册；配置可能与模拟车辆及大陆车型不同。仅提取文字，未识别插图。'}
     if path.exists():
         old, rows = read_index(path)
+        old.setdefault('embedding_provider', 'ark')
         if any(old.get(key) != value for key, value in meta.items()):
             raise RuntimeError('已有索引的来源、模型或切片配置不同，请指定新的 --db 文件。')
         return old, [row for row in rows if row[4] is None]
@@ -97,7 +99,7 @@ def write_vectors(path, records):
 
 
 async def build(args):
-    client = ManualEmbeddingClient()
+    client = create_embedding_provider()
     try:
         meta, pending = await asyncio.to_thread(initialize, args.pdf, args.db, client)
         print(json.dumps({'pages': meta['pages'], 'chunks': meta['chunks'], 'pending': len(pending)}, ensure_ascii=False), flush=True)
@@ -129,12 +131,17 @@ async def build(args):
 
 
 async def search(args):
+    checked_meta, _, checked_matrix = await asyncio.to_thread(load_index, args.db)
     meta, rows = await asyncio.to_thread(read_index, args.db)
+    if checked_meta != {**meta, 'embedding_provider': meta.get('embedding_provider', 'ark')}:
+        raise RuntimeError('索引在查询准备期间发生变化，请重试。')
     if not meta.get('ready') or any(row[4] is None for row in rows):
         raise RuntimeError('索引尚未建完，请先完成 build。')
-    client = ManualEmbeddingClient(dimensions=meta['dimensions'])
+    client = create_embedding_provider()
     try:
-        if (client.model != meta['embedding_model']
+        if (getattr(client, 'provider', 'ark') != meta.get('embedding_provider', 'ark')
+                or client.dimensions != meta['dimensions']
+                or client.model != meta['embedding_model']
                 or load_prompt('manual_embedding_query') != meta['query_instruction']
                 or load_prompt('manual_embedding_document') != meta['document_instruction']):
             raise RuntimeError('查询模型或指令与建库时不一致，需要重建索引。')
@@ -144,7 +151,7 @@ async def search(args):
 
     def rank():
         started = time.perf_counter()
-        matrix = np.stack([np.frombuffer(row[4], dtype='<f4') for row in rows])
+        matrix = checked_matrix
         scores = matrix @ np.asarray(result['vector'], dtype=np.float32)
         hits = []
         for index in np.argsort(-scores)[:args.top_k]:

@@ -13,6 +13,7 @@ CONFIG_FILES = frozenset({
     'talker/tools.toml', 'planner/tools.toml', 'thinker/tools.toml', 'vehicle/functions.toml',
     'speech/receipts.toml', 'speech/persona.toml', 'speech/feedback.toml',
     'speech/thinker.toml', 'speech/vehicle.toml',
+    'cockpit/tools.toml', 'cockpit/feedback.toml',
 })
 
 
@@ -123,7 +124,7 @@ def validate_example_tools(messages, tools):
 def validate_all():
     """Both service entry points check every module's text before accepting work."""
     from importlib import import_module
-    for module in ('catalog', 'tool_text_config', 'speech_config', 'vehicle_planner', 'worker'):
+    for module in ('catalog', 'tool_text_config', 'speech_config', 'vehicle_planner', 'worker', 'cockpit.tools', 'cockpit.controller'):
         import_module(f'backend.{module}')
     from backend.prompt_templates import PROMPT_FILES, preload_prompts, load_examples
     actual = {path.relative_to(CONFIG_DIRECTORY).as_posix()
@@ -145,9 +146,10 @@ def validate_all():
     # template/session import cycle and never constructs a running actor.
     from backend.catalog import HOT_TOOL_NAMES, TOOLS
     from backend.session import CONTROL_TOOLS, MAPS_TOOLS, WEB_TOOLS, MANUAL_TOOLS
+    from backend.cockpit.tools import COCKPIT_TOOLS
     examples = load_examples()
     tools = ([TOOLS[name].openai_tool() for name in HOT_TOOL_NAMES]
-             + CONTROL_TOOLS + MAPS_TOOLS + WEB_TOOLS + MANUAL_TOOLS)
+             + CONTROL_TOOLS + MAPS_TOOLS + WEB_TOOLS + MANUAL_TOOLS + COCKPIT_TOOLS)
     validate_example_tools(examples, tools)
     return {'templates': len(PROMPT_FILES), 'example_messages': len(load_examples()),
             'text_files': len(CONFIG_FILES), 'text_entries': sum(len(load_config(file)) for file in CONFIG_FILES)}

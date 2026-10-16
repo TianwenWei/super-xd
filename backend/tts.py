@@ -86,10 +86,13 @@ class VolcanoTTS:
     def __init__(self, client: httpx.AsyncClient | None = None, *,
                  api_key: str | None = None, app_id: str | None = None,
                  access_token: str | None = None, timeout_seconds: float | None = None,
-                 ws_connect=None):
+                 ws_connect=None, allowed_voices=None):
         self._api_key = (os.getenv(API_KEY_FIELD, "") if api_key is None else api_key).strip()
         self._app_id = (os.getenv(APP_ID_FIELD, "") if app_id is None else app_id).strip()
         self._access_token = (os.getenv(ACCESS_TOKEN_FIELD, "") if access_token is None else access_token).strip()
+        self._allowed_voices = set(allowed_voices or (XIAOHE_VOICE,))
+        if any(not isinstance(voice, str) or not voice.strip() or len(voice) > 120 for voice in self._allowed_voices):
+            raise ValueError("TTS provider voice identifiers must be nonblank strings of at most 120 characters")
         self._source = "environment"
         self._configuration_error = None
         config_file = os.getenv(CONFIG_FILE_FIELD, "").strip()
@@ -156,6 +159,12 @@ class VolcanoTTS:
                 message = message.replace(secret, "[redacted]")
         return message[:240]
 
+    def _voice(self, voice):
+        selected = XIAOHE_VOICE if voice in (None, "", "xiaohe2.0", "小何2.0") else voice
+        if selected not in self._allowed_voices:
+            raise RuntimeError("本原型仅支持火山 Speech 小何 2.0 音色，不能替换为其他音色。")
+        return selected
+
     async def synthesize(self, text: str, voice: str | None = None) -> bytes:
         return (await self.synthesize_with_metrics(text, voice))["audio"]
 
@@ -163,8 +172,7 @@ class VolcanoTTS:
                                 voice: str | None = None) -> AsyncIterator[dict[str, Any]]:
         """Yield live Xiaohe PCM frames while upstream text is still arriving."""
         adapter_started = time.perf_counter()
-        if voice not in (None, "", XIAOHE_VOICE, "xiaohe2.0", "小何2.0"):
-            raise RuntimeError("本原型仅支持火山 Speech 小何 2.0 音色，不能替换为其他音色。")
+        selected_voice = self._voice(voice)
         from .speech_stream import SpeechStream
         headers = self._stream_headers()
         prewarm_wait_ms = 0
@@ -179,7 +187,7 @@ class VolcanoTTS:
                 connection = candidate
                 break
             await candidate['websocket'].close()
-        stream = SpeechStream(headers, XIAOHE_VOICE, connect=self._ws_connect,
+        stream = SpeechStream(headers, selected_voice, connect=self._ws_connect,
             timeout_seconds=self.timeout_seconds, max_text_chars=MAX_TEXT_CHARS,
             max_audio_bytes=MAX_AUDIO_BYTES, safe_message=self._safe_message,
             connection=connection, recycle=self._recycle_speech_connection,
@@ -254,10 +262,9 @@ class VolcanoTTS:
     async def synthesize_with_metrics(self, text: str, voice: str | None = None) -> dict[str, Any]:
         if not isinstance(text, str) or not text.strip() or len(text) > MAX_TEXT_CHARS:
             raise RuntimeError(f"朗读文本需为 1–{MAX_TEXT_CHARS} 字，不能只含空白。")
-        if voice not in (None, "", XIAOHE_VOICE, "xiaohe2.0", "小何2.0"):
-            raise RuntimeError("本原型仅支持火山 Speech 小何 2.0 音色，不能替换为其他音色。")
+        selected_voice = self._voice(voice)
         headers = self._headers()
-        payload = {"req_params": {"text": text, "speaker": XIAOHE_VOICE,
+        payload = {"req_params": {"text": text, "speaker": selected_voice,
                    "audio_params": {"format": "mp3", "sample_rate": 24000},
                    "additions": json.dumps({"disable_markdown_filter": True,
                                             "disable_emoji_filter": True})}}
@@ -272,8 +279,10 @@ class VolcanoTTS:
             async with self.client.stream("POST", TTS_URL, headers=headers, json=payload,
                                           timeout=self.timeout_seconds) as response:
                 if response.status_code >= 400:
-                    raise RuntimeError(f"火山 Speech TTS 请求失败（HTTP {response.status_code}）。"
-                                       "请检查独立 Speech 凭证、seed-tts-2.0 开通权限与额度。")
+                    error = RuntimeError(f"火山 Speech TTS 请求失败（HTTP {response.status_code}）。"
+                                         "请检查独立 Speech 凭证、seed-tts-2.0 开通权限与额度。")
+                    error.status_code = response.status_code
+                    raise error
                 async for chunk in response.aiter_text():
                     buffer += chunk
                     if len(buffer) > MAX_AUDIO_BYTES * 2:

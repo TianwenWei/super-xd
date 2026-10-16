@@ -10,19 +10,22 @@ from backend.prompt_templates import load_prompt
 
 
 class ManualEmbeddingClient:
-    def __init__(self, client=None, *, dimensions=1024):
+    def __init__(self, client=None, *, dimensions=1024, model=None, base_url=None,
+                 key_env='ARK_EMBEDDING_API_KEY', timeout_seconds=45):
         if type(dimensions) is not int or dimensions not in {1024, 2048}:
             raise ValueError('dimensions 必须为 1024 或 2048。')
         self.dimensions = dimensions
-        self.model = os.getenv('ARK_EMBEDDING_MODEL', 'doubao-embedding-vision-251215')
-        self.base_url = os.getenv('ARK_EMBEDDING_BASE_URL',
-                                  'https://ark.cn-beijing.volces.com/api/v3').rstrip('/')
-        self.client = client or httpx.AsyncClient(timeout=httpx.Timeout(45, connect=10))
+        self.model = model or os.getenv('ARK_EMBEDDING_MODEL', 'doubao-embedding-vision-251215')
+        self.key_env = key_env
+        self._owns_client = client is None
+        self.base_url = (base_url or os.getenv('ARK_EMBEDDING_BASE_URL',
+                                  'https://ark.cn-beijing.volces.com/api/v3')).rstrip('/')
+        self.client = client or httpx.AsyncClient(timeout=httpx.Timeout(timeout_seconds, connect=10))
 
     async def embed(self, text, *, query=False):
-        key = os.getenv('ARK_EMBEDDING_API_KEY')
+        key = os.getenv(self.key_env)
         if not key:
-            raise RuntimeError('ARK_EMBEDDING_API_KEY 未配置，未生成向量。')
+            raise RuntimeError(self.key_env + ' 未配置，未生成向量。')
         if not isinstance(text, str) or not text.strip():
             raise ValueError('需要非空文字。')
         if len(text.encode('utf-8')) > 100000:
@@ -50,8 +53,13 @@ class ManualEmbeddingClient:
                     '_trace': {'request': body, 'response': data},
                     'elapsed_ms': round((time.perf_counter() - started) * 1000, 2)}
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
-            message = sanitized_error(exc).replace(key, '[redacted]')
-            raise RuntimeError('说明书向量化失败：' + message) from None
+            safe_exception = exc if isinstance(exc, httpx.HTTPStatusError) else RuntimeError(str(exc).replace(key, '[redacted]'))
+            message = sanitized_error(safe_exception).replace(key, '[redacted]')
+            error = RuntimeError('说明书向量化失败：' + message)
+            error.status_code = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+            error.provider_code = 'timeout' if isinstance(exc, httpx.TimeoutException) else 'unavailable' if isinstance(exc, httpx.RequestError) else None
+            raise error from None
 
     async def aclose(self):
-        await self.client.aclose()
+        if self._owns_client:
+            await self.client.aclose()

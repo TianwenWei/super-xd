@@ -13,7 +13,6 @@ from uuid import uuid4
 
 import numpy as np
 
-from backend.manual_embeddings import ManualEmbeddingClient
 from backend.models import utcnow
 from backend.prompt_templates import load_prompt
 from backend.settings import ROOT
@@ -55,14 +54,17 @@ def load_index(path):
         if any(type(row[1]) is not int or not 1 <= row[1] <= meta['pages']
                or not isinstance(row[2], str) or not isinstance(row[3], str) for row in rows):
             raise ValueError('索引片段无效')
+        meta.setdefault('embedding_provider', 'ark')
+        if not isinstance(meta['embedding_provider'], str) or not meta['embedding_provider']:
+            raise ValueError('索引向量服务标识无效')
         dimensions = meta['dimensions']
-        if type(dimensions) is not int or dimensions not in {1024, 2048}:
+        if type(dimensions) is not int or not 1 <= dimensions <= 65536:
             raise ValueError('维度无效')
         matrix = np.stack([np.frombuffer(row[4], dtype='<f4') for row in rows])
         if matrix.shape != (len(rows), dimensions) or not np.isfinite(matrix).all():
             raise ValueError('索引向量无效')
         norms = np.linalg.norm(matrix, axis=1)
-        if np.any(norms == 0):
+        if not np.isfinite(norms).all() or np.any(norms == 0):
             raise ValueError('索引包含零向量')
         matrix = matrix / norms[:, None]
         passages = tuple({'chunk_id': row[0], 'page': row[1], 'section': row[2], 'text': row[3]}
@@ -75,7 +77,12 @@ def load_index(path):
 class ManualSearchClient:
     def __init__(self, path=None, embeddings=None):
         self.path = Path(path or os.getenv('MANUAL_INDEX_PATH', str(DEFAULT_INDEX)))
-        self.embeddings = embeddings or ManualEmbeddingClient()
+        if embeddings is None:
+            from backend.services.factory import create_embedding_provider
+            embeddings_client = create_embedding_provider()
+        else:
+            embeddings_client = embeddings
+        self.embeddings = embeddings_client
         self.owns_embeddings = embeddings is None
         self._index = None
         self._load_lock = asyncio.Lock()
@@ -85,15 +92,23 @@ class ManualSearchClient:
         self._page_locks = {}
 
     def info(self):
-        return {'provider': feedback_text('manual.provider'), 'configured': bool(os.getenv('ARK_EMBEDDING_API_KEY')),
+        return {'provider': feedback_text('manual.provider'), 'configured': self.embedding_info()['configured'],
                 'model': self.embeddings.model, **self._status}
+
+    def embedding_info(self):
+        if hasattr(self.embeddings, 'info'):
+            return self.embeddings.info()
+        # Compatibility for existing injected test clients and legacy adapters.
+        return {'configured': bool(os.getenv('ARK_EMBEDDING_API_KEY')), 'provider': 'ark',
+                'missing_fields': [] if os.getenv('ARK_EMBEDDING_API_KEY') else ['ARK_EMBEDDING_API_KEY']}
 
     async def _load(self):
         async with self._load_lock:
             if self._index is None:
                 try:
                     meta, passages, matrix = await asyncio.to_thread(load_index, self.path)
-                    if (meta['embedding_model'] != self.embeddings.model
+                    if (meta['embedding_provider'] != getattr(self.embeddings, 'provider', 'ark')
+                            or meta['embedding_model'] != self.embeddings.model
                             or meta['dimensions'] != self.embeddings.dimensions
                             or meta['query_instruction'] != load_prompt('manual_embedding_query')
                             or meta['document_instruction'] != load_prompt('manual_embedding_document')):
@@ -164,8 +179,10 @@ class ManualSearchClient:
         if type(max_results) is not int or not 1 <= max_results <= 5:
             raise ValueError('max_results 必须为 1 至 5。')
         # Cached evidence never hides a missing credential on subsequent calls.
-        if not os.getenv('ARK_EMBEDDING_API_KEY'):
-            raise RuntimeError('ARK_EMBEDDING_API_KEY 未配置，无法检索车书。')
+        embedding_status = self.embedding_info()
+        if not embedding_status['configured']:
+            missing = '、'.join(embedding_status.get('missing_fields', []))
+            raise RuntimeError((missing or 'Embedding 服务') + ' 未配置，无法检索车书。')
         meta, passages, matrix = await self._load()
         query = query.strip()
         cached = self._cache.get(query)

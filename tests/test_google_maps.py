@@ -152,7 +152,9 @@ async def test_poi_query_then_selection_uses_real_identity_and_receipt(actor_fac
     assert not actor.vehicle['navigation']['active']
     await actor.post({'type': 'vehicle.execute', 'command_id': command['command_id']})
     done, _ = await wait_for(q, 'stream.done')
-    assert actor.vehicle['navigation']['destination_place'] == POI
+    assert all(actor.vehicle['navigation']['destination_place'][key] == value for key, value in POI.items())
+    assert actor.vehicle['navigation']['destination_place']['provider'] == 'google'
+    assert actor.vehicle['navigation']['destination_place']['place_ref'] == 'google:' + POI['place_id']
     assert actor.vehicle['navigation']['destination'] == POI['name'] and done['text'] == f"导航设好了，去{POI['name']}。"
 
 

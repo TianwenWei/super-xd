@@ -1,24 +1,204 @@
 [
-  {"id": "multi_hold_window_ventilation", "tags": ["hold", "multi"],
-   "turns": [{"input": "主驾车窗开一半，副驾座椅通风开到2档，氛围灯保持原样",
-              "expect": {"commands": [{"name": "set_window_position", "arguments": {"window": "driver", "position": 50}},
-                                      {"name": "set_seat_ventilation", "arguments": {"seat": "front_passenger", "level": 2}}],
-                         "commands_exact": true, "forbid_commands": [{"name": "set_ambient_light"}],
-                         "unchanged": ["lights.ambient"]}}]},
-  {"id": "multi_deferral_not_off", "tags": ["hold", "multi"],
-   "turns": [{"input": "音量调到20，打开车内灯，空调先别开",
-              "expect": {"commands": [{"name": "set_volume", "arguments": {"volume": 20}},
-                                      {"name": "set_interior_light", "arguments": {"enabled": true}}],
-                         "forbid_commands": [{"name": "set_climate_power"}], "unchanged": ["climate.power"]}}]},
-  {"id": "multi_three_hot_actions", "tags": ["multi"],
-   "turns": [{"input": "暂停播放，把后排温度调到25度，主驾座椅加热开到1档",
-              "expect": {"commands": [{"name": "control_playback", "arguments": {"action": "pause"}},
-                                      {"name": "set_seat_heating", "arguments": {"seat": "driver", "level": 1}}],
-                         "state": {"climate.temperatures.rear": 25}}}]},
-  {"id": "poi_search_then_user_chooses", "tags": ["navigation", "maps"],
-   "turns": [{"input": "找一下杭州西湖附近的咖啡馆",
-              "expect": {"talker_calls": [{"name": "search_places"}], "no_commands": true, "allow_error": true}},
-             {"input": "导航去第一个",
-              "expect": {"talker_calls": [{"name": "start_poi_navigation"}],
-                         "commands": [{"name": "set_navigation_destination"}], "allow_error": true}}]}
+  {
+    "id": "multi_hold_window_ventilation",
+    "tags": [
+      "hold",
+      "multi"
+    ],
+    "turns": [
+      {
+        "input": "主驾车窗开一半，副驾座椅通风开到2档，氛围灯保持原样",
+        "expect": {
+          "commands": [
+            {
+              "name": "set_window_position",
+              "arguments": {
+                "window": "driver",
+                "position": 50
+              }
+            },
+            {
+              "name": "set_seat_ventilation",
+              "arguments": {
+                "seat": "front_passenger",
+                "level": 2
+              }
+            }
+          ],
+          "commands_exact": true,
+          "forbid_commands": [
+            {
+              "name": "set_ambient_light"
+            }
+          ],
+          "unchanged": [
+            "lights.ambient"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "multi_deferral_not_off",
+    "tags": [
+      "hold",
+      "multi"
+    ],
+    "turns": [
+      {
+        "input": "音量调到20，打开车内灯，空调先别开",
+        "expect": {
+          "commands": [
+            {
+              "name": "set_volume",
+              "arguments": {
+                "volume": 20
+              }
+            },
+            {
+              "name": "set_interior_light",
+              "arguments": {
+                "enabled": true
+              }
+            }
+          ],
+          "forbid_commands": [
+            {
+              "name": "set_climate_power"
+            }
+          ],
+          "unchanged": [
+            "climate.power"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "multi_three_hot_actions",
+    "tags": [
+      "multi"
+    ],
+    "turns": [
+      {
+        "input": "暂停播放，把后排温度调到25度，主驾座椅加热开到1档",
+        "expect": {
+          "commands": [
+            {
+              "name": "set_temperature",
+              "arguments": {
+                "zone": "rear",
+                "temperature": 25
+              }
+            },
+            {
+              "name": "set_seat_heating",
+              "arguments": {
+                "seat": "driver",
+                "level": 1
+              }
+            }
+          ],
+          "commands_exact": true,
+          "talker_calls": [
+            {
+              "name": "control_media",
+              "arguments": {
+                "action": "pause"
+              }
+            },
+            {
+              "name": "set_temperature",
+              "arguments": {
+                "zone": "rear",
+                "temperature": 25
+              }
+            },
+            {
+              "name": "set_seat_heating",
+              "arguments": {
+                "seat": "driver",
+                "level": 1
+              }
+            }
+          ],
+          "forbid_talker_calls": [
+            "delegate_vehicle_control",
+            "delegate_task"
+          ],
+          "cockpit_commands": [
+            {
+              "domain": "media",
+              "action": "pause"
+            }
+          ],
+          "cockpit_commands_exact": true,
+          "cockpit_state": {
+            "media.status": "paused",
+            "media.content_id": "fixture:rain"
+          },
+          "state": {
+            "climate.temperatures.rear": 25,
+            "seats.positions.driver.heating": 1
+          },
+          "model_calls": 1,
+          "tasks_created": 0
+        }
+      }
+    ],
+    "cockpit": {
+      "items": [
+        {
+          "content_id": "fixture:rain",
+          "kind": "music",
+          "title": "清晨细雨",
+          "source_url": "https://media.example/fixture-rain.mp3"
+        }
+      ],
+      "state": {
+        "media.content_id": "fixture:rain",
+        "media.kind": "music",
+        "media.title": "清晨细雨",
+        "media.status": "playing",
+        "media.desired_status": "playing"
+      }
+    }
+  },
+  {
+    "id": "poi_search_then_user_chooses",
+    "tags": [
+      "navigation",
+      "maps"
+    ],
+    "turns": [
+      {
+        "input": "找一下杭州西湖附近的咖啡馆",
+        "expect": {
+          "talker_calls": [
+            {
+              "name": "search_places"
+            }
+          ],
+          "no_commands": true,
+          "allow_error": true
+        }
+      },
+      {
+        "input": "导航去第一个",
+        "expect": {
+          "talker_calls": [
+            {
+              "name": "start_poi_navigation"
+            }
+          ],
+          "commands": [
+            {
+              "name": "set_navigation_destination"
+            }
+          ],
+          "allow_error": true
+        }
+      }
+    ]
+  }
 ]

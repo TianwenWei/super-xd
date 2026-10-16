@@ -20,3 +20,17 @@ def environment_defaults():
     return {'location': os.getenv('DEFAULT_LOCATION', '').strip(),
             'location_country': os.getenv('DEFAULT_LOCATION_COUNTRY', '').strip(),
             'timezone': zone}
+
+
+def allowed_origins():
+    from urllib.parse import urlparse
+    origins = {'http://localhost:5173', 'http://127.0.0.1:5173',
+               'http://localhost:8000', 'http://127.0.0.1:8000'}
+    for key in ('FRONTEND_ORIGIN', 'API_ORIGIN'):
+        value = os.getenv(key)
+        if value:
+            parsed = urlparse(value)
+            if parsed.scheme not in {'http', 'https'} or not parsed.netloc or parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment:
+                raise ValueError(f'{key} must be an exact HTTP(S) origin')
+            origins.add(value)
+    return origins

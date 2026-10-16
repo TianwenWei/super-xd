@@ -410,7 +410,7 @@ def validate_vehicle_plan(plan, request_text, vehicle, allowed_tools=None, compl
 
 class VehicleControlPlanner:
     def __init__(self, ark):
-        self.ark = ark
+        self.ark = ark.for_role('planner') if hasattr(ark, 'for_role') else ark
 
     async def plan(self, request_text, vehicle, skill_ids, history=None, completed_operations=None, trace=None,
                    speaker_seat=DEFAULT_SPEAKER_SEAT):
@@ -418,6 +418,9 @@ class VehicleControlPlanner:
         loaded, observations, loads, events = [], [], [], []
         model_call_id = None
         attempts = 0
+        effective = self.ark.request([], model=VEHICLE_CONTROL_MODEL, thinking=False, max_tokens=2000) if hasattr(self.ark, 'request') else None
+        model_id = effective.model if effective else VEHICLE_CONTROL_MODEL
+        token_budget = effective.max_tokens if effective else 2000
 
         def emit(kind, data, *, call_id=None, status=None):
             event = {'kind': kind, 'data': deepcopy({'agent': 'vehicle_planner', **data}),
@@ -432,7 +435,7 @@ class VehicleControlPlanner:
                          model_call_id=model_call_id, model_observations=deepcopy(observations),
                          load_evidence=deepcopy(loads), trace_events=deepcopy(events), executed=False)
             value['provenance'] = {'plan_call_id': plan_call_id, 'model_call_id': model_call_id,
-                                   'submit_call_id': value.pop('_submit_call_id', None), 'model': VEHICLE_CONTROL_MODEL,
+                                   'submit_call_id': value.pop('_submit_call_id', None), 'model': model_id,
                                    'executed': False}
             return value
 
@@ -477,11 +480,11 @@ class VehicleControlPlanner:
             tools = [loader, submit]
             model_call_id = uuid4().hex
             emit('model.started', {'plan_call_id': plan_call_id, 'model_call_index': index,
-                                  'model': VEHICLE_CONTROL_MODEL, 'thinking': False, 'max_tokens': 2000,
+                                  'model': model_id, 'thinking': False, 'max_tokens': token_budget,
                                   'messages': messages, 'tools': tools}, call_id=model_call_id, status='running')
             try:
                 returned = await self.ark.complete(deepcopy(messages), deepcopy(tools),
-                                                   model=VEHICLE_CONTROL_MODEL, thinking=False, max_tokens=2000)
+                                                   model=model_id, thinking=False, max_tokens=token_budget)
             except asyncio.CancelledError:
                 emit('model.cancelled', {'plan_call_id': plan_call_id, 'model_call_index': index,
                                         'received_message': False, 'executed': False},

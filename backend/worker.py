@@ -30,6 +30,7 @@ from .speech_text import brief_result, spoken_number
 from .textutil import find_urls, is_domain, redact
 from .task_feedback import PHASES, partial_result, task_user_detail
 from .speaker import speaker_context
+from .services.reads import verify_forecast_record
 
 logger = logging.getLogger(__name__)
 SKILL_GUIDE = "；".join(f"{skill_id}：{SKILLS[skill_id].name}" for skill_id in sorted(SKILLS))
@@ -63,17 +64,7 @@ def _weather_task(task):
 
 
 def _forecast_raw_matches(record, raw):
-    if not isinstance(record, dict) or not isinstance(raw, dict):
-        return False
-    low, high = record.get("temperature_min"), record.get("temperature_max")
-    daily, units = raw.get("daily") or {}, raw.get("daily_units") or {}
-    return (isinstance(daily, dict) and isinstance(units, dict)
-            and _iso_date(record.get("date"))
-            and all(type(value) in (int, float) and math.isfinite(value) for value in (low, high))
-            and low <= high and record.get("unit") == "°C" and bool(record.get("timezone"))
-            and raw.get("timezone") == record["timezone"] and daily.get("time") == [record.get("date")]
-            and daily.get("temperature_2m_min") == [low] and daily.get("temperature_2m_max") == [high]
-            and units.get("temperature_2m_min") == units.get("temperature_2m_max") == "°C")
+    return verify_forecast_record(record, raw)
 
 
 def _iso_date(value):
@@ -243,14 +234,16 @@ class ThinkerWorker:
     def __init__(self, db: Any, ark: Any = None, tavily: Any = None, *,
                  max_steps: int = 20, timeout_seconds: float = 60,
                  concurrency: int = 2,
+                 close_clients: bool = True,
                  catalog: dict[str, Any] | None = None,
                  tool_timeout_seconds: float | None = None,
                  quick_max_steps: int = 4, quick_timeout_seconds: float = 60, weather: Any = None):
         self.db = db
+        self.close_clients = close_clients
         if ark is None or tavily is None:
-            from .models import ArkClient, TavilyClient
-            ark = ark or ArkClient()
-            tavily = tavily or TavilyClient()
+            from .services.factory import create_llm, create_search
+            ark = ark or create_llm()
+            tavily = tavily or create_search()
         self.ark, self.tavily = ark, tavily
         self.weather = weather
         self.max_steps = max(1, min(20, max_steps))
@@ -521,6 +514,8 @@ class ThinkerWorker:
         request = {'messages': deepcopy(messages), 'tools': tools, 'thinker': False,
                    'thinking': False, 'max_tokens': 2500,
                    'tool_choice': {'type': 'function', 'function': {'name': 'finish_task'}}}
+        if hasattr(self.ark, 'for_role'):
+            request['role'] = 'finalizer'
         self._save(task_id, revision, progress={'phase': 'finish_task', 'read_sources': sum(bool(s.get('extracted')) for s in sources.values())},
                    summary=PHASES['finish_task'])
         self._trace(task, 'model.started', {'request': request, 'phase': 'finalize'}, call_id=call_id, model_call_id=call_id, status='running')
@@ -657,6 +652,8 @@ class ThinkerWorker:
                     options['thinking'] = False
                     options['max_tokens'] = 2500
                     options['tool_choice'] = {'type': 'function', 'function': {'name': 'finish_task'}}
+                    if hasattr(self.ark, 'for_role'):
+                        options['role'] = 'finalizer'
                     messages.append({'role': 'user', 'content': render_prompt('thinker_finalize')})
                 self._save(task_id, revision, status="running", steps=step, error=None,
                            summary=PHASES['finish_task' if finalizing else 'model'], question=None,
@@ -905,8 +902,8 @@ class ThinkerWorker:
                             source_domains=None, adopted_forecasts=()) -> dict[str, Any]:
         if name == "get_weather_forecast":
             if self.weather is None:
-                from .weather import WeatherClient
-                self.weather = WeatherClient()
+                from .services.factory import create_maps
+                self.weather = create_maps()
             data = await self.weather.forecast(args["city"], args["date"], country_code=args.get("country_code"))
             if data.get("ok") is False:
                 observations.append({"tool": name, "ok": False, "attempted": True,
@@ -1053,6 +1050,8 @@ class ThinkerWorker:
                             "extracted": kind == "extract" or prior.get("extracted", False)}
 
     async def aclose(self) -> None:
+        if not self.close_clients:
+            return
         for client in (self.ark, self.tavily, self.weather):
             close = getattr(client, "aclose", None)
             if close:
@@ -1070,7 +1069,10 @@ async def _main() -> None:
     parser.add_argument("--concurrency", type=int, default=int(os.getenv("THINKER_CONCURRENCY", "2")))
     args = parser.parse_args()
     db = Database(args.database)
-    worker = ThinkerWorker(db, concurrency=args.concurrency,
+    from .services.factory import create_services
+    services = create_services()
+    worker = ThinkerWorker(db, ark=services.llm, tavily=services.web, weather=services.maps.weather,
+                           close_clients=False, concurrency=args.concurrency,
                            max_steps=int(os.getenv("THINKER_MAX_STEPS", "20")),
                            timeout_seconds=float(os.getenv("THINKER_TIMEOUT_SECONDS", "60")))
     loop = asyncio.get_running_loop()
@@ -1082,6 +1084,7 @@ async def _main() -> None:
         await worker.run_forever()
     finally:
         await worker.aclose()
+        await services.aclose()
         close = getattr(db, "close", None)
         if close:
             close()

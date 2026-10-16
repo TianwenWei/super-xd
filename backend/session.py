@@ -21,8 +21,8 @@ from backend.settings import TOOL_TIMEOUT
 from backend.models import utcnow, sanitized_error
 from backend.model_context import compact_message, compact_tool_result
 from backend.speech_text import speech_text, brief_result, spoken_number
-from backend.google_maps import GoogleMapsClient, MapsError
-from backend.web_search import WebSearchClient, WEB_TOOLS, WEB_BY_NAME
+from backend.google_maps import MapsError
+from backend.web_search import WEB_TOOLS, WEB_BY_NAME
 from backend.manual_search import ManualSearchClient, MANUAL_TOOLS, MANUAL_BY_NAME
 from backend.vehicle_simulator import VehicleSimulator
 from backend.vehicle_feedback import dispatch_feedback
@@ -33,6 +33,14 @@ from backend.db import TERMINAL as TERMINAL_TASK, task_card
 from backend.task_feedback import task_user_detail
 from backend.speaker import DEFAULT_SPEAKER_SEAT, speaker_context
 from backend.environment_context import environment_context
+from backend.cockpit import CockpitError, initial_cockpit_state
+from backend.cockpit.media import provider_diagnostic
+from backend.cockpit.tools import COCKPIT_TOOLS, COCKPIT_BY_NAME, cockpit_feedback
+from backend.cockpit.controller import prepare_media, prepare_navigation, validated_receipt, scoped_place, finite
+from backend.cockpit.device import DeviceRequest, validate_device_receipt, receipt_failure
+from backend.services.audio import PCM24K_TTS
+from backend.services.contracts import ProviderError, redact, ToolCapability
+from backend.services.factory import create_maps, create_search
 
 
 def function(name, description, properties=None, required=None):
@@ -173,17 +181,25 @@ class Turn:
 
 
 class SessionActor:
-    def __init__(self, session_id, db, ark, tts=None, vehicle_planner=None, maps=None, web=None, manual=None):
+    def __init__(self, session_id, db, ark, tts=None, vehicle_planner=None, maps=None, web=None, manual=None, cockpit=None):
         self.id, self.db, self.ark = session_id, db, ark
         self.tts = tts
         self.vehicle_planner = vehicle_planner or VehicleControlPlanner(ark)
         self.vehicle_planning_timeout = max(TOOL_TIMEOUT, 45)
-        self.maps = maps or GoogleMapsClient()
+        self.maps = maps if maps is not None else create_maps()
         self.owns_maps = maps is None
-        self.web = web or WebSearchClient()
+        self.web = web if web is not None else create_search()
         self.owns_web = web is None
         self.manual = manual or ManualSearchClient()
         self.owns_manual = manual is None
+        self.cockpit = cockpit
+        self.cockpit_state = initial_cockpit_state()
+        self.media_choices = {}
+        self.pending_cockpit = {}
+        self.cockpit_latest = {}
+        self.cockpit_generation = 0
+        self.cockpit_active = {}
+        self.cockpit_deferred = {'media': [], 'navigation': []}
         self.lookup_timeout = 25
         self.places = {}  # Session-local identities from successful, adopted search results.
         self.place_turns = {}  # place_id -> turn whose search surfaced it
@@ -285,6 +301,9 @@ class SessionActor:
             self.trace('audio.cancelled', {'playback_id': turn.playback_id, 'reason': reason}, turn,
                        status='cancelled')
 
+    def audio_format(self):
+        return getattr(self.tts, "output_format", PCM24K_TTS)
+
     def start_audio(self, turn):
         if self.asr_capture_id or not (self.audio_enabled and self.audio_clients and self.tts):
             return
@@ -292,8 +311,7 @@ class SessionActor:
         self.speaking = True  # Includes synthesis and queued PCM, until browser drain.
         identity = {'session_id': self.id, 'turn_id': turn.id, 'playback_id': turn.playback_id,
                     'client_request_id': turn.client_request_id}
-        self.emit_audio({'type': 'audio.started', **identity, 'sample_rate': 24000,
-                         'channels': 1, 'format': 'pcm_s16le'})
+        self.emit_audio({'type': 'audio.started', **identity, **self.audio_format().to_dict()})
         self.trace('audio.started', identity, turn, status='running')
 
         async def texts():
@@ -304,13 +322,17 @@ class SessionActor:
 
         async def synthesize():
             try:
-                async for item in self.tts.stream_synthesize(texts()):
+                stream = (self.tts.stream_synthesize(texts(), voice=turn.persona.voice)
+                          if hasattr(self.tts, 'output_format') else self.tts.stream_synthesize(texts()))
+                async for item in stream:
                     await self.post({'type': '_audio_item', 'turn': turn, 'item': item})
                 await self.post({'type': '_audio_finished', 'turn': turn})
             except asyncio.CancelledError:
                 pass
             except Exception as exc:
-                await self.post({'type': '_audio_error', 'turn': turn, 'error': sanitized_error(exc)})
+                await self.post({'type': '_audio_error', 'turn': turn, 'error': sanitized_error(exc),
+                                 'provider_error': redact(exc.public()) if isinstance(exc, ProviderError) else None,
+                                 'diagnostics': redact(exc.details) if isinstance(exc, ProviderError) else None})
         turn.audio_task = self.spawn(synthesize())
 
     def feed_audio(self, turn, text, source='persona_template', original_text=None):
@@ -359,6 +381,10 @@ class SessionActor:
         result = SessionSnapshot(session_id=self.id, persona=self.persona, persona_version=self.persona_version,
                                  vehicle=self.vehicle, tasks=self.task_list(), history=self.history()).model_dump()
         result['speaker'] = speaker_context(self.speaker_seat)
+        result['cockpit'] = copy.deepcopy(self.cockpit_state)
+        result['cockpit_capabilities'] = self.cockpit.info() if self.cockpit else {'configured': False}
+        result['tool_capabilities'] = self.tool_capabilities()
+        result['device'] = {'device_id': 'browser:' + self.id, 'online': bool(self.clients)}
         result['turns'] = [{'turn_id': turn.id, 'text': turn.text, 'output': turn.output,
                             'finished': turn.finished, 'proactive': turn.proactive, 'task_id': turn.task_id,
                             'state': 'interrupted' if turn.interrupted else 'done' if turn.finished else 'streaming',
@@ -426,6 +452,9 @@ class SessionActor:
             e['outgoing'].put_nowait({'type': 'session.snapshot', **self.snapshot()})
             for command in self.pending_commands.values():
                 e['outgoing'].put_nowait({'type': 'vehicle.command', **command['wire']})
+            for command in self.pending_cockpit.values():
+                if (command['wire']['kind'] == 'query' or command['generation'] == self.cockpit_latest.get(command['wire']['domain'])) and (command['turn'] is None or self.is_current(command['turn'])):
+                    e['outgoing'].put_nowait({'type': 'cockpit.command', **command['wire']})
             e['future'].set_result(True)
             self.schedule_announce()
         elif kind == '_detach':
@@ -443,6 +472,16 @@ class SessionActor:
                 if self.current: self.cancel_audio(self.current, 'audio_disconnected')
                 self.speaking = False
                 self.schedule_announce()
+        elif kind == '_cockpit_prepared':
+            self.accept_cockpit_prepared(e)
+        elif kind == 'cockpit.receipt':
+            self.accept_cockpit_receipt(e)
+        elif kind == '_cockpit_timeout':
+            self.cockpit_timeout(e['command_id'])
+        elif kind == 'cockpit.control':
+            self.cockpit_ui_control(e)
+        elif kind == 'cockpit.media_state':
+            self.accept_media_state(e)
         elif kind == 'input':
             text = str(e.get('text', '')).strip()
             if not text or len(text) > 4000:
@@ -491,7 +530,7 @@ class SessionActor:
                            and turn.playback_id == e.get('playback_id')), None)
             elapsed = e.get('played_ms')
             if target and type(elapsed) in (int, float) and math.isfinite(elapsed) and elapsed >= 0:
-                target.played_ms = max(target.played_ms, min(elapsed, target.audio_bytes / 48))
+                target.played_ms = max(target.played_ms, min(elapsed, self.audio_format().duration_ms(target.audio_bytes)))
                 target.played_text = ''.join(item['text'] for item in target.sentences
                                             if item['end_ms'] <= target.played_ms)
                 self.trace('audio.played', {'playback_id': target.playback_id,
@@ -557,7 +596,7 @@ class SessionActor:
             if not self.audio_valid(turn): return
             audio = item.get('audio')
             if isinstance(audio, bytes) and audio:
-                if len(audio) % 2:
+                if len(audio) % (self.audio_format().channels * self.audio_format().sample_width):
                     self.handle({'type': '_audio_error', 'turn': turn, 'error': '无效PCM音频帧'})
                     return
                 elapsed = (time.perf_counter() - turn.started) * 1000
@@ -572,13 +611,17 @@ class SessionActor:
                     self.speaking = False
                     self.schedule_announce()
             else:
-                if item.get('event') == 'sentence.started':
-                    turn.sentence_start_ms = turn.audio_bytes / 48
-                elif item.get('event') == 'sentence.finished':
+                if item.get('type') == 'alignment' and item.get('precision') == 'provider':
+                    start, end = item.get('start_ms'), item.get('end_ms')
+                    if isinstance(item.get('text'), str) and finite(start) and finite(end) and 0 <= start <= end:
+                        turn.sentences.append({'text': item['text'], 'start_ms': start, 'end_ms': end})
+                elif not hasattr(self.tts, 'output_format') and item.get('event') == 'sentence.started':
+                    turn.sentence_start_ms = self.audio_format().duration_ms(turn.audio_bytes)
+                elif not hasattr(self.tts, 'output_format') and item.get('event') == 'sentence.finished':
                     data = item.get('data') or {}
                     if isinstance(data.get('text'), str) and data['text']:
                         turn.sentences.append({'text': data['text'], 'start_ms': turn.sentence_start_ms,
-                                               'end_ms': turn.audio_bytes / 48})
+                                               'end_ms': self.audio_format().duration_ms(turn.audio_bytes)})
                 diagnostics = {k: v for k, v in item.items() if k != 'audio'}
                 self.emit_audio({'type': 'audio.metrics', 'turn_id': turn.id,
                                  'playback_id': turn.playback_id, 'client_request_id': turn.client_request_id,
@@ -600,9 +643,10 @@ class SessionActor:
         elif kind == '_audio_error':
             turn = e['turn']
             if not self.audio_valid(turn): return
-            self.trace('audio.error', {'playback_id': turn.playback_id, 'error': e['error']}, turn, status='failed')
+            self.trace('audio.error', {'playback_id': turn.playback_id, 'error': e['error'],
+                       'provider_error': e.get('provider_error'), 'diagnostics': e.get('diagnostics')}, turn, status='failed')
             self.emit_audio({'type': 'audio.error', 'turn_id': turn.id, 'playback_id': turn.playback_id,
-                             'message': e['error']})
+                             'message': e['error'], 'provider_code': (e.get('provider_error') or {}).get('code')})
             turn.audio_cancelled.set()
             if turn.audio_task and not turn.audio_task.done(): turn.audio_task.cancel()
             self.speaking = False
@@ -619,7 +663,8 @@ class SessionActor:
         elif kind == '_model_error':
             turn = e['turn']
             self.trace('model.error', {'model_call_index': e.get('model_call_index'), 'error': e['error'],
-                       'partial': e.get('partial'), 'observed_at': e.get('observed_at', utcnow())},
+                       'partial': e.get('partial'), 'observed_at': e.get('observed_at', utcnow()),
+                       'provider_error': e.get('provider_error'), 'diagnostics': e.get('diagnostics')},
                        turn, call_id=e.get('call_id'), status='failed' if self.is_current(turn) else 'stale')
             if self.is_current(turn):
                 verified = self.receipt_feedback(turn, mutations_only=True, failures_only=bool(turn.preface))
@@ -675,6 +720,10 @@ class SessionActor:
     def interrupt_current(self, reason):
         if self.current:
             old = self.current
+            for domain, operation in list(self.cockpit_active.items()):
+                if operation['turn'] is old:
+                    self.cockpit_active.pop(domain)
+                    self.cockpit_deferred[domain].clear()
             self.simulator.invalidate(old.id)
             self.cancel_audio(old, reason)
             if old.model_task and not old.model_task.done():
@@ -727,6 +776,10 @@ class SessionActor:
         context = {'vehicle': vehicle, 'background_tasks_reference_only': tasks,
                    'speaker': speaker_context(turn.speaker_seat or self.speaker_seat),
                    'recent_places': self.recent_places,
+                   'cockpit': copy.deepcopy(self.cockpit_state),
+                   'media_choices': list(copy.deepcopy(self.media_choices).values()),
+                   'cockpit_capabilities': self.cockpit.info() if self.cockpit else {'configured': False},
+                   'tool_capabilities': self.tool_capabilities(),
                    **environment_context(self.vehicle, utcnow()),
                    'capabilities': {'gps': False, 'browser_geolocation': False, 'task_priority_change': False}}
         context['interrupted_playback'] = [
@@ -772,7 +825,7 @@ class SessionActor:
 
     def tools_for(self, turn):
         # This bounded interface never grows after delegation or prior turns.
-        return [TOOLS[name].openai_tool() for name in HOT_TOOL_NAMES] + CONTROL_TOOLS + MAPS_TOOLS + WEB_TOOLS + MANUAL_TOOLS
+        return [TOOLS[name].openai_tool() for name in HOT_TOOL_NAMES] + CONTROL_TOOLS + MAPS_TOOLS + WEB_TOOLS + MANUAL_TOOLS + COCKPIT_TOOLS
 
     def launch_model(self, turn):
         if turn.model_calls >= 5:
@@ -810,7 +863,9 @@ class SessionActor:
                 error = sanitized_error(exc)
                 await self.post({'type': '_model_error', 'turn': turn, 'error': error,
                                 'partial': getattr(exc, 'trace_partial', {'message': {'content': partial}, 'meta': {}}),
-                                'call_id': call_id, 'model_call_index': model_call_index, 'observed_at': utcnow()})
+                                'call_id': call_id, 'model_call_index': model_call_index, 'observed_at': utcnow(),
+                                'provider_error': redact(exc.public()) if isinstance(exc, ProviderError) else None,
+                                'diagnostics': redact(exc.details) if isinstance(exc, ProviderError) else None})
         turn.model_task = self.spawn(generate())
 
     def append_text(self, turn, text, speak=True, source='persona_template', original_text=None):
@@ -905,6 +960,21 @@ class SessionActor:
                 if name == 'set_navigation_destination' and not destination_grounded(
                         arguments['destination'], self.destination_sources(turn)):
                     return name, arguments, dict(DESTINATION_NOT_GROUNDED)
+            elif name in COCKPIT_BY_NAME:
+                validate(arguments, COCKPIT_BY_NAME[name]['function']['parameters'])
+                if not self.cockpit:
+                    return name, arguments, self.cockpit_error('not_configured')
+                if name == 'manage_navigation' and arguments['action'] in ('start', 'add_waypoint', 'set_origin'):
+                    reference = self.resolve_place_reference(arguments.get('place_ref'))
+                    error = self.poi_error(turn, reference)
+                    if error:
+                        return name, arguments, error
+                    arguments['place_ref'] = reference
+                if name == 'manage_navigation' and arguments.get('origin_ref'):
+                    reference = self.resolve_place_reference(arguments['origin_ref'])
+                    error = self.poi_error(turn, reference)
+                    if error: return name, arguments, error
+                    arguments['origin_ref'] = reference
             elif name in MAPS_BY_NAME or name in WEB_BY_NAME or name in MANUAL_BY_NAME:
                 schema = (MAPS_BY_NAME | WEB_BY_NAME | MANUAL_BY_NAME)[name]
                 validate(arguments, schema['function']['parameters'])
@@ -940,7 +1010,13 @@ class SessionActor:
                                 'spoken_reason': validation_feedback(exc, name), 'retry_model': name not in TOOLS}
 
     def dispatch_call(self, turn, call, name, arguments):
-        if name in TOOLS:
+        if name in COCKPIT_BY_NAME:
+            self.launch_cockpit(turn, call, name, arguments)
+        elif self.cockpit and name == 'control_playback':
+            self.launch_cockpit(turn, call, 'control_media', {'action': 'resume' if arguments['action'] == 'play' else arguments['action']})
+        elif self.cockpit and name == 'set_volume':
+            self.launch_cockpit(turn, call, 'control_media', {'action': 'volume', 'volume': arguments['volume']})
+        elif name in TOOLS:
             if TOOLS[name].state_mapping.get('operation') == 'read':
                 turn.has_reads = True
                 turn.needs_model = True  # Reading must answer the returned facts, not a generic success template.
@@ -978,6 +1054,9 @@ class SessionActor:
         return sources
 
     def launch_lookup(self, turn, call, name, arguments):
+        if name == 'search_places' and getattr(getattr(self, 'maps', None), 'info', lambda: {})().get('execution_location') == 'device':
+            self.send_device_query(turn, call, 'places', 'search_places', arguments)
+            return
         async def lookup():
             started = time.perf_counter()
             try:
@@ -992,6 +1071,8 @@ class SessionActor:
                 result = {'ok': False, 'code': exc.code, 'reason': str(exc)}
             except TimeoutError:
                 result = {'ok': False, 'code': 'timeout', 'reason': feedback_text('errors.lookup_timeout')}
+            except ProviderError as exc:
+                result = {'ok': False, 'code': exc.code, 'reason': sanitized_error(exc), 'provider_error': redact(exc.public()), 'diagnostics': redact(exc.details)}
             except RuntimeError as exc:
                 result = {'ok': False, 'code': 'lookup_error', 'reason': sanitized_error(exc)}
             except Exception:
@@ -1007,11 +1088,12 @@ class SessionActor:
                        status='ok' if self.is_current(turn) else 'stale')
         if self.is_current(turn):
             if call['function']['name'] == 'search_places' and result.get('ok'):
-                self.recent_places = copy.deepcopy(result.get('places', []))
-                self.places.update({place['place_id']: copy.deepcopy(place) for place in self.recent_places})
-                self.place_turns.update({place['place_id']: turn.id for place in self.recent_places})
+                self.recent_places = [scoped_place(place, result.get('provider')) for place in result.get('places', [])]
+                result['places'] = copy.deepcopy(self.recent_places)
+                self.places.update({place['place_ref']: copy.deepcopy(place) for place in self.recent_places})
+                self.place_turns.update({place['place_ref']: turn.id for place in self.recent_places})
                 while len(self.places) > 50:
-                    self.place_turns.pop(self.places.pop(next(iter(self.places)))['place_id'], None)
+                    self.place_turns.pop(self.places.pop(next(iter(self.places)))['place_ref'], None)
             record = {'call_id': call['id'], 'tool': call['function']['name'], 'result': copy.deepcopy(result)}
             turn.lookup_results.append(record)
             self.emit('lookup.result', turn_id=turn.id, **record)
@@ -1038,7 +1120,14 @@ class SessionActor:
                 record['result'] = copy.deepcopy(result)
                 self.emit('lookup.result', turn_id=turn.id, **record)
 
+    def resolve_place_reference(self, reference):
+        if reference in self.places:
+            return reference
+        matches = [key for key, place in self.places.items() if place.get('place_id') == reference]
+        return matches[0] if len(matches) == 1 else None
+
     def poi_error(self, turn, place_id):
+        place_id = self.resolve_place_reference(place_id)
         if place_id not in self.places:
             return {'ok': False, 'executed': False, 'retry_model': True,
                     'code': 'unknown_place', 'reason': '该地点不在本会话真实查询结果中，请先search_places或重新选择。'}
@@ -1056,6 +1145,10 @@ class SessionActor:
         if error:
             turn.needs_model = True
             self.tool_result(turn, call, error)
+            return
+        place_id = self.resolve_place_reference(place_id)
+        if self.cockpit:
+            self.launch_cockpit(turn, call, 'manage_navigation', {'action': 'start', 'place_ref': place_id})
             return
         place = self.places[place_id]
         turn.poi_commands[call['id']] = copy.deepcopy(place)
@@ -1545,7 +1638,10 @@ class SessionActor:
 
     def send_command(self, turn, call, name, arguments, *, plan_parent_id=None, plan_action=None):
         command_id = uuid4().hex[:12]
-        wire = {'command_id': command_id, 'turn_id': turn.id, 'name': name, 'arguments': arguments}
+        kind = 'query' if TOOLS[name].state_mapping.get('operation') == 'read' else 'control'
+        wire = DeviceRequest(command_id, self.id, turn.id, 'vehicle', name, arguments, kind,
+                             'browser:' + self.id, int(TOOL_TIMEOUT * 1000)).to_wire()
+        wire['name'] = name
         if plan_parent_id is not None:
             wire.update(source='vehicle_plan', parent_call_id=plan_parent_id,
                         action_id=plan_action['id'], intent_id=plan_action['intent_id'],
@@ -1745,8 +1841,10 @@ class SessionActor:
                      not turn.tool_results[call['id']].get('retry_model') and
                      not (call['function']['name'] in TOOLS and TOOLS[call['function']['name']].state_mapping.get('operation') == 'read')
                      and (not mutations_only or call['function']['name'] in TOOLS
-                          or call['function']['name'] in {'delegate_vehicle_control', 'start_poi_navigation'})
-                     and call['function']['name'] not in READ_TOOLS]
+                          or call['function']['name'] in {'delegate_vehicle_control', 'start_poi_navigation', 'control_media', 'manage_navigation'})
+                     and call['function']['name'] not in READ_TOOLS
+                     and call['function']['name'] != 'search_media'
+                     and not turn.tool_results[call['id']].get('cockpit_read')]
         for item in all_calls:
             body = turn.tool_results[item['id']]
             if item['function']['name'] == 'delegate_vehicle_control' and body.get('source') == 'vehicle_plan':
@@ -1873,6 +1971,432 @@ class SessionActor:
         self.append_text(turn, text, source='thinker_full_report' if read_details else 'thinker_spoken_summary',
                          original_text=str(full_report))
         self.finish(turn)
+
+
+    def observed_media_state(self, result):
+        incoming, version = result.get('state'), result.get('state_version')
+        if not isinstance(incoming, dict) or type(version) is not int or version < self.cockpit_state['media']['version']:
+            raise CockpitError('stale_receipt', 'Invalid device status version')
+        if incoming.get('status') not in ('playing', 'paused', 'stopped', 'closed'):
+            raise CockpitError('device_failed', 'Invalid device playback status')
+        state = copy.deepcopy(self.cockpit_state['media'])
+        if incoming['status'] != 'closed':
+            if not isinstance(incoming.get('content_id'), str) or not incoming['content_id'] or incoming.get('kind') not in ('music', 'video', 'radio'):
+                raise CockpitError('device_failed', 'Invalid observed device content')
+        if incoming.get('desired_status', incoming['status']) not in ('playing', 'paused', 'stopped', 'closed'):
+            raise CockpitError('device_failed', 'Invalid observed desired status')
+        if 'title' in incoming and (not isinstance(incoming['title'], str) or len(incoming['title']) > 500):
+            raise CockpitError('device_failed', 'Invalid observed title')
+        for key in ('position_seconds', 'duration_seconds', 'volume'):
+            value = incoming.get(key)
+            if value is not None and (not finite(value) or value < 0 or key == 'volume' and value > 100):
+                raise CockpitError('device_failed', 'Invalid observed playback value')
+        for key in ('content_id', 'kind', 'title', 'status', 'desired_status', 'position_seconds', 'duration_seconds', 'volume', 'focus_reason'):
+            if key in incoming: state[key] = copy.deepcopy(incoming[key])
+        state['version'] = version
+        return state
+
+    def media_provider_info(self, kind=None, content_id=None):
+        if not self.cockpit:
+            return {'configured': False, 'execution_location': 'cloud'}
+        catalog = self.cockpit.media
+        if content_id and hasattr(catalog, 'content_provider_info'):
+            return catalog.content_provider_info(content_id)
+        if hasattr(catalog, 'provider_info'):
+            return catalog.provider_info(kind or 'music')
+        return catalog.info()
+
+    def tool_capabilities(self):
+        media_locations = {kind:self.media_provider_info(kind).get('execution_location', 'cloud') for kind in ('music','video','radio')}
+        places_location = getattr(getattr(self, 'maps', None), 'info', lambda: {})().get('execution_location', 'cloud')
+        route_location = self.cockpit.routes.info().get('execution_location', 'cloud') if self.cockpit and self.cockpit.routes else 'cloud'
+        rows = [ToolCapability('search_places', 'query', places_location, 'places'),
+                ToolCapability('control_media.get_status', 'query', 'device', 'media'),
+                ToolCapability('manage_navigation.get_status', 'query', 'cloud', 'navigation'),
+                ToolCapability('manage_navigation.route', 'query', route_location, 'navigation')]
+        rows.extend(ToolCapability('search_media.' + kind, 'query', location, 'media') for kind,location in media_locations.items())
+        rows.extend(ToolCapability('control_media.' + action, 'control', 'device', 'media')
+                    for action in ('play', 'pause', 'resume', 'stop', 'exit', 'next', 'previous', 'seek', 'volume'))
+        rows.extend(ToolCapability('manage_navigation.' + action, 'control', 'device', 'navigation')
+                    for action in ('start', 'add_waypoint', 'remove_waypoint', 'cancel', 'set_origin'))
+        return [row.to_dict() for row in rows]
+
+    def send_device_query(self, turn, call, domain, action, arguments, *, continuation=None):
+        identifier = uuid4().hex
+        wire = DeviceRequest(identifier, self.id, turn.id if turn else 'ui-' + uuid4().hex[:12],
+                             domain, action, arguments, 'query', 'browser:' + self.id, int(TOOL_TIMEOUT * 1000)).to_wire()
+        self.pending_cockpit[identifier] = {'wire': wire, 'turn': turn, 'call': call, 'continuation': continuation}
+        self.trace('device.query.dispatched', wire, turn, status='pending')
+        self.emit('cockpit.command', **wire)
+        async def expire():
+            await asyncio.sleep(TOOL_TIMEOUT)
+            await self.post({'type': '_cockpit_timeout', 'command_id': identifier})
+        self.spawn(expire())
+
+    def device_failure_result(self, wire, receipt):
+        failure = receipt_failure(wire, receipt)
+        result = self.cockpit_error(failure.code, domain=wire['domain'], action=wire['action'])
+        result.update(retryable=failure.retryable, execution_location='device',
+                      provider_error={**failure.public(), 'message': result['reason']})
+        return result
+
+    def trace_device_query(self, command, receipt, result, *, status=None):
+        wire, turn = command['wire'], command['turn']
+        failure = receipt_failure(wire, receipt) if receipt.get('ok') is False else None
+        self.trace('device.query.completed', {'request_id': wire['request_id'], 'domain': wire['domain'], 'action': wire['action'],
+                   'receipt': provider_diagnostic(receipt), 'result': provider_diagnostic(result),
+                   'provider_error': failure.public() if failure else None,
+                   'diagnostics': failure.details if failure else None}, turn,
+                   status=status or ('completed' if result.get('ok') else 'failed'))
+
+    def accept_device_query(self, command, receipt):
+        wire, turn, call = command['wire'], command['turn'], command['call']
+        if turn and not self.is_current(turn):
+            self.trace_device_query(command, receipt, {'ok': False, 'late': True}, status='stale')
+            return
+        result = receipt.get('result') if receipt['ok'] else self.device_failure_result(wire, receipt)
+        result = copy.deepcopy(result)
+        try:
+            if receipt['ok'] and result.get('ok', True) is not True:
+                raise CockpitError('device_failed', 'Device query result is not successful')
+            result['ok'] = receipt['ok']
+            result['execution_location'] = 'device'
+            if receipt['ok'] and wire['domain'] == 'media':
+                from backend.cockpit.media import media_item
+                if wire['action'] in ('search','resolve') and hasattr(self.cockpit.media,'scope_device_result'):
+                    result = self.cockpit.media.scope_device_result(wire['arguments']['kind'],result)
+                if wire['action'] == 'get_status':
+                    state = self.observed_media_state(result)
+                    continuation = command.get('continuation')
+                    if continuation and continuation['generation'] != self.cockpit_latest.get('media'):
+                        self.trace_device_query(command, receipt, {'ok': False, 'late': True}, status='stale')
+                        return
+                    self.cockpit_state['media'] = state
+                    self.emit('cockpit.state', domain='media', state=copy.deepcopy(state))
+                    if continuation:
+                        self.trace_device_query(command, receipt, {'ok': True, 'kind': 'media_status', 'state': state})
+                        self.launch_cockpit(turn, call, 'control_media', continuation['arguments'],
+                            trusted_selection=True, reserved_generation=continuation['generation'])
+                        self.cockpit_active['media']['retry_count'] = 1
+                        return
+                    result = {'ok': True, 'kind': 'media_status', 'state': copy.deepcopy(state), 'execution_location': 'device'}
+                elif wire['action'] == 'resolve':
+                    item = media_item(result.get('item'))
+                    logical_id = command['continuation']['arguments']['content_id']
+                    if item['content_id'] != logical_id:
+                        raise CockpitError('unknown_content', 'Device resolved a different content')
+                    continuation = command['continuation']
+                    if continuation['generation'] != self.cockpit_latest.get('media'):
+                        self.trace_device_query(command, receipt, {'ok': False, 'late': True}, status='stale')
+                        return
+                    self.media_choices[item['content_id']] = item
+                    self.trace_device_query(command, receipt, {'ok': True, 'kind': 'media_resolved', 'item': item})
+                    self.launch_cockpit(turn, call, continuation['name'], continuation['arguments'],
+                        trusted_selection=continuation['trusted_selection'], reserved_generation=continuation['generation'])
+                    return
+                if wire['action'] == 'search' and (not isinstance(result.get('items'), list) or len(result['items']) > wire['arguments'].get('max_results', 5)):
+                    raise CockpitError('invalid_action', 'Device catalog did not return items')
+                if wire['action'] == 'search':
+                    items = [media_item(item) for item in result['items']]
+                    if any(item['kind'] != wire['arguments']['kind'] for item in items):
+                        raise CockpitError('invalid_action', 'Device catalog returned a different kind')
+                    result.update(kind='media', items=items)
+                    self.media_choices = {item['content_id']: item for item in items}
+                    self.emit('cockpit.catalog', items=items, provider=result.get('provider'), execution_location='device')
+            if wire['domain'] == 'places' and turn:
+                if receipt['ok'] and not isinstance(result.get('places'), list):
+                    raise CockpitError('unknown_place', 'Device places query did not return places')
+                if receipt['ok']:
+                    result['places'] = [scoped_place(place, result.get('provider')) for place in result['places']]
+                result.setdefault('kind', 'places')
+                self.trace_device_query(command, receipt, result)
+                self.accept_lookup(turn, call, result)
+                return
+        except (CockpitError, TypeError, KeyError):
+            result = self.cockpit_error('device_failed')
+        self.trace_device_query(command, receipt, result)
+        if turn:
+            result['cockpit_read'] = True
+            self.tool_result(turn, call, result)
+        else:
+            self.emit('cockpit.result', domain=wire['domain'], result=result)
+        if command.get('continuation'): self.advance_cockpit('media', command['continuation'])
+
+    def cockpit_error(self, code, *, domain=None, action=None):
+        known = {'not_configured', 'unknown_content', 'unknown_place', 'place_not_confirmed', 'no_content',
+                 'queue_boundary', 'invalid_action', 'device_failed', 'device_timeout', 'stale_receipt', 'video_driving', 'route_not_configured', 'origin_required', 'unsupported_coordinate_system', 'unsupported_capability'}
+        key = code if code in known else 'device_failed'
+        if domain == 'navigation' and key == 'device_failed':
+            key = 'route_failed' if action == 'route' else 'navigation_failed'
+        return {'ok': False, 'code': code, 'executed': False, 'reason': cockpit_feedback(key),
+                'spoken_reason': cockpit_feedback(key)}
+
+    def cockpit_ui_control(self, event):
+        domain, action, arguments = event.get('domain'), event.get('action'), event.get('arguments', {})
+        if domain not in ('media', 'navigation') or not isinstance(arguments, dict):
+            self.emit('error', code='invalid_cockpit_control', message=cockpit_feedback('invalid_action'))
+            return
+        name = 'control_media' if domain == 'media' else 'manage_navigation'
+        if domain == 'media' and action == 'search':
+            validate(arguments, COCKPIT_BY_NAME['search_media']['function']['parameters'])
+            self.launch_cockpit(None, None, 'search_media', arguments, trusted_selection=True)
+            return
+        arguments = {**arguments, 'action': action}
+        validate(arguments, COCKPIT_BY_NAME[name]['function']['parameters'])
+        if domain == 'navigation' and action in ('start', 'add_waypoint', 'set_origin'):
+            reference = self.resolve_place_reference(arguments.get('place_ref'))
+            if not reference:
+                self.emit('error', code='unknown_place', message=cockpit_feedback('unknown_place'))
+                return
+            arguments['place_ref'] = reference
+        if arguments.get('origin_ref'):
+            reference = self.resolve_place_reference(arguments['origin_ref'])
+            if not reference:
+                self.emit('error', code='unknown_place', message=cockpit_feedback('unknown_place'))
+                return
+            arguments['origin_ref'] = reference
+        self.launch_cockpit(None, None, name, arguments, trusted_selection=True)
+
+    def launch_cockpit(self, turn, call, name, arguments, *, trusted_selection=False, reserved_generation=None):
+        if not self.cockpit:
+            result = self.cockpit_error('not_configured')
+            if turn: self.tool_result(turn, call, result)
+            else: self.emit('error', code=result['code'], message=result['reason'])
+            return
+        domain = 'navigation' if name == 'manage_navigation' else 'media'
+        action = arguments.get('action')
+        mutation = name != 'search_media' and action not in ('get_status', 'route')
+        active = self.cockpit_active.get(domain)
+        if mutation and reserved_generation is None and turn and active and active['turn'] is turn:
+            self.cockpit_deferred[domain].append((turn, call, name, arguments, trusted_selection))
+            return
+        snapshot = copy.deepcopy(self.cockpit_state[domain])
+        choices, places = copy.deepcopy(self.media_choices), copy.deepcopy(self.places)
+        if reserved_generation is None:
+            self.cockpit_generation += 1
+        generation = self.cockpit_generation if reserved_generation is None else reserved_generation
+        # Read-only queries do not invalidate a device command already in flight.
+        if mutation:
+            self.cockpit_latest[domain] = generation
+            self.cockpit_active[domain] = {'turn': turn, 'call': call, 'generation': generation}
+            if not turn: self.cockpit_deferred[domain].clear()
+        if domain == 'media' and action == 'get_status':
+            if turn: turn.has_reads = turn.needs_model = True
+            self.send_device_query(turn, call, 'media', 'get_status', {})
+            return
+        try:
+            provider_info = self.media_provider_info(arguments.get('kind') or snapshot.get('kind'),
+                arguments.get('content_id') if action == 'play' else None)
+        except CockpitError as error:
+            result = self.cockpit_error(error.code)
+            if turn: self.tool_result(turn,call,result)
+            else: self.emit('cockpit.result',domain=domain,result=result)
+            self.advance_cockpit(domain,{'generation':generation})
+            return
+        if provider_info.get('execution_location') == 'device':
+            if name == 'search_media':
+                if turn: turn.has_reads = turn.needs_model = True
+                self.send_device_query(turn, call, 'media', 'search', {**arguments, 'provider_binding':provider_info.get('binding')})
+                return
+            if domain == 'media' and action == 'play' and arguments.get('content_id') not in choices and trusted_selection:
+                raw_id = self.cockpit.media.device_content_id(arguments['content_id']) if hasattr(self.cockpit.media,'device_content_id') else arguments['content_id']
+                self.send_device_query(turn, call, 'media', 'resolve', {'content_id': raw_id, 'kind':provider_info.get('kind') or snapshot.get('kind'), 'provider_binding':provider_info.get('binding')},
+                    continuation={'name': name, 'arguments': arguments, 'trusted_selection': trusted_selection, 'generation': generation})
+                return
+        vehicle = copy.deepcopy(self.vehicle)
+        speaker_seat = turn.speaker_seat if turn else self.speaker_seat
+        if turn and (name == 'search_media' or action in ('get_status', 'route')):
+            turn.has_reads = turn.needs_model = True
+            turn.route = 'lookup'
+        async def prepare():
+            try:
+                async with asyncio.timeout(self.lookup_timeout):
+                    if name == 'search_media':
+                        result = await self.cockpit.media.search(**arguments)
+                        from backend.cockpit.media import media_item
+                        if not isinstance(result, dict) or result.get('ok') is not True or not isinstance(result.get('items'), list) or len(result['items']) > arguments.get('max_results', 5):
+                            raise CockpitError('invalid_content', 'Media provider returned an invalid catalog response')
+                        result['items'] = [media_item(item) for item in result['items']]
+                        if any(item['kind'] != arguments['kind'] for item in result['items']):
+                            raise CockpitError('invalid_content', 'Media provider returned a different kind')
+                        outcome = {'result': result, 'read': True, 'search': True}
+                    elif action == 'get_status':
+                        outcome = {'result': {'ok': True, 'kind': domain + '_status', 'state': snapshot}, 'read': True}
+                    elif domain == 'navigation' and action == 'route':
+                        if not snapshot.get('destination'):
+                            raise CockpitError('unknown_place', 'No navigation destination')
+                        origin = (places.get(arguments.get('origin_ref')) or snapshot.get('origin')
+                                  or vehicle.get('_meta', {}).get('coordinates'))
+                        result = await self.cockpit.route(origin, snapshot['destination'], snapshot['waypoints'])
+                        outcome = {'result': result, 'read': True}
+                    elif domain == 'media':
+                        command = await prepare_media(self.cockpit, action, arguments, snapshot, choices, trusted_selection=trusted_selection)
+                        if command['expected'].get('kind') == 'video' and vehicle['_meta'].get('speed_kph', 0) > 0 and speaker_seat == 'driver':
+                            raise CockpitError('video_driving', 'Driver video is unavailable while moving')
+                        outcome = {'command': command}
+                    else:
+                        outcome = {'command': prepare_navigation(action, arguments, snapshot, places)}
+            except asyncio.CancelledError:
+                return
+            except Exception as error:
+                code = getattr(error, 'code', 'device_failed')
+                if domain == 'navigation' and action == 'route' and code == 'not_configured': code = 'route_not_configured'
+                outcome = {'result': self.cockpit_error(code, domain=domain, action=action), 'read': False,
+                           'error': {'code': code,
+                                     'provider_error': redact(error.public()) if isinstance(error, ProviderError) else None,
+                                     'diagnostics': redact(error.details) if isinstance(error, ProviderError) else None}}
+            await self.post({'type': '_cockpit_prepared', 'turn': turn, 'call': call, 'name': name,
+                             'domain': domain, 'action': action, 'arguments': arguments, 'generation': generation,
+                             'version': snapshot['version'], 'outcome': outcome})
+        job = self.spawn(prepare())
+        if turn: turn.lookup_tasks[call['id']] = job
+
+    def accept_cockpit_prepared(self, event):
+        turn, call, domain = event['turn'], event['call'], event['domain']
+        outcome = event['outcome']
+        if turn and not self.is_current(turn):
+            self.trace('cockpit.stale', {'name': event['name'], 'stage': 'prepared'}, turn, status='stale')
+            return
+        if 'command' not in outcome:
+            result = outcome['result']
+            provider_trace = result.pop('_provider_trace', None)
+            self.trace('cockpit.prepared', {'name': event['name'], 'domain': domain, 'action': event.get('action'),
+                       'arguments': redact(event.get('arguments', {})), 'result': redact(result),
+                       'error': outcome.get('error'), 'provider_trace': provider_trace}, turn, status='completed' if result.get('ok') else 'failed')
+            if outcome.get('search') and result.get('ok'):
+                from backend.cockpit.media import media_item
+                items = [media_item(item) for item in result.get('items', [])]
+                self.media_choices = {item['content_id']: item for item in items}
+                result['items'] = items
+                self.emit('cockpit.catalog', items=items, provider=result.get('provider'))
+            if (event['name'] == 'manage_navigation' and result.get('ok') and outcome.get('read')
+                    and event['version'] == self.cockpit_state['navigation']['version']
+                    and result.get('provider') and result.get('configured') is True):
+                self.cockpit_state['navigation']['route'] = copy.deepcopy(result)
+                self.emit('cockpit.state', domain='navigation', state=copy.deepcopy(self.cockpit_state['navigation']))
+            if turn:
+                result['cockpit_read'] = outcome.get('read', False)
+                self.tool_result(turn, call, result)
+            else:
+                self.emit('cockpit.result', domain=domain, result=result)
+            self.advance_cockpit(domain, event)
+            return
+        if event['generation'] != self.cockpit_latest.get(domain) or event['version'] != self.cockpit_state[domain]['version']:
+            if turn: self.tool_result(turn, call, self.cockpit_error('stale_receipt'))
+            self.advance_cockpit(domain, event)
+            return
+        command = outcome['command']
+        if command.get('provider_trace'):
+            self.trace('cockpit.provider', {'name': event['name'], 'action': command['action'],
+                       'provider_trace': command['provider_trace']}, turn, status='completed')
+        command_id = uuid4().hex
+        wire = DeviceRequest(command_id, self.id, turn.id if turn else 'ui-' + uuid4().hex[:12],
+                             domain, command['action'], command['arguments'], 'control', 'browser:' + self.id,
+                             int(TOOL_TIMEOUT * 1000)).to_wire()
+        wire['expected_state_version'] = event['version']
+        self.pending_cockpit[command_id] = {**command, 'wire': wire, 'turn': turn, 'call': call, 'generation': event['generation']}
+        self.trace('cockpit.dispatched', {**wire, 'arguments': {key: ('[redacted playback capability]' if key == 'source_url' else value)
+                    for key,value in wire['arguments'].items()}}, turn, status='pending')
+        self.emit('cockpit.command', **wire)
+        async def expire():
+            await asyncio.sleep(TOOL_TIMEOUT)
+            await self.post({'type': '_cockpit_timeout', 'command_id': command_id})
+        self.spawn(expire())
+
+    def accept_cockpit_receipt(self, event):
+        command = self.pending_cockpit.get(event.get('command_id'))
+        if not command:
+            return
+        wire, turn = command['wire'], command['turn']
+        try:
+            validate_device_receipt(wire, event)
+        except CockpitError:
+            self.trace('cockpit.receipt.rejected', {'command_id': wire['command_id']}, turn, status='stale')
+            return
+        self.trace('device.receipt', {'request_id': wire['request_id'], 'domain': wire['domain'],
+                   'receipt': provider_diagnostic(event)}, turn, status='received')
+        self.pending_cockpit.pop(event['command_id'])
+        if wire['kind'] == 'query':
+            self.accept_device_query(command, event)
+            return
+        domain = wire['domain']
+        if (turn and not self.is_current(turn) or command['generation'] != self.cockpit_latest.get(domain)
+                or wire['expected_state_version'] != self.cockpit_state[domain]['version']
+                or event.get('turn_id', wire['turn_id']) != wire['turn_id']):
+            self.trace('cockpit.receipt', {'command_id': wire['command_id'], 'late': True}, turn, status='stale')
+            self.advance_cockpit(domain, command)
+            return
+        if (event.get('ok') is False and domain == 'media' and isinstance(event.get('error'), dict) and event['error'].get('code') == 'state_conflict'
+                and not self.cockpit_active.get(domain, {}).get('retry_count')):
+            active = self.cockpit_active.get(domain)
+            if active: active['retry_count'] = 1
+            arguments = {**wire['arguments'], 'action': wire['action']}
+            arguments = {key: value for key, value in arguments.items() if key in ('action', 'content_id', 'position_seconds', 'volume')}
+            self.send_device_query(turn, command['call'], 'media', 'get_status', {},
+                continuation={'generation': command['generation'], 'arguments': arguments})
+            return
+        if event.get('ok') is True:
+            try:
+                state = validated_receipt(command, event)
+                self.cockpit_state[domain] = state
+                result = {'ok': True, 'executed': True, 'domain': domain, 'state': copy.deepcopy(state),
+                          'feedback_kind': 'success', 'detail': cockpit_feedback('media_done' if domain == 'media' else 'navigation_done')}
+                self.emit('cockpit.state', domain=domain, state=copy.deepcopy(state))
+            except CockpitError as error:
+                result = self.cockpit_error(error.code, domain=domain, action=wire['action'])
+        else:
+            result = self.device_failure_result(wire, event)
+        self.trace('cockpit.receipt', {'command_id': wire['command_id'], 'result': result}, turn,
+                   status='completed' if result['ok'] else 'failed')
+        if turn:
+            self.tool_result(turn, command['call'], result)
+        else:
+            self.emit('cockpit.result', domain=domain, command_id=wire['command_id'], result=result)
+        self.advance_cockpit(domain, command)
+
+    def advance_cockpit(self, domain, operation):
+        active = self.cockpit_active.get(domain)
+        if not active or active['generation'] != operation.get('generation'):
+            return
+        self.cockpit_active.pop(domain)
+        pending = self.cockpit_deferred[domain]
+        while pending:
+            turn, call, name, arguments, trusted = pending.pop(0)
+            if self.is_current(turn):
+                self.launch_cockpit(turn, call, name, arguments, trusted_selection=trusted)
+                break
+
+    def cockpit_timeout(self, command_id):
+        command = self.pending_cockpit.pop(command_id, None)
+        if command is None:
+            return
+        result = self.cockpit_error('device_timeout')
+        turn = command['turn']
+        self.trace('cockpit.receipt', {'command_id': command_id, 'result': result}, turn, status='timeout')
+        if turn and self.is_current(turn): self.tool_result(turn, command['call'], result)
+        elif not turn: self.emit('cockpit.result', domain=command['wire']['domain'], result=result)
+        if command['wire']['kind'] == 'control': self.advance_cockpit(command['wire']['domain'], command)
+        elif command.get('continuation'):
+            self.advance_cockpit('media', command['continuation'])
+
+    def accept_media_state(self, event):
+        current, incoming = self.cockpit_state['media'], event.get('state')
+        if not isinstance(incoming, dict) or event.get('state_version') != current['version'] or incoming.get('content_id') != current['content_id']:
+            return
+        if incoming.get('status') not in ('playing', 'paused', 'stopped', 'closed'):
+            return
+        updated = copy.deepcopy(current)
+        for key in ('position_seconds', 'duration_seconds', 'volume'):
+            value = incoming.get(key)
+            if value is not None:
+                if not finite(value) or value < 0 or key == 'volume' and value > 100: return
+                updated[key] = value
+        updated['status'] = incoming['status']
+        if event.get('event') == 'ended' and incoming['status'] == incoming.get('desired_status') == 'stopped':
+            updated['desired_status'] = 'stopped'
+        updated['focus_reason'] = incoming.get('focus_reason') if incoming.get('focus_reason') == 'speech' else None
+        self.cockpit_state['media'] = updated
+        self.emit('cockpit.state', domain='media', state=copy.deepcopy(updated))
 
     async def close(self):
         await self.simulator.close()

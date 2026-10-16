@@ -5,20 +5,16 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Quer
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, FileResponse
 from pydantic import BaseModel, Field
-from backend.tts import VolcanoTTS
-from backend.asr import VolcanoASR
 from backend.asr_endpoint import recognize_socket
 from backend.handsfree_endpoint import listen_socket
 from backend.vad import vad_info
 from backend.catalog import TOOLS, SKILLS, HOT_TOOL_NAMES, COLD_TOOL_NAMES
 from backend.db import Database
-from backend.models import ArkClient
 from backend.persona import PERSONAS
 from backend.session import SessionActor
-from backend.google_maps import GoogleMapsClient
-from backend.web_search import WebSearchClient
-from backend.manual_search import ManualSearchClient
-from backend.settings import TALKER_MODEL, THINKER_MODEL, VEHICLE_CONTROL_MODEL
+from backend.settings import allowed_origins
+from backend.services.factory import create_services
+from backend.services.contracts import ProviderError
 from backend.prompt_config import validate_all
 
 actors = {}
@@ -26,11 +22,9 @@ actors = {}
 @asynccontextmanager
 async def lifespan(app):
     validate_all()
-    app.state.db, app.state.ark, app.state.tts = Database(), ArkClient(), VolcanoTTS()
-    app.state.asr = VolcanoASR()
-    app.state.maps = GoogleMapsClient()
-    app.state.web = WebSearchClient()
-    app.state.manual = ManualSearchClient()
+    app.state.services = services = create_services()
+    app.state.db, app.state.ark, app.state.tts = Database(), services.llm, services.tts
+    app.state.asr, app.state.maps, app.state.web, app.state.manual = services.asr, services.maps, services.web, services.manual
     await app.state.manual.prepare()
     app.state.prewarm = {'ok': None, 'status': 'warming'}
     async def warm_model():
@@ -42,31 +36,28 @@ async def lifespan(app):
     await asyncio.gather(*jobs, return_exceptions=True)
     await asyncio.gather(*(actor.close() for actor in actors.values()))
     actors.clear()
-    await app.state.ark.aclose()
-    await app.state.tts.aclose()
-    await app.state.asr.aclose()
-    await app.state.maps.aclose()
-    await app.state.web.aclose()
-    await app.state.manual.aclose()
+    await services.aclose()
 
 app = FastAPI(title='Super XD Talker–Thinker', lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=['http://localhost:5173', 'http://127.0.0.1:5173'], allow_methods=['GET', 'POST'], allow_headers=['Content-Type'])
+app.add_middleware(CORSMiddleware, allow_origins=sorted(allowed_origins()), allow_methods=['GET', 'POST', 'HEAD'], allow_headers=['Content-Type', 'Range'])
 
 @app.get('/api/health')
 def health():
-    return {'ok': True, 'sessions': len(actors), 'model_prewarm': app.state.prewarm, 'retrieval': retrieval_status(), 'manual': app.state.manual.info(), 'tts': app.state.tts.info(), 'asr': app.state.asr.info()}
+    return {'ok': True, 'sessions': len(actors), 'model_prewarm': app.state.prewarm, 'retrieval': retrieval_status(), 'manual': app.state.manual.info(), 'tts': app.state.tts.info(), 'asr': app.state.asr.info(), 'services': app.state.services.info()}
 
 def retrieval_status():
     return {'status': 'disabled', 'model': None, 'reason': '车控目录按skill直接加载；车书检索状态见manual字段。'}
 
 @app.get('/api/config')
 def config():
+    models = app.state.services.llm.info()['roles']
     return {'personas': [p.model_dump() for p in PERSONAS.values()],
             'catalog': {'tools': [t.model_dump() for t in TOOLS.values()], 'skills': [s.model_dump() for s in SKILLS.values()], 'hot_tool_names': HOT_TOOL_NAMES},
-            'model': {'talker': TALKER_MODEL, 'thinker': THINKER_MODEL, 'vehicle_planner': VEHICLE_CONTROL_MODEL},
+            'model': {'talker': models['talker']['model'], 'thinker': models['thinker']['model'], 'vehicle_planner': models['planner']['model']},
             'vehicle_control': {'mode': 'progressive_pro', 'hot_count': len(HOT_TOOL_NAMES),
                                 'delegated_count': len(COLD_TOOL_NAMES)},
             'maps': app.state.maps.info(), 'web_search': app.state.web.info(), 'manual': app.state.manual.info(),
+            'services': app.state.services.info(), 'cockpit': app.state.services.cockpit.info(),
             'retrieval': retrieval_status(), 'tts': app.state.tts.info(), 'asr': app.state.asr.info(),
             'vad': vad_info()}
 
@@ -74,8 +65,48 @@ def config():
 async def create_session():
     session_id = uuid4().hex[:16]
     actors[session_id] = SessionActor(session_id, app.state.db, app.state.ark, app.state.tts,
-                                    maps=app.state.maps, web=app.state.web, manual=app.state.manual)
+                                    maps=app.state.maps, web=app.state.web, manual=app.state.manual,
+                                    cockpit=app.state.services.cockpit)
     return {'session_id': session_id}
+
+
+@app.get('/api/services')
+def services_status():
+    return app.state.services.info()
+
+
+@app.get('/api/media/catalog')
+async def media_catalog(kind: str | None = None, query: str | None = None):
+    from backend.cockpit.media import CockpitError, media_item
+    provider = app.state.services.cockpit.media
+    info = provider.info()
+    if kind is not None and kind not in {'music', 'video', 'radio'}:
+        raise HTTPException(400, 'Unknown media kind')
+    selected = provider.provider_info(kind or 'music')
+    if not selected.get('configured'):
+        return {**info, 'ok': False, 'items': [], 'error': {'code': 'not_configured', 'message': 'Selected content CP is not configured'}}
+    if query is not None:
+        if not query.strip() or len(query) > 300:
+            raise HTTPException(400, 'Media query must contain 1–300 characters')
+        try:
+            result = await provider.search(kind=kind or 'music', query=query, max_results=5)
+            return {**result, **info}
+        except (CockpitError, ProviderError) as error:
+            return {**info, 'ok': False, 'items': [], 'error': {'code': error.code, 'message': str(error)}}
+    entries = getattr(provider, 'entries', {})
+    # Only an explicitly configured local catalog exposes playback URLs here.
+    items = [media_item(item, playable=True) for item in entries.values()
+             if kind is None or item['kind'] == kind]
+    return {**info, 'ok': True, 'items': items}
+
+
+@app.api_route('/api/media/files/{content_id}', methods=['GET', 'HEAD'])
+async def media_file(content_id: str):
+    path = app.state.services.media_files.get(content_id)
+    if path is None or not path.is_file():
+        raise HTTPException(404, 'Media content was not found in the configured catalog')
+    return FileResponse(path, filename=path.name, content_disposition_type='inline',
+                        headers={'Cache-Control': 'private, max-age=3600'})
 
 
 @app.get('/api/manual/pdf')
@@ -138,7 +169,7 @@ async def websocket(ws: WebSocket, session_id: str):
         return
     # This prototype is local-only. Reject cross-origin browser websocket requests.
     origin = ws.headers.get('origin')
-    if origin and origin not in {'http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:8000', 'http://127.0.0.1:8000'}:
+    if origin and origin not in allowed_origins():
         await ws.close(code=4403)
         return
     await ws.accept()
@@ -173,8 +204,7 @@ async def audio_websocket(ws: WebSocket, session_id: str):
         await ws.close(code=4404)
         return
     origin = ws.headers.get('origin')
-    if origin and origin not in {'http://localhost:5173', 'http://127.0.0.1:5173',
-                                 'http://localhost:8000', 'http://127.0.0.1:8000'}:
+    if origin and origin not in allowed_origins():
         await ws.close(code=4403)
         return
     await ws.accept()

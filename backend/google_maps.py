@@ -29,9 +29,10 @@ NEAR_RADIUS_M = 50000  # Bias radius; a city's airports can be 30+ km from its c
 
 
 class GoogleMapsClient:
-    def __init__(self, client=None, api_key=None, now=None):
+    def __init__(self, client=None, api_key=None, now=None, *, coverage_fallback=True, timeout_seconds=10):
+        self.coverage_fallback = coverage_fallback
         self.key = os.getenv('GOOGLE_MAPS_API_KEY', '') if api_key is None else api_key
-        self.client = client or httpx.AsyncClient(timeout=10, follow_redirects=False)
+        self.client = client or httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=False)
         self.owns_client = client is None
         self.now = now or (lambda: datetime.now(timezone.utc))
 
@@ -140,6 +141,8 @@ class GoogleMapsClient:
             data = await self._request('GET', 'https://weather.googleapis.com/v1/' + endpoint, params=params)
         except MapsError as exc:
             if exc.code != 'unsupported_location':
+                raise
+            if not self.coverage_fallback:
                 raise
             return await self._fallback_weather(place, date)
         try:

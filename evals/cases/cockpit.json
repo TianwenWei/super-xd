@@ -1,0 +1,249 @@
+[
+  {
+    "id": "cockpit_pause",
+    "tags": [
+      "cockpit"
+    ],
+    "personas": [
+      "professional",
+      "warm",
+      "playful"
+    ],
+    "cockpit": {
+      "items": [
+        {
+          "content_id": "fixture:rain",
+          "kind": "music",
+          "title": "清晨细雨",
+          "source_url": "https://media.example/fixture-rain.mp3"
+        }
+      ],
+      "state": {
+        "media.content_id": "fixture:rain",
+        "media.kind": "music",
+        "media.title": "清晨细雨",
+        "media.status": "playing",
+        "media.desired_status": "playing"
+      }
+    },
+    "turns": [
+      {
+        "input": "先把正在放的声音暂停吧",
+        "expect": {
+          "talker_calls": [
+            {
+              "name": "control_media",
+              "arguments": {
+                "action": "pause"
+              }
+            }
+          ],
+          "forbid_talker_calls": [
+            "delegate_vehicle_control",
+            "delegate_task"
+          ],
+          "no_commands": true,
+          "cockpit_commands": [
+            {
+              "domain": "media",
+              "action": "pause"
+            }
+          ],
+          "cockpit_commands_exact": true,
+          "cockpit_state": {
+            "media.status": "paused"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "id": "cockpit_exit",
+    "tags": [
+      "cockpit"
+    ],
+    "personas": [
+      "professional",
+      "warm",
+      "playful"
+    ],
+    "cockpit": {
+      "items": [
+        {
+          "content_id": "fixture:rain",
+          "kind": "music",
+          "title": "清晨细雨",
+          "source_url": "https://media.example/fixture-rain.mp3"
+        }
+      ],
+      "state": {
+        "media.content_id": "fixture:rain",
+        "media.kind": "music",
+        "media.title": "清晨细雨",
+        "media.status": "playing",
+        "media.desired_status": "playing"
+      }
+    },
+    "turns": [
+      {
+        "input": "不听了，退出音乐程序",
+        "expect": {
+          "talker_calls": [
+            {
+              "name": "control_media",
+              "arguments": {
+                "action": "exit"
+              }
+            }
+          ],
+          "forbid_talker_calls": [
+            "delegate_vehicle_control",
+            "delegate_task"
+          ],
+          "no_commands": true,
+          "cockpit_commands": [
+            {
+              "domain": "media",
+              "action": "exit"
+            }
+          ],
+          "cockpit_commands_exact": true,
+          "cockpit_state": {
+            "media.status": "closed"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "id": "cockpit_stop",
+    "tags": [
+      "cockpit"
+    ],
+    "personas": [
+      "professional",
+      "warm",
+      "playful"
+    ],
+    "cockpit": {
+      "items": [
+        {
+          "content_id": "fixture:rain",
+          "kind": "music",
+          "title": "清晨细雨",
+          "source_url": "https://media.example/fixture-rain.mp3"
+        }
+      ],
+      "state": {
+        "media.content_id": "fixture:rain",
+        "media.kind": "music",
+        "media.title": "清晨细雨",
+        "media.status": "playing",
+        "media.desired_status": "playing"
+      }
+    },
+    "turns": [
+      {
+        "input": "停止当前这首歌，但不用退出",
+        "expect": {
+          "talker_calls": [
+            {
+              "name": "control_media",
+              "arguments": {
+                "action": "stop"
+              }
+            }
+          ],
+          "forbid_talker_calls": [
+            "delegate_vehicle_control",
+            "delegate_task"
+          ],
+          "no_commands": true,
+          "cockpit_commands": [
+            {
+              "domain": "media",
+              "action": "stop"
+            }
+          ],
+          "cockpit_commands_exact": true,
+          "cockpit_state": {
+            "media.status": "stopped"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "id": "cockpit_seek",
+    "tags": [
+      "cockpit"
+    ],
+    "cockpit": {
+      "items": [
+        {
+          "content_id": "fixture:rain",
+          "kind": "music",
+          "title": "清晨细雨",
+          "source_url": "https://media.example/fixture-rain.mp3"
+        }
+      ],
+      "state": {
+        "media.content_id": "fixture:rain",
+        "media.kind": "music",
+        "media.title": "清晨细雨",
+        "media.status": "playing",
+        "media.desired_status": "playing",
+        "media.duration_seconds": 300
+      }
+    },
+    "turns": [
+      {
+        "input": "跳到这首歌的第八十五秒",
+        "expect": {
+          "talker_calls": [
+            {
+              "name": "control_media",
+              "arguments": {
+                "action": "seek",
+                "position_seconds": 85
+              }
+            }
+          ],
+          "no_commands": true,
+          "cockpit_state": {
+            "media.position_seconds": 85
+          }
+        }
+      }
+    ]
+  },
+  {
+    "id": "cockpit_radio_search",
+    "tags": [
+      "cockpit"
+    ],
+    "cockpit": {
+      "items": []
+    },
+    "turns": [
+      {
+        "input": "在网络电台里搜一下爵士频道",
+        "expect": {
+          "talker_calls": [
+            {
+              "name": "search_media",
+              "arguments": {
+                "kind": "radio"
+              }
+            }
+          ],
+          "forbid_talker_calls": [
+            "delegate_vehicle_control",
+            "web_search"
+          ],
+          "no_commands": true
+        }
+      }
+    ]
+  }
+]

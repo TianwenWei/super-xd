@@ -312,7 +312,9 @@ class SpeechStream:
                 if self.finished:
                     return
         except asyncio.TimeoutError:
-            raise RuntimeError('火山 Speech WS 等待流式音频超时。') from None
+            error = RuntimeError('火山 Speech WS 等待流式音频超时。')
+            error.provider_code = 'timeout'
+            raise error from None
         except asyncio.CancelledError:
             raise
         except RuntimeError:
@@ -321,7 +323,9 @@ class SpeechStream:
             # Never expose WebSocket request/response headers in diagnostics.
             status = getattr(getattr(exc, 'response', None), 'status_code', None)
             detail = f'HTTP {status}' if status is not None else type(exc).__name__
-            raise RuntimeError('火山 Speech WS 连接或流式合成失败：' + self.safe_message(detail)) from None
+            error = RuntimeError('火山 Speech WS 连接或流式合成失败：' + self.safe_message(detail))
+            error.status_code = status
+            raise error from None
         finally:
             await self.aclose()
 

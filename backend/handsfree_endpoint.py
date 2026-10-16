@@ -8,6 +8,8 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from backend.asr_endpoint import ALLOWED_ORIGINS, ASRInputError, _active, control_message
 from backend.textutil import is_identifier
+from backend.services.audio import PCM16K_ASR
+from backend.services.contracts import ProviderError, redact
 from backend.vad import FRAME_BYTES, SileroVAD, SpeechGate, vad_info
 
 
@@ -27,6 +29,7 @@ async def listen_socket(ws: WebSocket, actor, asr, *, vad_factory=SileroVAD):
         await ws.close(code=4404 if actor is None else 4403)
         return
     await ws.accept()
+    audio_format = getattr(asr, 'input_format', PCM16K_ASR)
     listen_id, segment, claimed = None, None, False
     marker = object()
     jobs = set()
@@ -94,10 +97,13 @@ async def listen_socket(ws: WebSocket, actor, asr, *, vad_factory=SileroVAD):
             raise
         except Exception as exc:
             message = asr.safe_message(exc)
-            actor.trace('asr.error', {'capture_id': target.id, 'error': message, 'mode': 'handsfree'},
+            actor.trace('asr.error', {'capture_id': target.id, 'error': message, 'mode': 'handsfree',
+                        'provider_error': redact(exc.public()) if isinstance(exc, ProviderError) else None,
+                        'diagnostics': redact(exc.details) if isinstance(exc, ProviderError) else None},
                         call_id=target.id, status='failed')
             if segment is target:
-                await emit('voice.error', capture_id=target.id, message=message)
+                await emit('voice.error', capture_id=target.id, message=message,
+                           provider_code=exc.code if isinstance(exc, ProviderError) else None)
         finally:
             if sender:
                 sender.cancel()
@@ -112,11 +118,11 @@ async def listen_socket(ws: WebSocket, actor, asr, *, vad_factory=SileroVAD):
         body = control_message(event)
         listen_id = body.get('listen_id')
         if (body.get('type') != 'voice.start' or not is_identifier(listen_id, max_length=80)
-                or body.get('format') != 'pcm_s16le' or type(body.get('sample_rate')) is not int
-                or body['sample_rate'] != 16000 or type(body.get('channels')) is not int or body['channels'] != 1):
+                or body.get('format') != audio_format.format or type(body.get('sample_rate')) is not int
+                or body['sample_rate'] != audio_format.sample_rate or type(body.get('channels')) is not int or body['channels'] != audio_format.channels):
             raise ASRInputError('免按键对话需要16kHz单声道PCM和有效监听标识。')
         if not asr.info().get('configured'):
-            raise ASRInputError('火山 ASR 尚未配置，无法开始免按键对话。')
+            raise ASRInputError('ASR 服务尚未配置，无法开始免按键对话。')
         if actor.id in _active:
             raise ASRInputError('这个会话已有语音连接，请先关闭另一处录音。')
         _active[actor.id], claimed = marker, True
@@ -154,7 +160,7 @@ async def listen_socket(ws: WebSocket, actor, asr, *, vad_factory=SileroVAD):
             if segment and not segment.ended:
                 for chunk in result['audio']:
                     segment.pcm_bytes += len(chunk)
-                    if segment.pcm_bytes > 16000 * 2 * 55:
+                    if segment.pcm_bytes > int(audio_format.bytes_per_ms * 55000):
                         raise ASRInputError('连续说话超过55秒，本段未发送，请停顿后分段说。')
                     try:
                         segment.audio.put_nowait(chunk)
@@ -175,7 +181,8 @@ async def listen_socket(ws: WebSocket, actor, asr, *, vad_factory=SileroVAD):
         pass
     except Exception as exc:
         try:
-            await emit('voice.error', message=asr.safe_message(exc))
+            await emit('voice.error', message=asr.safe_message(exc),
+                       provider_code=exc.code if isinstance(exc, ProviderError) else None)
         except (RuntimeError, WebSocketDisconnect):
             pass
     finally:

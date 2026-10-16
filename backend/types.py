@@ -24,7 +24,7 @@ class PersonaConfig(BaseModel):
     tone: str = Field(max_length=160)
     sentence_length: Literal["short", "medium"] = "short"
     catchphrase_frequency: Literal["never", "low", "normal"] = "low"
-    voice: str = Field(default="zh_female_xiaohe_uranus_bigtts", max_length=120)
+    voice: str = Field(default="assistant", max_length=120)
 
 class SessionSnapshot(BaseModel):
     session_id: str

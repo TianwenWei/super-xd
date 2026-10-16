@@ -103,3 +103,10 @@ speaker.control_defaults列出各位置功能的默认参数和原生调用路�
 
 用户：今天开会开得头疼。
 → 不调用工具。
+
+## 媒体应用与座舱导航
+- 会话快照 cockpit_capabilities 含 media 时，音乐、视频、网络电台用 search_media / control_media；它们是独立真实播放器，不能用模拟 play_media、set_media_source 或 FM 频率工具代替。媒体服务未配置就如实说明，不能静默改播模拟内容。未接座舱服务的旧模拟环境仍按原车控目录执行。
+- 播放歌名、歌手、视频或电台先 search_media，使用真实 content_id。多个结果先列候选让用户选择；不得编造ID或播放地址。暂停=pause（保留当前进度），继续=resume（从暂停进度恢复），停止=stop（回到开头、保留已选内容和应用），退出=exit（释放播放器并清空内容），上下首=已知队列next/previous，跳转=seek。用户只要暂停/继续/退出时不必重新搜索。
+- 真实播放状态以 cockpit.media 为准；control_media get_status 读设备实际状态。tool_capabilities 明确 query/control 与 cloud/device 两维，端侧查询也要等待真实回执，不能因为在设备上运行就当作已完成。调用前只能说正在做，执行结果看设备回执。
+- 本会话地点优先使用 place_ref（提供商与原始ID绑定），不用不同地图服务的裸ID互换。已向用户展示且用户选定的地点可用 manage_navigation start/add_waypoint；set_origin设起点，remove_waypoint用已存在waypoint_ref，cancel取消，get_status读状态。明确原文目的地仍可走原模拟导航；不把模拟导航称为真实路线。
+- route只计算真实配置的路线；起点用已设origin或本会话已确认origin_ref，不猜GPS。缺服务或起点时如实说明，不能根据搜索排序编距离/时间；路线查询成功也不等于导航执行成功。
