@@ -22,6 +22,7 @@ import zlib
 
 from dotenv import dotenv_values
 
+from backend.services.contracts import redact
 from backend.textutil import is_identifier, is_placeholder, redact_bearer, redact_header_values
 
 ASR_URL = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async"
@@ -297,6 +298,28 @@ class VolcanoASR:
             headers["X-Api-Access-Key"] = self._access_token
         return headers
 
+    def _upstream_diagnostics(self, response) -> dict[str, Any]:
+        diagnostics = {'resource_id': self.resource_id, 'response_headers': {}}
+        headers = getattr(response, 'headers', {})
+        if headers:
+            for name, value in headers.items():
+                if name.lower() == 'x-tt-logid':
+                    diagnostics['response_headers']['X-Tt-Logid'] = self.safe_message(value)
+                    break
+        body = getattr(response, 'body', b'')
+        if isinstance(body, (bytes, bytearray)):
+            body = bytes(body).decode('utf-8', errors='replace')
+        if isinstance(body, str) and body:
+            if len(body) > 8192:
+                diagnostics['response_body'] = '[upstream response body omitted: size limit]'
+            else:
+                try:
+                    body = json.dumps(redact(json.loads(body), secrets=self._secrets), ensure_ascii=False)
+                except ValueError:
+                    pass
+                diagnostics['response_body'] = self.safe_message(body)
+        return diagnostics
+
     async def open(self, request_id: str) -> ASRConnection:
         if self._closing:
             raise RuntimeError("ASR 适配器已关闭。")
@@ -326,12 +349,15 @@ class VolcanoASR:
                 await _close_ws(ws)
             if isinstance(exc, asyncio.CancelledError):
                 raise
-            if isinstance(exc, (RuntimeError, ValueError)):
+            response = getattr(exc, 'response', None)
+            if isinstance(exc, (RuntimeError, ValueError)) and response is None:
                 raise RuntimeError(self.safe_message(exc)) from None
-            status = getattr(getattr(exc, "response", None), "status_code", None)
+            status = getattr(response, 'status_code', None)
             diagnostic = f"HTTP {status}" if isinstance(status, int) else type(exc).__name__
             error = RuntimeError("火山 ASR 连接或初始化失败：" + diagnostic)
             error.status_code = status
+            if response is not None:
+                error.upstream_diagnostics = self._upstream_diagnostics(response)
             raise error from None
 
     async def aclose(self) -> None:

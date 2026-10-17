@@ -3,12 +3,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import ts from 'typescript';
+const activationSource = fs.readFileSync(new URL('../src/audioActivation.ts', import.meta.url), 'utf8');
+const activationCompiled = ts.transpileModule(activationSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
+const activationModule = `data:text/javascript;base64,${Buffer.from(activationCompiled).toString('base64')}`;
 const source = fs.readFileSync(new URL('../src/StreamingSpeech.ts', import.meta.url), 'utf8');
 const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
 const textSource = fs.readFileSync(new URL('../src/text.ts', import.meta.url), 'utf8');
 const textCompiled = ts.transpileModule(textSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
 const textModule = `data:text/javascript;base64,${Buffer.from(textCompiled).toString('base64')}`;
-const { StreamingSpeech } = await import(`data:text/javascript;base64,${Buffer.from(compiled.replace("from './text'", `from '${textModule}'`)).toString('base64')}`);
+const { StreamingSpeech } = await import(`data:text/javascript;base64,${Buffer.from(compiled.replace("from './text'", `from '${textModule}'`).replace("from './audioActivation'", `from '${activationModule}'`)).toString('base64')}`);
 let sockets = [], nodes = [];
 globalThis.location = { protocol: 'http:', host: 'localhost' };
 globalThis.WebSocket = class { static OPEN=1; static CONNECTING=0; readyState=1; constructor() { sockets.push(this); } close() {} };
@@ -43,5 +46,50 @@ test('cancel waits for worklet progress and reports it under the cancelled playb
   await stopped;
   const report=h.sent.find(m=>m.type==='audio.played');
   assert.equal(report.turn_id,'turn-a'); assert.equal(report.playback_id,id('a')); assert.equal(report.played_ms,500);
+  h.engine.dispose();
+});
+
+test('audio transport loss clears actual availability while retaining enabled preference for reconnect', async()=>{
+  sockets=[];nodes=[];const available=[];
+  const engine=new StreamingSpeech({send:()=>{},phase:()=>{},metrics:()=>{},records:()=>{},error:()=>{},allowed:()=>true,availability:value=>available.push(value)});
+  engine.connect('session');await engine.setEnabled(true);
+  assert.equal(available.at(-1),true);
+  sockets.at(-1).onclose({code:1006});
+  assert.equal(available.at(-1),false);
+  engine.dispose();
+});
+
+test('audio before control start followed by VAD cancellation preserves the valid text turn but rejects late audio',async()=>{
+  const h=await setup();h.engine.submit('request-a','query',performance.now(),[]);
+  start(h.engine);h.socket.onmessage({data:packet(id('a'))});
+  const bytes=h.records()[0].pcm_bytes;
+  void h.engine.cancel('voice_activity');
+  assert.equal(h.engine.acceptsTurn('turn-a','request-a'),true);
+  h.engine.turnStarted('turn-a','request-a');
+  start(h.engine);h.socket.onmessage({data:packet(id('a'))});
+  assert.equal(h.records()[0].pcm_bytes,bytes);
+  assert.equal(h.records()[0].status,'cancelled');
+  assert.equal(h.node.sent.filter(message=>message.type==='start').length,1);
+  h.engine.dispose();
+});
+
+test('explicit turn interruption rejects late control starts independently of audio-only cancellation',async()=>{
+  const h=await setup();h.engine.submit('request-a','query',performance.now(),[]);start(h.engine);
+  h.engine.interrupted('turn-a');
+  assert.equal(h.engine.acceptsTurn('turn-a','request-a'),false);
+  assert.equal(h.engine.acceptsTurn('turn-a'),false);
+  h.engine.dispose();
+});
+
+test('new input supersedes requested and proactive turns even when the late control start has no request ID',async()=>{
+  const h=await setup();h.engine.submit('request-a','old',performance.now(),[]);start(h.engine);
+  h.engine.submit('request-b','new',performance.now(),[]);
+  assert.equal(h.engine.acceptsTurn('turn-a','request-a'),false);
+  assert.equal(h.engine.acceptsTurn('turn-a'),false);
+  start(h.engine,'request-b','turn-b',id('b'));
+  assert.equal(h.engine.acceptsTurn('turn-b','request-b'),true);
+  h.engine.metadata({type:'audio.started',turn_id:'background',playback_id:id('c'),sample_rate:24000,format:'pcm_s16le',channels:1});
+  h.engine.submit('request-c','next',performance.now(),[]);
+  assert.equal(h.engine.acceptsTurn('background'),false);
   h.engine.dispose();
 });

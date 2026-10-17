@@ -7,6 +7,7 @@ import pytest
 
 from backend.db import Database
 from backend.handsfree_endpoint import listen_socket
+from backend.services.contracts import ProviderError
 from backend.session import SessionActor
 
 
@@ -187,3 +188,48 @@ async def test_asr_final_before_endpoint_is_rejected(voice):
     await asr.connections[-1].events.put({'type': 'final', 'text': '过早结果'})
     assert '提前关闭' in (await socket.event('voice.error'))['message']
     assert not actor.turns
+
+
+async def test_failed_asr_segment_keeps_listening_after_more_than_queue_capacity(tmp_path):
+    class DeniedASR(ASR):
+        def __init__(self):
+            super().__init__()
+            self.attempts = []
+
+        async def open(self, capture):
+            self.attempts.append(capture)
+            raise ProviderError('auth', 'ASR resource not granted', provider='offline', retryable=False)
+
+    actor = SessionActor('failed-asr-listener', Database(tmp_path / 'voice.sqlite3'), Ark())
+    await actor.attach()
+    socket, asr = Socket(), DeniedASR()
+    runner = asyncio.create_task(listen_socket(socket, actor, asr, vad_factory=VAD))
+    try:
+        await socket.incoming.put({'type': 'websocket.receive', 'text': json.dumps({
+            'type': 'voice.start', 'listen_id': 'failed-listener', 'sample_rate': 16000,
+            'format': 'pcm_s16le', 'channels': 1})})
+        await socket.event('voice.ready')
+        await socket.frames(True, 3)
+        first = (await socket.event('voice.speech_start'))['capture_id']
+        failure = await socket.event('voice.error')
+        assert failure['capture_id'] == first and failure['provider_code'] == 'auth'
+
+        # More PCM than the dead upload queue can hold must still reach VAD.
+        await socket.frames(True, 110)
+        await socket.frames(False, 20)
+        assert (await socket.event('voice.speech_end'))['capture_id'] == first
+        assert not runner.done() and asr.attempts == [first]
+        await actor.queue.join()
+        assert actor.asr_capture_id is None and not actor.turns
+
+        await socket.frames(True, 3)
+        second = (await socket.event('voice.speech_start'))['capture_id']
+        assert second != first
+        assert (await socket.event('voice.error'))['capture_id'] == second
+        assert asr.attempts == [first, second]
+        assert not runner.done() and not actor.turns
+        assert all(event['type'] != 'voice.final' for event in list(socket.outgoing._queue))
+    finally:
+        await socket.incoming.put({'type': 'websocket.disconnect'})
+        await asyncio.wait_for(runner, 2)
+        await actor.close()

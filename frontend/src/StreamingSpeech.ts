@@ -1,8 +1,9 @@
 import type { AudioMeasurement, SpeechMetrics, TaskCardData } from './types';
 import { isHex } from './text';
+import { resumeAudioContext } from './audioActivation';
 
 interface AudioStarted { type: string; turn_id: string; playback_id: string; client_request_id?: string; sample_rate: number; format: string; channels: number; [key: string]: unknown }
-interface Callbacks { send: (value: Record<string, unknown>) => void; phase: (value: 'idle' | 'synthesizing' | 'playing') => void; metrics: (turn: string, metrics: SpeechMetrics) => void; records: (records: AudioMeasurement[]) => void; error: (message: string) => void; allowed: (turn: string) => boolean }
+interface Callbacks { send: (value: Record<string, unknown>) => void; phase: (value: 'idle' | 'synthesizing' | 'playing') => void; metrics: (turn: string, metrics: SpeechMetrics) => void; records: (records: AudioMeasurement[]) => void; error: (message: string) => void; allowed: (turn: string) => boolean; availability?: (available: boolean) => void }
 interface Query { id: string; text: string; submitted: number; epoch: number; superseded: boolean; tasks: Array<{id: string; status: string}> }
 interface Playback { turn: string; id: string; record: AudioMeasurement; inputEnded: boolean }
 
@@ -22,6 +23,7 @@ export class StreamingSpeech {
   private stopping = new Map<string, { turn: string; done: () => void; promise: Promise<void> }>();
   private rejected = new Set<string>();
   private rejectedTurns = new Set<string>();
+  private invalidatedTurns = new Set<string>();
   private queries = new Map<string, Query>();
   private turns = new Map<string, string>();
   private measurements = new Map<string, AudioMeasurement>();
@@ -34,11 +36,12 @@ export class StreamingSpeech {
   constructor(private callbacks: Callbacks) {}
 
   configure(provider: string, voice: string) { this.provider = provider; this.voice = voice; }
+  private publishAvailability() { this.callbacks.availability?.(this.enabled && !this.closed && !!this.node && this.context?.state === 'running' && this.socket?.readyState === WebSocket.OPEN); }
   async unlock() {
-    if (!this.context) this.context = new AudioContext({ latencyHint: 'interactive' });
+    if (!this.context) { this.context = new AudioContext({ latencyHint: 'interactive' }); this.context.onstatechange = () => this.publishAvailability(); }
     const context = this.context;
     // resume() is invoked in the original click/Enter gesture, before any await.
-    const resumed = context.resume();
+    const resumed = resumeAudioContext(context);
     if (!this.initializing) this.initializing = context.audioWorklet.addModule('/pcm-player-worklet.js').then(() => {
       const node = new AudioWorkletNode(context, 'super-xd-pcm-player', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [1] });
       node.port.onmessage = event => this.onWorklet(event.data);
@@ -47,15 +50,16 @@ export class StreamingSpeech {
     }).catch(error => { this.initializing = null; throw error; });
     await Promise.all([resumed, this.initializing]);
     if (context.state !== 'running') throw new Error('浏览器音频尚未解锁，请再次点击火山朗读。');
+    this.publishAvailability();
   }
   async setEnabled(value: boolean): Promise<boolean> {
     const generation = ++this.enableGeneration;
-    if (!value) { this.enabled = false; this.cancel('disabled'); this.callbacks.send({ type: 'audio.configure', enabled: false }); return false; }
+    if (!value) { this.enabled = false; this.publishAvailability(); this.cancel('disabled'); this.callbacks.send({ type: 'audio.configure', enabled: false }); return false; }
     this.enableRequestedPerf = performance.now(); this.enableReadyPerf = undefined;
     await this.unlock();
     await this.waitForSocket();
     if (generation !== this.enableGeneration || this.closed) return false;
-    this.enabled = true;
+    this.enabled = true; this.publishAvailability();
     this.enableReadyPerf = performance.now();
     this.callbacks.send({ type: 'audio.configure', enabled: true });
     return true;
@@ -81,7 +85,7 @@ export class StreamingSpeech {
     if (this.closed || !this.session) return;
     const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/${encodeURIComponent(this.session)}/audio`);
     socket.binaryType = 'arraybuffer'; this.socket = socket;
-    socket.onopen = () => { if (this.socket === socket && !this.closed) this.callbacks.send({ type: 'audio.configure', enabled: this.enabled }); };
+    socket.onopen = () => { if (this.socket === socket && !this.closed) { this.callbacks.send({ type: 'audio.configure', enabled: this.enabled }); this.publishAvailability(); } };
     socket.onmessage = event => {
       if (this.closed || this.socket !== socket) return;
       if (typeof event.data === 'string') { try { this.metadata(JSON.parse(event.data)); } catch { this.callbacks.error('音频服务返回了无效消息。'); } }
@@ -89,13 +93,13 @@ export class StreamingSpeech {
     };
     socket.onclose = event => {
       if (this.socket !== socket || this.closed) return;
-      this.cancel('audio_disconnected'); this.socket = null;
+      this.cancel('audio_disconnected'); this.socket = null; this.publishAvailability();
       if (event.code !== 4404) this.retry = setTimeout(() => this.openSocket(), 2000);
     };
     socket.onerror = () => { if (this.enabled && !this.closed) this.callbacks.error('火山音频连接中断，正在重新连接。'); };
   }
   disconnect() {
-    this.closed = true; clearTimeout(this.retry); this.cancel('disconnected');
+    this.closed = true; this.publishAvailability(); clearTimeout(this.retry); this.cancel('disconnected');
     const socket = this.socket; this.socket = null; socket?.close();
   }
   dispose() { this.disconnect(); clearTimeout(this.recordTimer); this.node?.disconnect(); void this.context?.close(); }
@@ -120,8 +124,8 @@ export class StreamingSpeech {
       if (pending) { pending.turn_id = turn; this.measurements.set(turn, pending); this.measurements.delete(`request:${requestId}`); this.emitRecords(); }
     }
   }
-  acceptsTurn(turn: string, requestId?: string) { return !this.rejectedTurns.has(turn) && !(requestId && this.queries.get(requestId)?.superseded); }
-  interrupted(turn: string) { this.rejectedTurns.add(turn); if (this.current?.turn === turn) this.cancel('turn_interrupted'); }
+  acceptsTurn(turn: string, requestId?: string) { return !this.invalidatedTurns.has(turn) && !(requestId && this.queries.get(requestId)?.superseded); }
+  interrupted(turn: string) { this.invalidatedTurns.add(turn); this.rejectedTurns.add(turn); if (this.current?.turn === turn) this.cancel('turn_interrupted'); }
   annotate(turn: string, kind: 'vehicle' | 'task', data: Record<string, unknown>) {
     const record = this.measurements.get(turn); if (!record) return;
     if (kind === 'vehicle') record.vehicle_receipts.push({ ...data, received_perf_ms: performance.now() });
@@ -187,6 +191,12 @@ export class StreamingSpeech {
     else if (message.type === 'drained' && playback.inputEnded) { this.callbacks.send({type: 'audio.played', turn_id: playback.turn, playback_id: playback.id, played_ms: message.rendered_output_samples * 1000 / (this.context?.sampleRate || 48000)}); record.drained_perf_ms = now; record.rendered_output_samples = message.rendered_output_samples; this.finish(record.first_nonzero_pcm_perf_ms === undefined ? 'error' : 'ended', record.first_nonzero_pcm_perf_ms === undefined ? 'no_nonzero_pcm_received' : undefined); }
   }
   cancel(reason = 'user_stop'): Promise<void> {
+    // Audio-only stops (including VAD) cannot invalidate a late control start.
+    // New input supersedes the known turn even if its control frame has not arrived.
+    if (reason === 'new_input') {
+      const turn = this.current?.turn || this.focusedTurn;
+      if (turn) this.invalidatedTurns.add(turn);
+    }
     if (this.current) {
       const playback = this.current;
       let done!: () => void;

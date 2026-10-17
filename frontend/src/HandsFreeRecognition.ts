@@ -1,4 +1,7 @@
 import type { RecognitionMeasurement, RecognitionPhase } from './types';
+import { AudioActivationError, resumeAudioContext } from './audioActivation';
+
+export interface RecognitionFailure { kind: 'activation' | 'permission' | 'provider' | 'connection' | 'capture'; providerCode?: string }
 
 interface Callbacks {
   capture: (id: string, active: boolean) => void;
@@ -7,12 +10,12 @@ interface Callbacks {
   transcript: (text: string) => void;
   final: (text: string, id: string) => Promise<void>;
   records: (records: RecognitionMeasurement[]) => void;
-  error: (message: string) => void;
+  error: (message: string, failure?: RecognitionFailure) => void;
 }
 interface Listener {
   id: string; stream?: MediaStream; context?: AudioContext; source?: MediaStreamAudioSourceNode;
   node?: AudioWorkletNode; gain?: GainNode; socket?: WebSocket; ready: boolean;
-  timer?: ReturnType<typeof setTimeout>; capture?: RecognitionMeasurement; finalConsumed: boolean;
+  timer?: ReturnType<typeof setTimeout>; capture?: RecognitionMeasurement; finalConsumed: boolean; resuming?: Promise<void>;
 }
 
 /** The microphone remains live during ASR finalization and assistant playback. */
@@ -34,8 +37,9 @@ export class HandsFreeRecognition {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error('麦克风需要本机 localhost 或 HTTPS 页面。');
       const context = new AudioContext({ sampleRate: 16000, latencyHint: 'interactive' });
       listener.context = context;
+      context.onstatechange = () => { if (this.valid(listener) && listener.ready && context.state === 'suspended') this.resume(listener); };
       // Both audio unlocks run in the initial user gesture.
-      const initialized = Promise.all([context.resume(), context.audioWorklet.addModule('/pcm-capture-worklet.js'), this.callbacks.unlockSpeech()]);
+      const initialized = Promise.all([resumeAudioContext(context), context.audioWorklet.addModule('/pcm-capture-worklet.js'), this.callbacks.unlockSpeech()]);
       void initialized.catch(() => {});
       const stream = await navigator.mediaDevices.getUserMedia({ audio: {
         channelCount: 1, sampleRate: 16000, echoCancellation: true, noiseSuppression: true, autoGainControl: true,
@@ -74,8 +78,9 @@ export class HandsFreeRecognition {
       socket.onclose = () => this.fail(listener, '免按键语音连接已断开，监听已停止。');
     } catch (error) {
       const name = error instanceof Error ? error.name : '';
-      this.fail(listener, name === 'NotAllowedError' ? '未获得麦克风权限，无法开启免按键对话。'
-        : error instanceof Error ? error.message : String(error));
+      this.fail(listener, name === 'NotAllowedError' ? '未获得麦克风权限，请在浏览器中允许麦克风后重新进入语音对话。'
+        : error instanceof Error ? error.message : String(error),
+        { kind: error instanceof AudioActivationError ? 'activation' : name === 'NotAllowedError' ? 'permission' : 'capture' });
     }
   }
 
@@ -96,7 +101,10 @@ export class HandsFreeRecognition {
       listener.capture = record; listener.finalConsumed = false; this.measurements.push(record);
       this.callbacks.capture(record.capture_id, true); this.callbacks.transcript(''); this.callbacks.phase('recording'); this.publish();
     } else if (message.type === 'voice.error' && (!message.capture_id || this.isCurrent(message.capture_id))) {
-      this.fail(listener, typeof message.message === 'string' ? message.message : '免按键语音失败，监听已停止。');
+      const code = typeof message.provider_code === 'string' ? message.provider_code : undefined;
+      const detail = typeof message.message === 'string' ? message.message : '语音服务失败。';
+      this.fail(listener, `${code === 'auth' ? '语音识别服务授权失败' : '语音识别服务未完成请求'}：${detail}`,
+        { kind: 'provider', providerCode: code });
     } else if (listener.capture && message.capture_id === listener.capture.capture_id && !listener.finalConsumed) {
       const record = listener.capture;
       if (message.type === 'voice.partial' && typeof message.text === 'string') {
@@ -120,6 +128,28 @@ export class HandsFreeRecognition {
         });
       }
     }
+  }
+
+  private resume(listener: Listener) {
+    if (listener.resuming || !listener.context) return;
+    this.callbacks.phase('resuming');
+    listener.resuming = resumeAudioContext(listener.context).then(() => {
+      if (!this.valid(listener)) return;
+      const capture = listener.capture;
+      this.callbacks.phase(!capture ? 'listening' : listener.finalConsumed ? 'finalizing'
+        : capture.stopped_perf_ms === undefined ? 'recording' : 'recognizing');
+    }).catch(error => {
+      this.fail(listener, error instanceof Error ? error.message : String(error),
+        { kind: error instanceof AudioActivationError ? 'activation' : 'capture' });
+    }).finally(() => { listener.resuming = undefined; });
+  }
+  discardCapture(reason = 'text_input') {
+    const listener = this.current;
+    if (!listener) return;
+    this.releaseCapture(listener, reason);
+    listener.finalConsumed = true;
+    if (listener.ready) this.callbacks.phase('listening');
+    this.callbacks.transcript('');
   }
 
   markSubmitted(id: string, at: number, requestId?: string) {
@@ -147,10 +177,10 @@ export class HandsFreeRecognition {
     listener.socket?.close(); this.callbacks.phase('idle'); this.callbacks.transcript('');
   }
   dispose() { this.cancel('disposed'); }
-  private fail(listener: Listener, message: string) {
+  private fail(listener: Listener, message: string, failure?: RecognitionFailure) {
     if (!this.valid(listener)) return;
     if (listener.capture) { listener.capture.status = 'error'; listener.capture.error = message; }
-    this.callbacks.error(message); this.cancel('error');
+    this.callbacks.error(message, failure); this.cancel('error');
   }
   private publish() { this.callbacks.records(this.measurements.map(record => ({ ...record }))); }
 }

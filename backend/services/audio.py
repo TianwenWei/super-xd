@@ -137,10 +137,13 @@ def _error(exc: Exception, provider: str, secrets=()) -> ProviderError:
     else:
         code = 'provider_error'
     diagnostic = redact(str(exc), secrets=secrets)
+    details = {'exception_type': type(exc).__name__, 'status_code': status, 'diagnostic': diagnostic}
+    upstream = getattr(exc, 'upstream_diagnostics', None)
+    if isinstance(upstream, dict):
+        details['upstream'] = redact(upstream, secrets=secrets)
     return ProviderError(code, diagnostic or type(exc).__name__, provider=provider,
                          retryable=code in {'timeout', 'rate_limit', 'unavailable'},
-                         details={'exception_type': type(exc).__name__, 'status_code': status,
-                                  'diagnostic': diagnostic})
+                         details=details)
 
 
 def _positive(profile, name, default):

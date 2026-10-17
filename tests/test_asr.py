@@ -441,6 +441,42 @@ async def test_connect_timeout_and_send_timeout_do_not_leave_open_connections():
     assert ws2.closed
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('wrapped', [False, True])
+async def test_handshake_denial_retains_only_redacted_upstream_diagnostics(wrapped):
+    from backend.services.audio import VolcengineASRProvider
+    from backend.services.contracts import ProviderError
+
+    class DeniedHandshake(Exception):
+        response = SimpleNamespace(
+            status_code=403,
+            headers={'x-tt-logid': 'offline-denied-log-id', 'Authorization': 'Bearer private-header'},
+            body=json.dumps({'error': '[resource_id=volc.bigasr.sauc.duration] requested resource not granted',
+                             'echo': 'offline-asr-secret', 'api_key': 'other-private-key'}).encode())
+
+    async def connect(url, **options):
+        raise DeniedHandshake('request rejected')
+
+    asr = VolcanoASR(api_key='offline-asr-secret', resource_id='volc.bigasr.sauc.duration',
+                     ws_connect=connect, timeout_seconds=.2)
+    provider = VolcengineASRProvider(asr) if wrapped else asr
+    with pytest.raises(ProviderError if wrapped else RuntimeError) as caught:
+        await provider.open('denied-capture')
+    error = caught.value
+    diagnostics = error.details['upstream'] if wrapped else error.upstream_diagnostics
+    assert diagnostics['response_headers'] == {'X-Tt-Logid': 'offline-denied-log-id'}
+    assert diagnostics['resource_id'] == 'volc.bigasr.sauc.duration'
+    assert 'requested resource not granted' in diagnostics['response_body']
+    encoded = json.dumps(diagnostics)
+    assert all(value not in encoded for value in ('offline-asr-secret', 'other-private-key', 'private-header'))
+    assert str(error) == '火山 ASR 连接或初始化失败：HTTP 403'
+    assert 'requested resource not granted' not in str(error)
+    if wrapped:
+        assert error.code == 'auth' and not error.retryable
+        assert 'upstream' not in error.public()
+    assert not asr._connections
+
+
 def test_binary_response_decoder_enforces_bounded_decompression_and_size():
     compressed = response(data={'result': {'text': 'x' * 5000}})
     with pytest.raises(RuntimeError, match='解压后响应超过'):

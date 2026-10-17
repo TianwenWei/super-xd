@@ -11,3 +11,9 @@
 .handsfree-toggle.enabled{background:#e6f3ed;border-color:#b7d7c8;color:#39745b}
 .compose-topline{flex-wrap:wrap;gap:8px}
 @media(max-width:640px){.voice-button{width:32px;height:34px}.voice-capture p{max-height:64px}}
+
+.voice-entry { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 0 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft, #faf9f6); font-size: 12px; }
+.voice-entry strong { font-weight: 600; }
+.voice-entry p { margin: 4px 0 0; color: var(--muted); line-height: 1.5; }
+.voice-entry button { flex-shrink: 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper, #fff); color: inherit; cursor: pointer; }
+.voice-entry button:disabled { opacity: .5; cursor: default; }

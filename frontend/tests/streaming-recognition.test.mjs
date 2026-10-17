@@ -3,15 +3,21 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import ts from 'typescript';
+const activationSource = fs.readFileSync(new URL('../src/audioActivation.ts', import.meta.url), 'utf8');
+const activationCompiled = ts.transpileModule(activationSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
+const activationModule = `data:text/javascript;base64,${Buffer.from(activationCompiled).toString('base64')}`;
 const source = fs.readFileSync(new URL('../src/StreamingRecognition.ts', import.meta.url), 'utf8');
 const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
 const { StreamingRecognition } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
+const handsFreeSource = fs.readFileSync(new URL('../src/HandsFreeRecognition.ts', import.meta.url), 'utf8');
+const handsFreeCompiled = ts.transpileModule(handsFreeSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
+const { HandsFreeRecognition } = await import(`data:text/javascript;base64,${Buffer.from(handsFreeCompiled.replace("from './audioActivation'", `from '${activationModule}'`)).toString('base64')}`);
 const speechSource = fs.readFileSync(new URL('../src/StreamingSpeech.ts', import.meta.url), 'utf8');
 const speechCompiled = ts.transpileModule(speechSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
 const textSource = fs.readFileSync(new URL('../src/text.ts', import.meta.url), 'utf8');
 const textCompiled = ts.transpileModule(textSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
 const textModule = `data:text/javascript;base64,${Buffer.from(textCompiled).toString('base64')}`;
-const { StreamingSpeech } = await import(`data:text/javascript;base64,${Buffer.from(speechCompiled.replace("from './text'", `from '${textModule}'`)).toString('base64')}`);
+const { StreamingSpeech } = await import(`data:text/javascript;base64,${Buffer.from(speechCompiled.replace("from './text'", `from '${textModule}'`).replace("from './audioActivation'", `from '${activationModule}'`)).toString('base64')}`);
 globalThis.location = { protocol: 'http:', host: 'localhost' };
 let sockets = [], nodes = [], contexts = [];
 globalThis.WebSocket = class {
@@ -127,4 +133,41 @@ test('cancel while final waits for real Speech enable invalidates late enable as
   h.engine.cancel('user_cancel'); resumed.resolve(); await tick(); await tick();
   assert.equal(sent.filter(value => value.type === 'audio.configure' && value.enabled).length, enabledBefore);
   assert.equal(h.finals.length, 0); assert.equal(h.engine.active, false); speech.dispose();
+});
+
+
+test('real continuous capture uploads during TTS and barge-in clears playback without closing the microphone', async () => {
+  sockets=[]; nodes=[]; contexts=[];
+  const device=media(), constraints=[], sent=[], errors=[], finals=[]; let capturing=false;
+  Object.defineProperty(globalThis,'navigator',{configurable:true,value:{mediaDevices:{getUserMedia:async value=>{constraints.push(value);return device.stream;}}}});
+  const speech=new StreamingSpeech({send:value=>sent.push(value),phase:()=>{},metrics:()=>{},records:()=>{},error:error=>errors.push(error),allowed:()=>!capturing});
+  speech.connect('full-duplex'); const audio=sockets[0]; audio.open();
+  let listen;
+  listen=new HandsFreeRecognition({unlockSpeech:()=>speech.setEnabled(true),phase:()=>{},transcript:()=>{},records:()=>{},error:error=>errors.push(error),
+    capture:(_id,active)=>{capturing=active;if(active)void speech.cancel('voice_activity');},
+    final:async(text,id)=>{capturing=false;listen.markSubmitted(id,performance.now());finals.push(text);}});
+  await listen.start('full-duplex');
+  const uplink=sockets.at(-1), microphone=nodes.at(-1), player=nodes[0]; uplink.open();
+  const listenId=JSON.parse(uplink.sent[0]).listen_id;
+  const event=(type,more={})=>uplink.receive({type,listen_id:listenId,capture_id:'utterance',...more});
+  event('voice.ready');
+  assert.deepEqual(constraints[0].audio,{channelCount:1,sampleRate:16000,echoCancellation:true,noiseSuppression:true,autoGainControl:true});
+  speech.submit('request','显式离线回复',performance.now(),[]);
+  const playback='a'.repeat(32);
+  audio.receive({type:'audio.started',turn_id:'reply',playback_id:playback,client_request_id:'request',sample_rate:24000,format:'pcm_s16le',channels:1});
+  const pcm=new ArrayBuffer(36); new Uint8Array(pcm,0,32).set(new TextEncoder().encode(playback));new DataView(pcm).setInt16(32,100,true);
+  audio.onmessage({data:pcm});
+  assert.equal(player.sent.at(-1).type,'pcm');
+  microphone.emit({type:'pcm',capture_id:listenId,buffer:new ArrayBuffer(1024)});
+  assert.equal(uplink.sent.at(-1).byteLength,1024); assert.equal(device.track.stopped,0);
+  event('voice.speech_start');
+  assert.equal(player.sent.at(-1).type,'clear');
+  assert.equal(listen.active,true); assert.equal(device.track.stopped,0);
+  microphone.emit({type:'pcm',capture_id:listenId,buffer:new ArrayBuffer(1024)});
+  assert.equal(uplink.sent.at(-1).byteLength,1024);
+  event('voice.speech_end');event('voice.final',{text:'下一句'});await tick();
+  assert.deepEqual(finals,['下一句']);assert.equal(listen.active,true);
+  assert.equal(sent.some(value=>value.type==='audio.configure'&&!value.enabled),true); // Initial connection is unready.
+  assert.equal(sent.filter(value=>value.type==='audio.configure').at(-1).enabled,true);
+  assert.deepEqual(errors,[]);listen.dispose();speech.dispose();
 });

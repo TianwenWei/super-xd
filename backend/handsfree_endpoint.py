@@ -19,6 +19,7 @@ class Segment:
     audio: asyncio.Queue = field(default_factory=lambda: asyncio.Queue(maxsize=96))
     ended: bool = False
     completed: bool = False
+    failed: bool = False
     pcm_bytes: int = 0
     started: float = field(default_factory=time.perf_counter)
     job: asyncio.Task | None = None
@@ -96,6 +97,8 @@ async def listen_socket(ws: WebSocket, actor, asr, *, vad_factory=SileroVAD):
                         call_id=target.id, status='cancelled')
             raise
         except Exception as exc:
+            # This segment has no consumer now; VAD must still find its end.
+            target.failed = True
             message = asr.safe_message(exc)
             actor.trace('asr.error', {'capture_id': target.id, 'error': message, 'mode': 'handsfree',
                         'provider_error': redact(exc.public()) if isinstance(exc, ProviderError) else None,
@@ -158,7 +161,7 @@ async def listen_socket(ws: WebSocket, actor, asr, *, vad_factory=SileroVAD):
                 segment.job = asyncio.create_task(recognize(segment))
                 jobs.add(segment.job)
             if segment and not segment.ended:
-                for chunk in result['audio']:
+                for chunk in result['audio'] if not segment.failed else ():
                     segment.pcm_bytes += len(chunk)
                     if segment.pcm_bytes > int(audio_format.bytes_per_ms * 55000):
                         raise ASRInputError('连续说话超过55秒，本段未发送，请停顿后分段说。')
@@ -168,7 +171,8 @@ async def listen_socket(ws: WebSocket, actor, asr, *, vad_factory=SileroVAD):
                         raise ASRInputError('语音识别上传积压，已停止监听，请重试。') from None
                 if result['event'] == 'end':
                     segment.ended = True
-                    segment.audio.put_nowait(None)
+                    if not segment.failed:
+                        segment.audio.put_nowait(None)
                     actor.trace('vad.speech_ended', {'capture_id': segment.id, 'silence_ms': 640,
                                 'pcm_bytes': segment.pcm_bytes}, call_id=segment.id, status='completed')
                     await emit('voice.speech_end', capture_id=segment.id)
