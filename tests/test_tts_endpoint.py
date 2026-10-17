@@ -48,6 +48,19 @@ async def test_audio_response_has_turn_id_and_separate_metrics(context):
     assert response.headers['cache-control']=='no-store'
 
 
+async def test_audio_response_uses_providers_actual_encoding(context):
+    class PCMProvider:
+        async def synthesize_with_metrics(self, text):
+            return {'audio': b'RIFFfixture', 'content_type': 'audio/wav',
+                    'first_packet_ms': 10, 'total_ms': 30}
+    actor, client = context
+    app.state.tts = PCMProvider()
+    response = await client.post('/api/sessions/audio-session/tts',
+        json={'turn_id': actor.current.id, 'text': actor.current.output})
+    assert response.status_code == 200 and response.headers['content-type'] == 'audio/wav'
+    assert response.content == b'RIFFfixture'
+
+
 async def test_new_input_cancels_synthesis_and_no_late_audio(context):
     actor,client=context;app.state.tts=FakeTTS(blocked=True)
     old_id=actor.current.id

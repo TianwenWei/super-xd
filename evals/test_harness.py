@@ -69,6 +69,41 @@ def test_grade_reports_missing_forbidden_and_state():
     assert grade(expect, good) == []
 
 
+@pytest.mark.parametrize('code', ['timeout', 'connection_error', 'auth', 'unavailable'])
+@pytest.mark.parametrize('turn_error', [None, 'provider_error'])
+def test_expected_tool_error_cannot_mask_any_failed_model_call(code, turn_error):
+    result = observed(error=turn_error, model_errors=[{'kind': 'model.error', 'data': {
+        'provider_error': {'code': code, 'provider': 'fixture'}, 'error_type': 'ProviderError'}}])
+    assert grade({'allow_error': True}, result) == ['model errors observed: 1']
+
+
+@pytest.mark.parametrize('code', ['out_of_range', 'task_not_found', 'unsupported_capability',
+                                 'timeout', 'provider_error'])
+def test_explicitly_allowed_business_or_tool_service_error_remains_allowed(code):
+    result = observed(error=code, model_errors=[], lookup_results=[{
+        'tool': 'get_weather', 'result': {'ok': False, 'code': code}}])
+    assert grade({'allow_error': True}, result) == []
+    assert grade({}, result) == [f'turn error {code}']
+
+
+@pytest.mark.parametrize('tool', ['control_media', 'control_playback'])
+def test_pause_case_accepts_documented_aliases_but_requires_one_real_pause(tool):
+    case = next(case for case in load_cases() if case['id'] == 'cockpit_pause')
+    expect = case['turns'][0]['expect']
+    result = observed(talker_calls=[{'name': tool, 'arguments': {'action': 'pause'}}],
+                      cockpit_commands=[{'domain': 'media', 'action': 'pause'}],
+                      cockpit={'media': {'status': 'paused'}})
+    assert grade(expect, result) == []
+    for invalid in (
+        {**result, 'talker_calls': [{'name': tool, 'arguments': {'action': 'stop'}}]},
+        {**result, 'cockpit_commands': [{'domain': 'media', 'action': 'stop'}]},
+        {**result, 'cockpit_commands': result['cockpit_commands'] * 2},
+        {**result, 'cockpit_commands': []},
+        {**result, 'cockpit': {'media': {'status': 'playing'}}},
+    ):
+        assert grade(expect, invalid)
+
+
 async def test_runner_drives_simulated_device_and_checks_persona_invariance():
     case = {'id': 'volume', 'personas': ['professional', 'playful'],
             'turns': [{'input': '音量调到35', 'expect': {'commands': [{'name': 'set_volume', 'arguments': {'volume': 35}}],
@@ -290,6 +325,7 @@ async def test_cli_uses_selected_config_custom_key_and_model_not_legacy_ark_env(
     from backend.services import config, llm
     from backend.settings import ROOT
 
+    monkeypatch.delenv('SERVICE_REGION', raising=False)
     selected = tmp_path / 'selected-services.toml'
     selected.write_text((ROOT / 'config/services.toml').read_text().replace(
         'key_env = "ARK_API_KEY"', 'key_env = "EVAL_CONFIGURED_KEY"').replace(

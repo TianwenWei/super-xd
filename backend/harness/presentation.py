@@ -193,17 +193,25 @@ def completion_presentation(checkpoint, error_details=None):
     if status == 'failed':
         structured = error_details or {}
         reason = structured.get('spoken_reason')
+        # Structured speech and the fallback templates are complete statements.
+        # Only an explicitly selected cause phrase needs a failure prefix;
+        # expression kind must never be inferred from the wording itself.
+        render_kind = 'result'
         if not isinstance(reason, str) or not reason.strip():
             code = checkpoint.run.error_code
             if code in {'unsupported_capability', 'not_configured'}:
                 reason = cockpit_feedback('unsupported_capability')
             elif code in {'task_commit_unknown', 'execution_not_confirmed', 'authoritative_vehicle_state_required'}:
                 reason = feedback_text('errors.outcome_unknown')
-            elif code in {'model_or_protocol_error', 'model_timeout', 'upstream_error', 'auth', 'permission_denied', 'rate_limit'}:
+            elif code in {'timeout', 'model_timeout'}:
+                reason = feedback_text('errors.model_timeout')
+                render_kind = 'error'
+            elif code in {'model_or_protocol_error', 'upstream_error', 'auth', 'permission_denied', 'rate_limit',
+                          'unavailable', 'connection_error', 'invalid_response', 'invalid_model_message', 'provider_error'}:
                 reason = feedback_text('errors.model_connection_pending' if details else 'errors.model_connection')
             else:
                 reason = feedback_text('errors.operation_incomplete')
-        details.append(render(PERSONAS[checkpoint.start.persona_id], 'error', safe_diagnostic(reason)))
+        details.append(render(PERSONAS[checkpoint.start.persona_id], render_kind, safe_diagnostic(reason)))
     if not details:
         return None
     return CompletionPresentation(speech=speech_text(' '.join(details)),

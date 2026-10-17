@@ -1,0 +1,35 @@
+# Select once at startup with SERVICE_REGION=europe or SERVICE_REGION=china.
+# Unset SERVICE_REGION to use explicit bindings in services.toml.
+version = 1
+
+[regions.europe]
+asr = "elevenlabs"
+tts = "volcengine"
+[regions.europe.llm.talker]
+profile = "google_vertex"
+model = "google/gemini-3.8-flash"
+[regions.europe.llm.planner]
+profile = "google_vertex"
+model = "google/gemini-3.8-flash"
+[regions.europe.llm.thinker]
+profile = "google_vertex"
+model = "google/gemini-3.8-flash"
+[regions.europe.llm.finalizer]
+profile = "google_vertex"
+model = "google/gemini-3.8-flash"
+
+[regions.china]
+asr = "volcengine"
+tts = "volcengine"
+[regions.china.llm.talker]
+profile = "ark"
+model_env = "TALKER_MODEL"
+[regions.china.llm.planner]
+profile = "ark"
+model_env = "VEHICLE_CONTROL_MODEL"
+[regions.china.llm.thinker]
+profile = "ark"
+model_env = "THINKER_MODEL"
+[regions.china.llm.finalizer]
+profile = "ark"
+model_env = "TALKER_MODEL"

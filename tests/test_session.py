@@ -898,8 +898,9 @@ async def test_text_is_spoken_while_the_model_is_still_generating(tmp_path):
     try:
         q = await actor.attach(); await q.get()
         await actor.post({'type': 'input', 'text': '主驾调到23度'})
-        await asyncio.sleep(.05)
-        await actor.queue.join()
+        # Observe the stream boundary, not an assumed scheduler/SQLite delay.
+        await wait_for(q, 'stream.delta')
+        assert not gate.is_set()
         assert actor.current.metrics.get('first_speech_ms') is not None  # before the tool call arrived
         gate.set()
         done, _ = await wait_for(q, 'stream.done', actor)

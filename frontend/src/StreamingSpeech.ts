@@ -27,8 +27,8 @@ export class StreamingSpeech {
   private queries = new Map<string, Query>();
   private turns = new Map<string, string>();
   private measurements = new Map<string, AudioMeasurement>();
-  private provider = 'volcengine-speech-tts';
-  private voice = 'xiaohe2.0';
+  private provider = 'unknown';
+  private voice = 'assistant';
   private connectionDiagnostic: Record<string, unknown> | undefined;
   private enableRequestedPerf: number | undefined;
   private enableReadyPerf: number | undefined;
@@ -49,7 +49,7 @@ export class StreamingSpeech {
       node.connect(context.destination); this.node = node;
     }).catch(error => { this.initializing = null; throw error; });
     await Promise.all([resumed, this.initializing]);
-    if (context.state !== 'running') throw new Error('浏览器音频尚未解锁，请再次点击火山朗读。');
+    if (context.state !== 'running') throw new Error('浏览器音频尚未解锁，请再次启用朗读。');
     this.publishAvailability();
   }
   async setEnabled(value: boolean): Promise<boolean> {
@@ -96,7 +96,7 @@ export class StreamingSpeech {
       this.cancel('audio_disconnected'); this.socket = null; this.publishAvailability();
       if (event.code !== 4404) this.retry = setTimeout(() => this.openSocket(), 2000);
     };
-    socket.onerror = () => { if (this.enabled && !this.closed) this.callbacks.error('火山音频连接中断，正在重新连接。'); };
+    socket.onerror = () => { if (this.enabled && !this.closed) this.callbacks.error('音频连接中断，正在重新连接。'); };
   }
   disconnect() {
     this.closed = true; this.publishAvailability(); clearTimeout(this.retry); this.cancel('disconnected');
@@ -155,7 +155,7 @@ export class StreamingSpeech {
     } else if (this.current && this.current.id === id && this.current.turn === turn) {
       if (message.type === 'audio.ended') { this.current.inputEnded = true; this.current.record.audio_ended_perf_ms = performance.now(); this.node?.port.postMessage({ type: 'end', playback_id: id }); this.publish(this.current.record, true); }
       else if (message.type === 'audio.cancelled') this.finish('cancelled', message.reason || 'server_cancelled');
-      else if (message.type === 'audio.error') { const detail = message.message || message.error || '服务端语音生成失败'; this.callbacks.error(`火山朗读未完成：${typeof detail === 'string' ? detail : JSON.stringify(detail)}`); this.finish('error', typeof detail === 'string' ? detail : JSON.stringify(detail)); }
+      else if (message.type === 'audio.error') { const detail = message.message || message.error || '服务端语音生成失败'; this.callbacks.error(`朗读未完成：${typeof detail === 'string' ? detail : JSON.stringify(detail)}`); this.finish('error', typeof detail === 'string' ? detail : JSON.stringify(detail)); }
     }
   }
   private pcm(buffer: ArrayBuffer) {

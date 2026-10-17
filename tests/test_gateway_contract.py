@@ -168,6 +168,62 @@ async def test_plain_answer_and_real_tool_handoff_roundtrip():
     assert final[-1].sequence > handoff.sequence
 
 
+@pytest.mark.parametrize('alias_type_change', [False, True])
+async def test_model_vehicle_receipt_is_projected_but_checkpoint_keeps_actual_snapshot(alias_type_change):
+    model = ScriptedModel([{'tool_calls': [call()]}, {'content': '收到真实回执。'}])
+    kernel = service(model, receipt_fast_path=False)
+    request = start_request()
+    request.context.vehicle.state['lights'] = {'unchanged_reference_data': 'a' * 2000}
+    first = (await collect(kernel.start(request)))[-1]
+    receipt = observation(first.checkpoint)
+    receipt.result.update(state=deepcopy(receipt.result['vehicle_state']),
+                          receipt_id='actual-receipt', state_version=6)
+    if alias_type_change:
+        receipt.result['state']['_meta']['speed_kph'] = False
+    original = deepcopy(receipt.result)
+    final = (await collect(kernel.resume(resume_request(first.checkpoint, [receipt]))))[-1]
+    assert final.type == 'run.completed' and len(model.requests) == 2
+    prompt_receipt = json.loads(model.requests[-1]['messages'][-1]['content'])
+    assert 'vehicle_state' not in prompt_receipt
+    if alias_type_change:
+        assert prompt_receipt['state']['_meta']['speed_kph'] is False
+    else:
+        assert 'state' not in prompt_receipt
+    assert prompt_receipt['receipt_id'] == 'actual-receipt' and prompt_receipt['state_version'] == 6
+    delta = prompt_receipt['vehicle_state_delta']
+    assert delta['baseline']['revision'] == 5
+    assert {'path': ['media', 'volume'], 'value': 40} in delta['set']
+    assert receipt.result == original
+    archived = next(item for item in kernel.turn_records(final.checkpoint)
+                    if item.get('role') == 'tool' and item.get('tool_call_id') == 'a')
+    assert json.loads(archived['content']) == original
+
+
+def test_historical_vehicle_delta_retains_older_values_and_receipt_version():
+    request = start_request()
+    request.context.vehicle.state['lights'] = {'unchanged_reference_data': 'a' * 2000}
+    older = deepcopy(request.context.vehicle.state)
+    older['media']['volume'] = 20
+    result = {'ok': True, 'executed': True, 'vehicle_state': older,
+              'receipt_id': 'prior-receipt', 'state_version': 2}
+    request.history = [HistoryTurn.model_validate({'turn_id': 'prior-turn', 'records': [
+        {'role': 'user', 'content': '把音量调到20'},
+        {'role': 'assistant', 'content': None, 'tool_calls': [
+            {'id': 'prior-call', 'name': 'set_volume', 'arguments': {'volume': 20}}]},
+        {'role': 'tool', 'tool_call_id': 'prior-call', 'result': result},
+    ]})]
+    original = request.model_dump()
+    compiled = service(ScriptedModel([])).compile_start(request)
+    projected = next(json.loads(record['content']) for record in compiled.messages
+                     if record.get('role') == 'tool' and record.get('tool_call_id') == 'prior-call')
+    assert 'vehicle_state' not in projected
+    assert projected['receipt_id'] == 'prior-receipt' and projected['state_version'] == 2
+    assert projected['vehicle_state_delta']['baseline']['revision'] == 5
+    assert {'path': ['media', 'volume'], 'value': 20} in projected['vehicle_state_delta']['set']
+    assert request.model_dump() == original
+    assert request.context.vehicle.state['media']['volume'] == 30
+
+
 async def test_partial_duplicate_and_out_of_order_observations_do_not_redispatch():
     model = ScriptedModel([{'tool_calls': [call(), call('get_weather', {'location': '巴黎', 'date': 'today'}, 'b')]},
                            {'content': '最终答复'}])

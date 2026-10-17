@@ -79,6 +79,8 @@ class LLMRequest:
     reasoning: bool | None = None
     max_tokens: int | None = None
     tool_choice: Any = None
+    first_output_timeout_seconds: float | None = None
+    total_timeout_seconds: float | None = None
 
 
 @dataclass(frozen=True)

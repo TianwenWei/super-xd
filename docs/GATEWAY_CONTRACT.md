@@ -62,6 +62,8 @@ Gateway提供原话与事实，不提交system prompt、工具schema或模型参
 
 历史原生工具组须闭合；最后未完组可标记`pending_tool_group`，编译时剔除。主动任务历史带`source_task`。assistant消息保留完整生成内容；`playback_status=unknown/not_started/partial/completed`与`heard_text`独立描述实际播放，默认unknown，not_started不能带非空heard_text。打断另带`interrupted_playback`。模型可用完整生成内容理解追问，但不能把未播出的全文当作已听；未知反馈也不能将答案替换为空。POI必须保留provider、source_turn_id、presented_to_user；本轮刚搜到的POI不视为用户选择。媒体ID来源于真实目录/本轮已接受的目录回执，不能来自模型编造URL。
 
+历史工具调用可带`extra_content`对象（单个最多64 KiB），原样保存模型返回的续推元数据，例如Gemini的`google.thought_signature`。Gateway从可信模型transcript持久化并回传，不能生成、拼接、截断或改写签名；该字段不授予工具权限，也不送入设备执行参数。同一run的checkpoint及后续模型请求同样保留原值；更换模型策略必须启动新run。
+
 发生新的用户输入、说话位置或会影响决策的上下文变更时，终止旧决策，使用新身份与新context revision启动新run。resume不能替换原话、上下文或版本。迟到回执只用于审计/刷新下一轮事实，不能重贴新identity后注入新run。
 
 ## 输出、编排与回执

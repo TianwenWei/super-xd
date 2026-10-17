@@ -16,17 +16,32 @@ timeout_seconds = 45
 supports_tools = true
 supports_tool_choice = true
 
+# Inactive until a role explicitly selects this profile and a google/gemini-* model.
+# ADC is discovered lazily on the first request; no credential is stored here.
+[llm.profiles.google_vertex]
+provider = "google_vertex"
+project_env = "GOOGLE_CLOUD_PROJECT"
+location = "eu"
+reasoning_effort = "low"
+timeout_seconds = 45
+supports_tools = true
+supports_tool_choice = true
+
 [llm.roles.talker]
 profile = "ark"
 model_env = "TALKER_MODEL"
 max_tokens = 900
 reasoning = false
+# One logical call, including any retry. No speech is fabricated on timeout.
+first_output_timeout_seconds = 10
+total_timeout_seconds = 15
 
 [llm.roles.planner]
 profile = "ark"
 model_env = "VEHICLE_CONTROL_MODEL"
 max_tokens = 2000
 reasoning = false
+total_timeout_seconds = 30
 
 [llm.roles.thinker]
 profile = "ark"
@@ -53,6 +68,15 @@ require_api_key = false
 language = "zh"
 timeout_seconds = 30
 
+# Manual commits use the local VAD boundary; no second provider VAD delay.
+[asr.profiles.elevenlabs]
+provider = "elevenlabs"
+key_env = "ELEVENLABS_API_KEY"
+model = "scribe_v2_realtime"
+language = "zh"
+timeout_seconds = 15
+max_record_seconds = 60
+
 [tts]
 profile = "volcengine"
 [tts.profiles.volcengine]
@@ -60,6 +84,26 @@ provider = "volcengine"
 [tts.profiles.volcengine.voices]
 default = "zh_female_xiaohe_uranus_bigtts"
 assistant = "zh_female_xiaohe_uranus_bigtts"
+
+[tts.profiles.google]
+provider = "google"
+project_env = "GOOGLE_CLOUD_PROJECT"
+location = "eu"
+language = "cmn-CN"
+timeout_seconds = 20
+[tts.profiles.google.voices]
+default = "Kore"
+assistant = "Kore"
+
+[tts.profiles.elevenlabs]
+provider = "elevenlabs"
+key_env = "ELEVENLABS_API_KEY"
+model = "eleven_flash_v2_5"
+language = "zh"
+timeout_seconds = 20
+[tts.profiles.elevenlabs.voices]
+default = "JBFqnCBsd6RMkjVDRZzb"
+assistant = "JBFqnCBsd6RMkjVDRZzb"
 
 [web_search]
 profile = "tavily"

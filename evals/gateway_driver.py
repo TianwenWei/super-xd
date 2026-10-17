@@ -49,7 +49,9 @@ class TurnProgress:
     driver: LocalGateway | None = None
     output: str = ''
     first_text_ms: float | None = None
+    first_model_text_ms: float | None = None
     presentation_ms: float | None = None
+    presentation_source: str | None = None
     first_by_call: dict = field(default_factory=dict)
     finished: float | None = None
     failure: dict | None = None
@@ -246,8 +248,9 @@ class EvaluationGateway:
                 self.cockpit_commands.append({'domain': command['domain'], 'action': command['action'],
                                               'arguments': deepcopy(command['arguments'])})
         self.record('tool.completed', {'name': request.name, 'arguments': arguments, 'result': result}, start.identity.turn_id)
-        if result.get('outcome_unknown') is not True:
-            self.last_receipt_ms = (time.perf_counter() - self.turn_started) * 1000
+        if (dispatch.operation == 'control' and result.get('ok') is True
+                and result.get('executed') is True and result.get('outcome_unknown') is not True):
+            self.last_execution_receipt_ms = (time.perf_counter() - self.turn_started) * 1000
         return ToolObservation(identity=start.identity, invocation_id=request.invocation_id,
                                status='unknown' if result.get('outcome_unknown') is True else 'completed', result=result)
 
@@ -303,21 +306,24 @@ class EvaluationGateway:
         self.traces = []
         self.lookups, self.lookup_results = [], []
         progress = self.progress = TurnProgress(time.perf_counter(), deepcopy(self.vehicle.state), len(self.ledger.tasks))
-        self.turn_started, self.last_receipt_ms = progress.started, None
+        self.turn_started, self.last_execution_receipt_ms = progress.started, None
         start = self.start_request(spec['input'], persona, speaker_seat)
         progress.request = start
         self.record('turn.started', {'input': spec['input']}, start.identity.turn_id)
         driver = progress.driver = LocalGateway(self.service, start, self.execute)
         async for event in driver.events():
             progress.last = event
-            if event.type == 'text.delta':
+            if event.type == 'text.delta' and event.text:
                 elapsed = (time.perf_counter() - progress.started) * 1000
                 progress.first_text_ms = progress.first_text_ms if progress.first_text_ms is not None else elapsed
+                if progress.first_model_text_ms is None:
+                    progress.first_model_text_ms = elapsed
                 index = sum((record.get('event') or {}).get('type') == 'model.started' for record in self.diagnostics)
                 progress.first_by_call.setdefault(index, elapsed)
                 progress.output += event.text
             if event.presentation is not None:
                 progress.presentation_ms = (time.perf_counter() - progress.started) * 1000
+                progress.presentation_source = event.presentation.source
                 progress.first_text_ms = progress.first_text_ms if progress.first_text_ms is not None else progress.presentation_ms
                 progress.output += event.presentation.speech
         if progress.last is None or progress.last.checkpoint is None:
@@ -393,9 +399,6 @@ class EvaluationGateway:
         if checkpoint is None and progress.driver is not None and progress.driver.commit is not None:
             checkpoint = progress.driver.commit.checkpoint
         native = checkpoint.run.messages if checkpoint else []
-        first_useful = progress.presentation_ms if progress.presentation_ms is not None else (
-            progress.first_by_call.get(roles['talker']) if native and native[-1]['role'] == 'assistant'
-            and not native[-1].get('tool_calls') else self.last_receipt_ms)
         route = ('task' if any(row['name'] in {'delegate_task', 'manage_task'} for row in self.talker_calls)
                  else 'vehicle' if self.commands else 'lookup' if self.lookups else 'chat')
         outcome_unknown = checkpoint is not None and checkpoint.run.status == 'waiting_reconciliation'
@@ -406,6 +409,16 @@ class EvaluationGateway:
             commit = progress.driver.commit if progress.driver else None
             outcome_unknown |= error == 'checkpoint_size_exceeded' or bool(commit and any(
                 getattr(item.dispatch, 'operation', None) == 'control' for item in commit.requests))
+        # Error templates and incomplete model text do not establish a useful
+        # result. A failed turn can still retain an actually executed control.
+        if error:
+            first_useful = self.last_execution_receipt_ms
+        elif progress.presentation_source == 'verified_receipts':
+            first_useful = progress.presentation_ms
+        elif native and native[-1]['role'] == 'assistant' and not native[-1].get('tool_calls'):
+            first_useful = progress.first_by_call.get(roles['talker'])
+        else:
+            first_useful = self.last_execution_receipt_ms
         result = {'turn_id': progress.request.identity.turn_id if progress.request else None,
             'commands': self.commands, 'cockpit_commands': self.cockpit_commands,
             'cockpit_device_mode': 'explicit_eval_fixture' if self.cockpit else None, 'cockpit': deepcopy(self.device.state),
@@ -416,6 +429,7 @@ class EvaluationGateway:
             'model_calls': sum(roles.values()), 'model_calls_by_role': dict(roles),
             'talker_model_calls': roles['talker'], 'total_ms': ((progress.finished or time.perf_counter()) - progress.started) * 1000,
             'first_effective_ms': progress.first_text_ms, 'first_useful_ms': first_useful, 'usage': dict(usage),
+            'first_model_text_ms': progress.first_model_text_ms, 'presentation_source': progress.presentation_source,
             'first_speech_ms': None, 'trace': deepcopy(self.traces),
             'model_errors': [row for row in self.traces if row['kind'] == 'model.error']}
         if failure is not None:

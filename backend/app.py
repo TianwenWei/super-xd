@@ -270,7 +270,7 @@ async def tts_audio(session_id: str, body: TTSRequest):
         if cancelled.done() or actor.current is not turn:
             raise HTTPException(409, '新轮次已开始，旧音频合成已取消')
         audio = await synthesis
-        return Response(content=audio['audio'], media_type='audio/mpeg', headers={
+        return Response(content=audio['audio'], media_type=audio.get('content_type', 'audio/mpeg'), headers={
             'Cache-Control': 'no-store', 'X-Turn-Id': turn.id,
             'X-TTS-First-Packet-Ms': str(round(audio['first_packet_ms'], 1)),
             'X-TTS-Synthesis-Ms': str(round(audio['total_ms'], 1)),

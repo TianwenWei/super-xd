@@ -540,10 +540,19 @@ def build_asr(profile):
         return VolcengineASRProvider(profile=profile)
     if provider == 'vllm':
         return VLLMASRProvider(profile)
+    if provider == 'elevenlabs':
+        from .elevenlabs_audio import ElevenLabsASRProvider
+        return ElevenLabsASRProvider(profile)
     raise ValueError('Unsupported ASR provider: ' + str(provider))
 
 
 def build_tts(profile):
+    if profile.get('provider') == 'elevenlabs':
+        from .elevenlabs_tts import ElevenLabsTTSProvider
+        return ElevenLabsTTSProvider(profile)
+    if profile.get('provider') == 'google':
+        from .google_audio import GoogleTTSProvider
+        return GoogleTTSProvider(profile)
     if profile.get('provider', 'volcengine') != 'volcengine':
         raise ValueError('Unsupported TTS provider: ' + str(profile.get('provider')))
     return VolcengineTTSProvider(profile=profile)

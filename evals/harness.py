@@ -15,6 +15,7 @@ from collections import Counter
 import copy
 from itertools import combinations
 import json
+import math
 import time
 from pathlib import Path
 
@@ -153,6 +154,10 @@ def grade(expect, observed):
         failures.append(f'tasks_created={observed["tasks_created"]}, expected {expect["tasks_created"]}')
     if 'route' in expect and observed['route'] != expect['route']:
         failures.append(f'route={observed["route"]}, expected {expect["route"]}')
+    # Expected business/tool rejection cannot waive a failed model call, even
+    # when a later response or fallback presentation hides the top-level error.
+    if observed.get('model_errors'):
+        failures.append(f'model errors observed: {len(observed["model_errors"])}')
     if observed.get('error') and not expect.get('allow_error'):
         failures.append(f'turn error {observed["error"]}')
     return failures
@@ -162,7 +167,43 @@ def grade(expect, observed):
 
 
 
-async def run_case(case, ark, *, persona='warm', planner=None, maps=None, repeat=0):
+def useful_latency_failures(observed, maximum_ms):
+    """Gate the existing verified-result metric, never a preface or error text."""
+    if maximum_ms is None:
+        return []
+    failures = []
+    if (observed.get('error') or observed.get('model_errors') or observed.get('outcome_unknown')
+            or observed.get('presentation_source') == 'error_template'):
+        failures.append('first-useful gate: turn has an error or unknown outcome')
+    useful = observed.get('first_useful_ms')
+    if type(useful) not in (int, float) or not math.isfinite(useful) or useful < 0:
+        failures.append('first-useful gate: first_useful_ms missing or invalid')
+    elif useful > maximum_ms:
+        failures.append(f'first-useful gate: {useful:.1f} ms exceeds {maximum_ms:g} ms')
+    return failures
+
+
+class SerialCadence:
+    """One shared clock across turns/cases/repeats, outside request deadlines."""
+    def __init__(self, pause_seconds):
+        self.pause_seconds = pause_seconds
+        self.finished_at = None
+
+    async def before_turn(self):
+        if self.finished_at is None:
+            return {'actual_idle_ms': None, 'cadence_group': 'first_request'}
+        remaining = self.pause_seconds - (time.perf_counter() - self.finished_at)
+        if remaining > 0:
+            await asyncio.sleep(remaining)
+        return {'actual_idle_ms': (time.perf_counter() - self.finished_at) * 1000,
+                'cadence_group': 'after_pause' if self.pause_seconds else 'consecutive'}
+
+    def after_turn(self):
+        self.finished_at = time.perf_counter()
+
+
+async def run_case(case, ark, *, persona='warm', planner=None, maps=None, repeat=0,
+                   max_first_useful_ms=None, cadence=None):
     gateway = EvaluationGateway(case, ark, planner=planner, maps=maps)
     task_aliases, traces = {}, []
     try:
@@ -187,6 +228,7 @@ async def run_case(case, ark, *, persona='warm', planner=None, maps=None, repeat
         turns = []
         for index, spec in enumerate(case['turns']):
             previous = set(gateway.ledger.tasks)
+            timing = await cadence.before_turn() if cadence is not None else {}
             try:
                 async with asyncio.timeout(TURN_TIMEOUT):
                     observed = await gateway.turn(spec, persona, spec.get('speaker_seat') or case.get('speaker_seat') or 'driver')
@@ -194,16 +236,25 @@ async def run_case(case, ark, *, persona='warm', planner=None, maps=None, repeat
             except Exception as error:
                 observed = gateway.failed_turn(error)
                 failures = ['turn timed out' if isinstance(error, TimeoutError) else f'run failed: {type(error).__name__}']
+            finally:
+                if cadence is not None:
+                    cadence.after_turn()
+            behavior_passed = not failures
+            latency_failures = useful_latency_failures(observed, max_first_useful_ms)
+            failures.extend(latency_failures)
             for task_id in [identity for identity in gateway.ledger.tasks if identity not in previous]:
                 task_aliases[task_id] = f'created:{index}:{len(task_aliases)}'
             traces.extend(observed.pop('trace', []))
             turns.append({'input': spec['input'], 'passed': not failures, 'failures': failures,
+                'behavior_passed': behavior_passed,
+                **({'latency_failures': latency_failures} if max_first_useful_ms is not None else {}), **timing,
                 'response_rubric': spec.get('expect', {}).get('response_rubric'),
                 'response_review_status': 'pending' if spec.get('expect', {}).get('response_rubric') else 'not_requested',
                 **{key: value for key, value in observed.items() if key not in {'vehicle', 'vehicle_before'}}})
         result = {'id': case['id'], 'persona': persona, 'repeat': repeat, 'tags': case.get('tags', []),
             'engine': 'NLPService', 'release_id': gateway.service.release_id,
             'model_policy_id': gateway.service.model_policy_id, 'semantic_policy_id': gateway.service.semantic_policy.policy_id,
+            'behavior_passed': all(turn['behavior_passed'] for turn in turns),
             'passed': all(turn['passed'] for turn in turns), 'turns': turns, 'task_id_aliases': task_aliases,
             'traces': traces, 'trace_capture': {'event_count': len(traces), 'recording_error': None}}
         return safe_diagnostic(result, model_secrets(ark))
@@ -243,12 +294,19 @@ def persona_signature(result):
             for turn in result['turns']]
 
 
-async def run_all(cases, ark, *, concurrency=4, planner=None, maps=None, repeat=1):
+async def run_all(cases, ark, *, concurrency=4, planner=None, maps=None, repeat=1,
+                  max_first_useful_ms=None, pause_seconds=0):
+    if not math.isfinite(pause_seconds) or pause_seconds < 0 or (pause_seconds and concurrency != 1):
+        raise ValueError('pause_seconds must be nonnegative and requires concurrency=1 when positive')
+    if max_first_useful_ms is not None and (not math.isfinite(max_first_useful_ms) or max_first_useful_ms <= 0):
+        raise ValueError('max_first_useful_ms must be finite and positive')
     semaphore = asyncio.Semaphore(concurrency)
+    cadence = SerialCadence(pause_seconds) if concurrency == 1 else None
 
     async def one(case, persona, index):
         async with semaphore:
-            return await run_case(case, ark, persona=persona, planner=planner, maps=maps, repeat=index)
+            return await run_case(case, ark, persona=persona, planner=planner, maps=maps, repeat=index,
+                                  max_first_useful_ms=max_first_useful_ms, cadence=cadence)
 
     jobs = [one(case, persona, index) for index in range(repeat) for case in cases
             for persona in case.get('personas', ['warm'])]
@@ -258,7 +316,7 @@ async def run_all(cases, ark, *, concurrency=4, planner=None, maps=None, repeat=
     # is shared by every persona across all repeats.
     by_case = {}
     for result in results:
-        result['behavior_passed'] = result['passed']
+        result.setdefault('behavior_passed', result['passed'])
         by_case.setdefault(result['id'], {}).setdefault(result['persona'], set()).add(json.dumps(persona_signature(result)))
     for identity, personas in by_case.items():
         if len(personas) > 1 and not set.intersection(*personas.values()):
@@ -334,21 +392,66 @@ def percentile(values, q):
     return round(values[min(len(values) - 1, int(q * len(values)))]) if values else None
 
 
+def first_talker_cache_groups(result):
+    """Classify the first Talker completion; later calls cannot warm its start."""
+    groups = {}
+    for row in result.get('traces', []):
+        data = row.get('data', {})
+        turn_id = row.get('turn_id')
+        if (row.get('kind') != 'model.completed' or not turn_id or turn_id in groups
+                or not isinstance(data, dict) or data.get('agent', 'talker') != 'talker'):
+            continue
+        meta = data.get('meta', {})
+        usage = meta.get('usage', {}) if isinstance(meta, dict) else {}
+        details = usage.get('prompt_tokens_details', {}) if isinstance(usage, dict) else {}
+        cached = (details.get('cached_tokens') if isinstance(details, dict) and 'cached_tokens' in details
+                  else usage.get('cached_tokens') if isinstance(usage, dict) else None)
+        groups[turn_id] = ('zero_cache' if cached == 0 else 'cache_hit') if type(cached) is int and cached >= 0 else 'unknown'
+    return groups
+
+
+def text_latency_counts(turns):
+    first = [t['first_effective_ms'] for t in turns if t.get('first_effective_ms') is not None]
+    model_first = [t['first_model_text_ms'] for t in turns
+                   if type(t.get('first_model_text_ms')) in (int, float)
+                   and math.isfinite(t['first_model_text_ms']) and t['first_model_text_ms'] >= 0]
+    no_model_text = sum('first_model_text_ms' in t and t['first_model_text_ms'] is None for t in turns)
+    total = [t['total_ms'] for t in turns if t.get('total_ms') is not None]
+    useful = [t['first_useful_ms'] for t in turns
+              if type(t.get('first_useful_ms')) in (int, float)
+              and math.isfinite(t['first_useful_ms']) and t['first_useful_ms'] >= 0]
+    return {'turns': len(turns), 'first_text_samples': len(first),
+            'no_first_text_turns': len(turns) - len(first),
+            'model_text_samples': len(model_first), 'no_model_text_turns': no_model_text,
+            'model_text_unknown_turns': len(turns) - len(model_first) - no_model_text,
+            'first_model_text_p50': percentile(model_first, .5), 'first_model_text_p90': percentile(model_first, .9),
+            'error_turns': sum(bool(t.get('error')) for t in turns),
+            'first_useful_samples': len(useful), 'no_first_useful_turns': len(turns) - len(useful),
+            'first_useful_p50': percentile(useful, .5), 'first_useful_p90': percentile(useful, .9),
+            'first_useful_gate_turns': sum('latency_failures' in t for t in turns),
+            'first_useful_gate_failed_turns': sum(bool(t.get('latency_failures')) for t in turns),
+            'first_text_p50': percentile(first, .5), 'first_text_p90': percentile(first, .9),
+            'total_p50': percentile(total, .5), 'total_p90': percentile(total, .9)}
+
+
 def latency_summary(results):
     """Production text latency and all-role calls; audio is measured separately."""
-    turns = [t for r in results for t in r['turns'] if t.get('total_ms') is not None]
+    turns = []
+    for result in results:
+        cache_groups = first_talker_cache_groups(result)
+        turns.extend((turn, cache_groups.get(turn.get('turn_id'), 'unknown')) for turn in result['turns'])
     out = {}
-    for route in sorted({t.get('route') for t in turns} | {'all'}):
-        group = [t for t in turns if route == 'all' or t.get('route') == route]
+    for route in sorted({t.get('route') or 'unknown' for t, _ in turns} | {'all'}):
+        selected = [(t, cache) for t, cache in turns if route == 'all' or (t.get('route') or 'unknown') == route]
+        group = [t for t, _ in selected]
         speech = [t['first_speech_ms'] for t in group if t.get('first_speech_ms') is not None]
-        first = [t['first_effective_ms'] for t in group if t.get('first_effective_ms') is not None]
-        useful = [t['first_useful_ms'] for t in group if t.get('first_useful_ms') is not None]
-        out[route] = {'turns': len(group),
+        out[route] = {**text_latency_counts(group),
                       'first_speech_p50': percentile(speech, .5), 'first_speech_p90': percentile(speech, .9),
-                      'first_text_p50': percentile(first, .5), 'first_text_p90': percentile(first, .9),
-                      'first_useful_p50': percentile(useful, .5), 'first_useful_p90': percentile(useful, .9),
-                      'total_p50': percentile([t['total_ms'] for t in group], .5),
-                      'total_p90': percentile([t['total_ms'] for t in group], .9),
+                      'cache_groups': {cache: text_latency_counts([t for t, status in selected if status == cache])
+                                       for cache in ('zero_cache', 'cache_hit', 'unknown')},
+                      'cadence_groups': {cadence: text_latency_counts([t for t in group if t.get('cadence_group', 'unknown') == cadence])
+                                         for cadence in ('first_request', 'consecutive', 'after_pause', 'unknown')},
+                      'model_calls': sum(t.get('model_calls') or 0 for t in group),
                       'model_calls_mean': round(sum(t.get('model_calls') or 0 for t in group) / len(group), 2) if group else None,
                       'model_calls_by_role': {role: sum(t.get('model_calls_by_role', {}).get(role, 0) for t in group)
                                               for role in ('talker', 'planner', 'thinker', 'finalizer')},
@@ -363,10 +466,20 @@ async def main(argv=None):
     parser.add_argument('--case', action='append', default=[])
     parser.add_argument('--concurrency', type=int, default=4)
     parser.add_argument('--repeat', type=int, default=1, help='run every case N times to measure flakiness')
+    parser.add_argument('--max-first-useful-ms', type=float,
+                        help='fail turns with errors, no useful result, or a useful result later than this limit')
+    parser.add_argument('--pause-seconds', type=float, default=0,
+                        help='minimum idle between turns, including case boundaries; positive values require --concurrency 1')
     parser.add_argument('--out')
     args = parser.parse_args(argv)
     if args.repeat < 1 or args.concurrency < 1:
         parser.error('--repeat and --concurrency must be positive integers')
+    if args.max_first_useful_ms is not None and (not math.isfinite(args.max_first_useful_ms) or args.max_first_useful_ms <= 0):
+        parser.error('--max-first-useful-ms must be finite and positive')
+    if not math.isfinite(args.pause_seconds) or args.pause_seconds < 0:
+        parser.error('--pause-seconds must be finite and nonnegative')
+    if args.pause_seconds and args.concurrency != 1:
+        parser.error('--pause-seconds requires --concurrency 1')
     available = load_cases()
     unknown = sorted(set(args.case) - {case['id'] for case in available})
     if unknown:
@@ -384,7 +497,8 @@ async def main(argv=None):
                    if not configuration['roles'][role]['provider']['configured']]
         if missing:
             parser.error('Selected LLM roles are not configured: ' + ', '.join(missing))
-        results = await run_all(cases, ark, concurrency=args.concurrency, repeat=args.repeat)
+        results = await run_all(cases, ark, concurrency=args.concurrency, repeat=args.repeat,
+                                max_first_useful_ms=args.max_first_useful_ms, pause_seconds=args.pause_seconds)
         from evals.response_review import review_results
         response_review = await review_results(ark, results, concurrency=args.concurrency)
         for result in results:
@@ -403,7 +517,8 @@ async def main(argv=None):
     report = {'engine': 'NLPService', 'release': get_release_manifest(), 'model_configuration': configuration,
               'selection': {'requested_case_ids': args.case, 'tags': args.tag,
                             'selected_case_ids': [case['id'] for case in cases],
-                            'repeat': args.repeat, 'concurrency': args.concurrency},
+                            'repeat': args.repeat, 'concurrency': args.concurrency,
+                            'max_first_useful_ms': args.max_first_useful_ms, 'pause_seconds': args.pause_seconds},
               'response_review': response_review,
               'summary': summarize(results), 'results': results}
     for result in results:

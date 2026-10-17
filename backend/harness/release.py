@@ -22,7 +22,8 @@ SOURCE_FILES = (
     'backend/task_feedback.py', 'backend/textutil.py', 'backend/tool_text_config.py',
     'backend/types.py', 'backend/google_maps.py', 'backend/weather.py',
     'backend/services/__init__.py', 'backend/services/config.py', 'backend/services/contracts.py',
-    'backend/services/factory.py', 'backend/services/llm.py', 'backend/services/reads.py', 'backend/services/routes.py',
+    'backend/services/factory.py', 'backend/services/google_auth.py', 'backend/services/llm.py',
+    'backend/services/reads.py', 'backend/services/regions.py', 'backend/services/routes.py',
 )
 SOURCE_DIRECTORIES = ('backend/harness', 'backend/cockpit', 'backend/tool_schemas')
 
@@ -45,7 +46,7 @@ def _safe_file(root: Path, relative: str) -> Path:
 def build_release_manifest(root: Path) -> dict:
     """Build offline or at startup. Request handlers use the cached getters."""
     root = Path(root).resolve()
-    paths = set(SOURCE_FILES) | set(REQUIRED_PROMPTS) | {'config/services.toml'}
+    paths = set(SOURCE_FILES) | set(REQUIRED_PROMPTS) | {'config/services.toml', 'config/regions.toml'}
     for directory, suffixes in [('prompts', {'.md', '.toml', '.json'}),
                                  *((directory, {'.py'}) for directory in SOURCE_DIRECTORIES)]:
         folder = root / directory

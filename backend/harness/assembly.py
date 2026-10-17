@@ -50,6 +50,7 @@ class FrozenNLPConfig:
 
     def __init__(self, config):
         self.document, self.source = deepcopy(config.document), config.source
+        self.region = getattr(config, 'region', '')
         self._profiles = {domain: self._resolved(config.profile(domain))
                           for domain in ('web_search', 'web_content', 'weather', 'places')}
         self._media = {kind: self._resolved(profile) for kind, profile in config.media_profiles().items()}
@@ -65,6 +66,10 @@ class FrozenNLPConfig:
     @staticmethod
     def _resolved(profile, *, default_url=''):
         profile = deepcopy(profile)
+        if profile.get('provider') == 'google_vertex':
+            profile['project'] = resolved(profile, 'project')
+            profile.pop('project_env', None)
+            return profile
         profile['base_url'] = resolved(profile, 'base_url', default_url)
         profile.pop('base_url_env', None)
         return profile
@@ -106,6 +111,8 @@ def model_policy_id(llm, config, task_budget=None):
         roles[name] = {'request': asdict(llm.request([], role=name)),
                        'provider': profile['provider'], 'base_url': resolved(profile, 'base_url'),
                        'reasoning_field': profile.get('reasoning_field'),
+                       'project': profile.get('project'), 'location': profile.get('location'),
+                       'reasoning_effort': profile.get('reasoning_effort'),
                        'timeout_seconds': profile.get('timeout_seconds', 45)}
     reads = {}
     for domain in ('web_search', 'web_content', 'weather'):

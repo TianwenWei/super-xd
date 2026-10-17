@@ -60,7 +60,9 @@ Talker固定26工具（15热车控、3调度、3地点/天气、网页、车书�
 
 content=null 表示供应商的空内容/仅工具调用；usage=null 或字段缺失表示未返回，不能解读为 0 token。reasoning_content 只展示供应商实际返回的内容；未返回时显示未提供，不推测、补写或宣称访问内部推理。原始返回内容不以摘要替代，脱敏除外；轨迹功能启用前未采集的供应商元字段无法补回。
 
-Ark流请求使用stream_options.include_usage=true，但usage仍以实际返回为准。meta.response_headers_ms从本次HTTP请求开始至收到headers，含连接池、建连与HTTP等待，不是纯prefill；first_tool_delta_ms是同请求首个tool_calls delta时间，tool-only时first_delta_ms可为null；service_tier只记录供应商值。正常SSE遇[DONE]后读至HTTP EOF供连接池复用，取消仍可关闭流。本地真实TCP回归已验证同一连接的顺序复用，不能据此补造旧线上请求的复用或缓存命中证据。
+Ark流请求使用stream_options.include_usage=true，但usage仍以实际返回为准。流式meta.response_headers_ms从整个逻辑调用开始累计至最终尝试收到headers，包含此前失败尝试；attempts[].response_headers_ms才是各次尝试相对自身开始的时间。顶层elapsed_ms、first_chunk_ms、first_delta_ms、first_tool_delta_ms和first_output_ms同样按逻辑调用累计，各attempt内相应字段按单次尝试计时。未观测到的时间保持null或缺失，不能用后续成功抹掉先前失败。
+
+headers等待包含请求准备、连接池、建连、上传、网络/代理、供应商接入及服务处理等尚未分解的耗时，不能等同prefill或模型推理；客户端完成send_body也不能证明对端已接收、解析完请求。first_tool_delta_ms记录首个非空工具片段，tool-only时first_delta_ms可为null；service_tier只记录供应商值。正常SSE遇[DONE]后读至HTTP EOF供连接池复用，取消仍可关闭流。本地真实TCP回归已验证同一连接的顺序复用，不能据此补造旧线上请求的复用或缓存命中证据。
 
 Talker 用独立队列和线程异步写入，SQLite 日志操作不阻塞前台事件循环；Thinker 在独立 worker 中以短事务写入。读取可能短暂落后于流式文字或回执。`recording_error` 非 null 表示曾发生写入失败，界面明确提示记录可能不完整，不能把缺失事件当作没有调用。
 

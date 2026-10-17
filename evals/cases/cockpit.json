@@ -30,13 +30,21 @@
       {
         "input": "先把正在放的声音暂停吧",
         "expect": {
-          "talker_calls": [
-            {
-              "name": "control_media",
-              "arguments": {
-                "action": "pause"
+          "talker_call_options": [
+            [
+              {
+                "name": "control_media",
+                "arguments": {
+                  "action": "pause"
+                }
+              },
+              {
+                "name": "control_playback",
+                "arguments": {
+                  "action": "pause"
+                }
               }
-            }
+            ]
           ],
           "forbid_talker_calls": [
             "delegate_vehicle_control",

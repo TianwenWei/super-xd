@@ -37,6 +37,49 @@ async def test_failed_attempt_is_counted_and_generic_provider_error_is_in_trace(
         await gateway.close()
 
 
+@pytest.mark.parametrize('partial', ['', '已经收到你的请求'])
+async def test_error_presentation_is_not_model_text_or_a_useful_result(make_gateway, partial):
+    from evals.harness import latency_summary
+    class BrokenModel:
+        async def stream(self, *args, **kwargs):
+            if partial:
+                yield {'type': 'delta', 'text': partial}
+            raise ProviderError('upstream_error' if partial else 'timeout', 'offline provider failure', provider='fixture')
+    gateway = make_gateway(BrokenModel())
+    try:
+        result = await gateway.turn({'input': '你好'}, 'warm', 'driver')
+        assert result['text'] and result['first_effective_ms'] is not None
+        assert result['presentation_source'] == 'error_template'
+        assert result['first_useful_ms'] is None
+        assert not result['commands'] and result['model_calls'] == 1
+        assert (result['first_model_text_ms'] is not None) == bool(partial)
+        if partial:
+            assert result['text'].startswith(partial)
+            assert result['first_model_text_ms'] == result['first_effective_ms']
+        summary = latency_summary([{'turns': [result], 'traces': result['trace']}])['all']
+        assert summary['first_text_samples'] == summary['error_turns'] == 1
+        assert summary['model_text_samples'] == int(bool(partial))
+        assert summary['no_model_text_turns'] == int(not partial)
+        assert summary['model_text_unknown_turns'] == 0
+        assert summary['cache_groups']['unknown']['turns'] == 1
+    finally:
+        await gateway.close()
+
+
+async def test_failed_continuation_after_query_receipt_has_no_executed_result_latency(make_gateway):
+    model = ScriptedModel([{'tool_calls': [call('get_weather', {'location': '巴黎', 'date': 'today'})]}])
+    gateway = make_gateway(model, lookup_fixtures={'get_weather': [{'ok': True, 'summary': {'temperature_c': 18}}]})
+    try:
+        result = await gateway.turn({'input': '巴黎今天天气怎么样'}, 'warm', 'driver')
+        assert result['error'] and result['lookups'] == ['get_weather']
+        assert result['lookup_results'][0]['result']['ok'] is True
+        assert result['first_effective_ms'] is not None
+        assert result['first_model_text_ms'] is None and result['first_useful_ms'] is None
+        assert result['presentation_source'] == 'error_template'
+    finally:
+        await gateway.close()
+
+
 async def test_usage_aliases_preserve_unreported_counts_as_unknown(make_gateway):
     class Model:
         async def stream(self, *args, **kwargs):
@@ -105,6 +148,9 @@ async def test_eval_consumes_core_presentation_without_adding_a_model_call(make_
         assert result['text'] == terminal['data']['presentation']['speech']
         assert '40' in result['text'] and result['model_calls'] == 1
         assert result['first_useful_ms'] is not None
+        assert result['first_model_text_ms'] is None
+        assert result['presentation_source'] == 'verified_receipts'
+        assert result['first_effective_ms'] is not None
         assert gateway.history[-1].records[-1].content == result['text']
     finally:
         await gateway.close()

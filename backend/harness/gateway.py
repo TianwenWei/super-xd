@@ -14,13 +14,13 @@ from backend.persona import PERSONAS, style_prompt
 from backend.catalog import TOOLS
 from backend.model_context import compact_message
 from backend.speaker import speaker_context
-from .context import ContextTurn
+from .context import ContextTurn, project_vehicle_state
 from .contracts import PreparedRun, RunCheckpoint, ToolRequest, ToolGroupRejected
 from .gateway_contracts import (StartRequest, ResumeRequest, GatewayCheckpoint, GatewayOutput,
     CompactRunCheckpoint, DispatchRequest, ToolDispatch, NLPDispatch, GroupCheckpoint, OrchestrationCheckpoint,
     MAX_CONTINUATION_BYTES, wire_bytes)
 from .ports import PolicyInput, SemanticPolicy, DiagnosticRecord, DiagnosticSink
-from .run import AgentRun, ModelStream, RunProtocolError
+from .run import AgentRun, ModelStream, RunProtocolError, canonical
 from .release import get_release_id
 from .diagnostics import safe_diagnostic
 from .talker import prepare_talker_run
@@ -31,6 +31,15 @@ from .evidence import RetrievalLimits, RetrievalProgress, RETRIEVAL_TOOLS, allow
 
 class _DiagnosticsUnavailable(RuntimeError):
     pass
+
+
+def _vehicle_context_state(context):
+    state = context.vehicle.model_dump()['state']
+    meta = state.setdefault('_meta', {})
+    location = context.environment.location
+    meta.update(timezone=context.environment.timezone, location=location.name if location else '',
+                location_country=location.country if location else '')
+    return state
 
 
 class NLPService:
@@ -69,11 +78,7 @@ class NLPService:
         request = StartRequest.model_validate(request.model_dump())
         context = request.context
         environment = context.environment
-        vehicle = context.vehicle.model_dump()['state']
-        meta = vehicle.setdefault('_meta', {})
-        meta.update(timezone=environment.timezone,
-                    location=environment.location.name if environment.location else '',
-                    location_country=environment.location.country if environment.location else '')
+        vehicle = _vehicle_context_state(context)
         local = datetime.fromisoformat(request.received_at).astimezone(ZoneInfo(environment.timezone))
         snapshot = {'vehicle': vehicle,
                     'vehicle_state_revision': context.vehicle.revision,
@@ -162,6 +167,9 @@ class GatewayRun:
         # The raw transcript remains in the checkpoint for product receipt
         # replay and audit. Only the actual model request drops task internals.
         prefix = len(self._run.prepared.messages)
+        vehicle_baseline = {'state': project_vehicle_state(_vehicle_context_state(self.start.context)),
+                            'revision': self.start.context.vehicle.revision,
+                            'observed_at': self.start.context.vehicle.observed_at}
         context = {}
         for record in messages[prefix:]:
             for call in record.get('tool_calls', []):
@@ -171,7 +179,7 @@ class GatewayRun:
         result = messages[:prefix]
         for record in messages[prefix:]:
             name, details = context.get(record.get('tool_call_id'), (None, False))
-            compact = compact_message(record, name, details)
+            compact = compact_message(record, name, details, vehicle_baseline=vehicle_baseline)
             if record.get('role') == 'tool':
                 original = json.loads(record['content'])
                 if isinstance(original, dict) and name in RETRIEVAL_TOOLS:
@@ -182,7 +190,12 @@ class GatewayRun:
                     # Unlike the demo actor, a resumed run does not rebuild its
                     # original snapshot. Its current query facts stay visible.
                     body = json.loads(compact['content'])
-                    body['state'] = original['state']
+                    # A vehicle receipt may carry identical aliases. Its lossless
+                    # delta already contains that actual state; other queries keep
+                    # their independent state payload in the current model input.
+                    if not ('vehicle_state_delta' in body
+                            and canonical(original['state']) == canonical(original.get('vehicle_state'))):
+                        body['state'] = original['state']
                     compact['content'] = json.dumps(body, ensure_ascii=False, separators=(',', ':'))
             result.append(compact)
         return result

@@ -81,7 +81,8 @@ class NLPBridge:
                     continue
                 if record['role'] == 'assistant':
                     calls = [{"id": call['id'], "name": call['function']['name'],
-                              "arguments": json.loads(call['function']['arguments'])}
+                              "arguments": json.loads(call['function']['arguments']),
+                              **({'extra_content': deepcopy(call['extra_content'])} if 'extra_content' in call else {})}
                              for call in record.get('tool_calls', [])]
                     pending.update(call['id'] for call in calls)
                     records.append({'role': 'assistant', 'content': record.get('content'), 'tool_calls': calls})
@@ -271,9 +272,15 @@ class NLPBridge:
                     if previous != self.tasks.get(task['id']):
                         self.emit('ui.card', task=task_card(task), origin_turn_id=turn.id)
             if event.presentation is not None:
-                turn.metrics.setdefault('first_useful_ms', (time.perf_counter() - turn.started) * 1000)
+                if event.type == 'run.completed' and event.presentation.source == 'verified_receipts':
+                    turn.metrics['first_useful_ms'] = (time.perf_counter() - turn.started) * 1000
                 turn.metrics['output_source'] = event.presentation.source
                 self.append_text(turn, event.presentation.speech, source=event.presentation.source)
+            # Failure speech and an unfinished model stream are audible, but
+            # only an actual completed control can remain useful in a failed turn.
+            if event.type == 'run.failed' or (event.type == 'run.completed'
+                    and turn.metrics.get('first_useful_ms') is None):
+                turn.metrics['first_useful_ms'] = turn.metrics.get('last_execution_receipt_ms')
             if event.type == 'run.suspended':
                 self.emit('run.waiting', turn_id=turn.id, status=event.checkpoint.run.status)
             elif event.type == 'run.completed':
@@ -291,7 +298,7 @@ class NLPBridge:
         request, dispatch = item.request, item.dispatch
         call = {'id': request.tool_call_id, 'function': {'name': request.name,
                 'arguments': json.dumps(request.arguments, ensure_ascii=False)}, 'type': 'function'}
-        turn.pending_results[call['id']] = (future, request)
+        turn.pending_results[call['id']] = (future, request, dispatch.operation)
         arguments = deepcopy(dispatch.execution_arguments if dispatch.execution_arguments is not None else request.arguments)
         if request.name in TOOLS and dispatch.prepared_command is None:
             self.send_command(turn, call, request.name, arguments,
@@ -343,12 +350,15 @@ class NLPBridge:
             return
         if pending is None:
             return
-        future, request = pending
+        future, request, operation = pending
         if request.name in TOOLS and isinstance(result.get('state'), dict) and '_meta' in result['state']:
             result = {**result, 'vehicle_state': deepcopy(result['state'])}
         self.trace('tool.completed', {'name': request.name, 'arguments': request.arguments, 'result': result},
                    turn, call_id=call['id'], status='completed' if result.get('ok') else 'failed')
         turn.traced_tool_results.add(call['id'])
+        if (operation == 'control' and result.get('ok') is True and result.get('executed') is True
+                and result.get('outcome_unknown') is not True):
+            turn.metrics['last_execution_receipt_ms'] = (time.perf_counter() - turn.started) * 1000
         if isinstance(result.get('task'), dict):
             self.remember_task(result['task'])
             self.emit('ui.card', task=task_card(result['task']))

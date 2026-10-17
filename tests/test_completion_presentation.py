@@ -1,16 +1,21 @@
 """Terminal speech is a shared expression of accepted facts, never execution."""
 from copy import deepcopy
 import json
+from types import SimpleNamespace
 
 import pytest
 
 from backend.cockpit import initial_cockpit_state
+from backend.cockpit.tools import cockpit_feedback
 from backend.demo.local_gateway import history_records
 from backend.demo.vehicle_simulator import execute_tool
 from backend.harness.contracts import ToolObservation
 from backend.harness.gateway_contracts import GatewayCheckpoint, HistoryTurn
 from backend.harness.presentation import completion_presentation
 from backend.harness.product_policy import ProductPolicyError
+from backend.persona import PERSONAS, render
+from backend.services.contracts import ProviderError
+from backend.speech_config import feedback_text
 from test_gateway_contract import (ScriptedModel, call, collect, observation, policy,
                                    resume_request, service, start_request)
 from test_orchestration import request, kernel, outputs, resume, StreamModel, message
@@ -145,6 +150,105 @@ async def test_model_failure_reports_completed_control_but_not_successful_query_
     assert '18' not in done.presentation.speech and '天气' not in done.presentation.speech
     assert 'IndexError' not in done.presentation.speech
     assert len(model.requests) == 2
+
+
+@pytest.mark.parametrize('persona', ['professional', 'warm', 'playful'])
+@pytest.mark.parametrize('code,key', [
+    ('timeout', 'errors.model_timeout'), ('model_timeout', 'errors.model_timeout'),
+    *((code, 'errors.model_connection') for code in (
+        'auth', 'permission_denied', 'rate_limit', 'upstream_error', 'unavailable',
+        'connection_error', 'invalid_response', 'invalid_model_message', 'provider_error',
+        'model_or_protocol_error')),
+])
+def test_typed_model_failures_select_a_reason_without_provider_diagnostics(persona, code, key):
+    checkpoint = SimpleNamespace(start=SimpleNamespace(persona_id=persona),
+        run=SimpleNamespace(status='failed', error_code=code),
+        orchestration=SimpleNamespace(groups=[]))
+    presentation = completion_presentation(checkpoint, {'reason': 'private technical detail token=secret'})
+    kind = 'error' if code in {'timeout', 'model_timeout'} else 'result'
+    assert presentation.speech == render(PERSONAS[persona], kind, feedback_text(key))
+    assert 'secret' not in presentation.speech and 'private' not in presentation.speech
+    assert feedback_text('errors.operation_incomplete') not in presentation.speech
+    if code in {'timeout', 'model_timeout'}:
+        assert '超时' in presentation.speech and '连接' not in presentation.speech
+
+
+@pytest.mark.parametrize('persona', ['professional', 'warm', 'playful'])
+@pytest.mark.parametrize('code', ['diagnostics_unavailable', 'checkpoint_size_exceeded', 'future_failure'])
+def test_generic_failure_is_one_complete_statement_without_repeated_persona_prefix(persona, code):
+    checkpoint = SimpleNamespace(start=SimpleNamespace(persona_id=persona),
+        run=SimpleNamespace(status='failed', error_code=code),
+        orchestration=SimpleNamespace(groups=[]))
+    assert completion_presentation(checkpoint).speech == feedback_text('errors.operation_incomplete')
+
+
+@pytest.mark.parametrize('persona', ['professional', 'warm', 'playful'])
+@pytest.mark.parametrize('code', ['unsupported_capability', 'not_configured', 'task_commit_unknown',
+                                 'execution_not_confirmed', 'authoritative_vehicle_state_required'])
+def test_complete_capability_and_unknown_statements_need_no_second_failure_prefix(persona, code):
+    checkpoint = SimpleNamespace(start=SimpleNamespace(persona_id=persona),
+        run=SimpleNamespace(status='failed', error_code=code), orchestration=SimpleNamespace(groups=[]))
+    statement = (cockpit_feedback('unsupported_capability') if code in {'unsupported_capability', 'not_configured'}
+                 else feedback_text('errors.outcome_unknown'))
+    presentation = completion_presentation(checkpoint)
+    assert presentation.speech == statement
+    assert presentation.source == 'error_template'
+
+
+@pytest.mark.parametrize('persona', ['professional', 'warm', 'playful'])
+@pytest.mark.parametrize('code', ['timeout', 'connection_error', 'unsupported_capability', 'future_failure'])
+def test_structured_spoken_reason_is_already_a_complete_statement_even_for_a_cause_code(persona, code):
+    checkpoint = SimpleNamespace(start=SimpleNamespace(persona_id=persona),
+        run=SimpleNamespace(status='failed', error_code=code), orchestration=SimpleNamespace(groups=[]))
+    statement = '没有收到设备确认，请先核对当前状态。'
+    presentation = completion_presentation(checkpoint, {
+        'spoken_reason': statement, 'reason': 'private technical detail token=secret'})
+    assert presentation.speech == statement
+    assert presentation.source == 'error_template'
+
+
+@pytest.mark.parametrize('persona', ['professional', 'warm', 'playful'])
+@pytest.mark.parametrize('code,key,kind', [
+    ('connection_error', 'errors.model_connection_pending', 'result'),
+    ('task_commit_unknown', 'errors.outcome_unknown', 'result'),
+    ('timeout', 'errors.model_timeout', 'error'),
+])
+async def test_partial_real_control_retains_one_success_and_one_correctly_typed_failure(persona, code, key, kind):
+    _, model, done = await volume_receipt(persona=persona)
+    checkpoint = done.checkpoint.model_copy(deep=True)
+    checkpoint.run.status, checkpoint.run.error_code = 'failed', code
+    presentation = completion_presentation(checkpoint)
+    assert presentation.speech == done.presentation.speech + ' ' + render(PERSONAS[persona], kind, feedback_text(key))
+    assert presentation.source == 'verified_receipts'
+    assert len(model.requests) == 1
+
+
+@pytest.mark.parametrize('with_control', [False, True])
+async def test_provider_timeout_after_lookup_keeps_only_real_action_completion(with_control):
+    class TimeoutAfterLookup(ScriptedModel):
+        async def stream(self, messages, tools, **options):
+            if self.requests:
+                self.requests.append({'messages': messages, 'tools': tools})
+                raise ProviderError('timeout', 'private provider diagnostic token=secret', provider='fixture')
+            async for item in super().stream(messages, tools, **options):
+                yield item
+    calls = [call('get_weather', {'location': '巴黎', 'date': 'today'}, 'query')]
+    if with_control:
+        calls.append(call())
+    model = TimeoutAfterLookup([{'tool_calls': calls}])
+    core = service(model)
+    first = (await collect(core.start(start_request(persona_id='warm'))))[-1]
+    receipts = [observation(first.checkpoint, 0, ok=True, summary={'temperature_c': 18})]
+    if with_control:
+        receipts.append(observation(first.checkpoint, 1))
+    done = (await collect(core.resume(resume_request(first.checkpoint, receipts))))[-1]
+    assert done.type == 'run.failed' and done.error_code == 'timeout'
+    assert len(model.requests) == 2
+    assert ('40' in done.presentation.speech) is with_control
+    assert '18' not in done.presentation.speech and '天气' not in done.presentation.speech
+    assert done.presentation.speech.endswith('这次没能完成，响应超时。')
+    assert 'secret' not in done.presentation.speech and '连接' not in done.presentation.speech
+    assert done.presentation.source == ('verified_receipts' if with_control else 'error_template')
 
 
 async def test_unknown_and_cancelled_never_claim_completion():

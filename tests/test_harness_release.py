@@ -11,10 +11,9 @@ from backend.harness.run import AgentRun, RunProtocolError
 def fixture_release(root):
     for directory in release.SOURCE_DIRECTORIES:
         (root / directory).mkdir(parents=True, exist_ok=True)
-    paths = {*release.SOURCE_FILES, *release.REQUIRED_PROMPTS, 'config/services.toml',
+    paths = {*release.SOURCE_FILES, *release.REQUIRED_PROMPTS, 'config/services.toml', 'config/regions.toml',
              'prompts/talker/tools.toml', 'backend/harness/engine.py',
              'backend/services/contracts.py', 'backend/cockpit/tools.py',
-    'backend/tool_schemas/manual.py', 'backend/tool_schemas/maps.py', 'backend/tool_schemas/web.py',
              'backend/tool_schemas/manual.py', 'backend/tool_schemas/maps.py', 'backend/tool_schemas/web.py'}
     for relative in paths:
         path = root / relative
@@ -33,8 +32,8 @@ def test_release_identity_is_independent_of_root_and_mtime(tmp_path):
 @pytest.mark.parametrize('relative', [
     'prompts/talker.md', 'prompts/reasoner_foreground.md', 'prompts/reasoner_background.md',
     'prompts/talker/tools.toml', 'prompts/talker/examples.json',
-    'config/services.toml', 'backend/catalog.py', 'backend/nlp_app.py', 'backend/harness/engine.py',
-    'backend/services/contracts.py', 'backend/cockpit/tools.py',
+    'config/services.toml', 'config/regions.toml', 'backend/catalog.py', 'backend/nlp_app.py', 'backend/harness/engine.py',
+    'backend/services/contracts.py', 'backend/services/regions.py', 'backend/services/google_auth.py', 'backend/cockpit/tools.py',
     'backend/tool_schemas/manual.py', 'backend/tool_schemas/maps.py', 'backend/tool_schemas/web.py',
 ])
 def test_changed_runtime_input_changes_release_id(tmp_path, relative):
@@ -93,9 +92,10 @@ def test_cached_getters_are_independent_copies_and_perform_no_file_io(monkeypatc
     assert release.get_release_id() == expected['release_id']
 
 
-def test_missing_required_source_fails_without_silent_release_fallback(tmp_path):
+@pytest.mark.parametrize('relative', ['config/services.toml', 'config/regions.toml'])
+def test_missing_required_source_fails_without_silent_release_fallback(tmp_path, relative):
     root = fixture_release(tmp_path)
-    (root / 'config/services.toml').unlink()
+    (root / relative).unlink()
     with pytest.raises(FileNotFoundError):
         release.build_release_manifest(root)
 
@@ -175,6 +175,7 @@ async def test_talker_model_trace_includes_cached_release(tmp_path):
 @pytest.mark.parametrize('relative', [
     'backend/session.py', 'backend/worker.py', 'backend/db.py', 'backend/demo/vehicle_simulator.py',
     'backend/services/audio.py', 'backend/asr.py', 'backend/tts.py', 'backend/manual_search.py',
+    'backend/services/google_audio.py', 'backend/services/elevenlabs_audio.py', 'backend/services/elevenlabs_tts.py',
 ])
 def test_demo_and_local_audio_changes_do_not_change_production_release(tmp_path, relative):
     root = fixture_release(tmp_path)

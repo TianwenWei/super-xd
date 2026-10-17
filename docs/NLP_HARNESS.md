@@ -40,6 +40,8 @@ Demo 的 `SessionActor` 经 `demo/session_nlp.py` 与 `demo/local_gateway.py` �
 
 Talker 一次调用决定并表达。咨询与执行由模型理解，代码校验结构、来源、能力与回执，不追加每轮意图分类模型。纯控制/登记的确定成功直接消费回执完成；查询及需要解释的失败按真实结果继续推理。前台 Planner 只产出计划，ForegroundGroup 验证完整动作并逐项交接；媒体/导航依赖必须在前序真实回执后重新准备，不能用 expected 状态推进。
 
+模型输入中的整车回执可投影为相对本轮车况快照的无损 `vehicle_state_delta`：基准含 revision、观测时间和内容指纹，set/remove 保留该回执当时的完整差异及原回执身份。历史状态不能当作最新事实；基准不完整时保留原值。真实观察、执行依赖、保持项校验和 checkpoint 仍使用完整回执，模型副本的压缩不能改变执行依据。
+
 历史 assistant 内容保留完整生成答案，`playback_history` 单独表达未知、未开始、部分、完成和已确认听到的片段。未知播放不能当作空答案。动态事实在固定规则、人设、原生示例和历史之后，先列当前音区和变化标志。Talker 的固定前缀从catalog文字配置生成85项完整冷能力语义说明，仍只有26工具；动态冷车控索引按 skill 保留 available/unavailable/missing 名称及可用数量，不从语义目录或 feature=true 推断缺失能力。完整声明保留在 StartRequest，供前台编排与执行校验使用。
 
 检索结果的来源 ID、版本和内容指纹用于判断有无新增证据；排序、分数和再次查询时间不算新证据。证据范围描述对象、时段、粒度及覆盖范围，不证明答案被支持。首个空结果允许一次改写；再次无新增证据会阻止继续调用同一检索工具，返回可收束的结构化反馈。前台默认每工具最多 4 次、合计 8 次；后台同时受任务步骤/查询预算约束。进展账本随运行/任务 checkpoint 保存，unknown 结果不当作确定证据。
@@ -59,8 +61,13 @@ NLP_GATEWAY_URL=http://gateway.internal .venv/bin/python -m uvicorn backend.nlp_
 
 依赖与 Python 版本由 `pyproject.toml`、`uv.lock` 锁定；生产只需基础依赖，Demo、车书索引和本地 VAD 为独立 extras。生产 factory 显式读取环境构造不可变 NLPSettings，不隐式加载 `.env`；Demo 和脚本的显式入口可调用本地环境加载器。模型/检索使用 `config/services.toml` 及已选择的本地配置，启动时解析并冻结，凭证不写入版本哈希或诊断。
 
+`SERVICE_REGION=europe/china` 在启动加载配置时应用 `config/regions.toml`，绑定四个模型角色与 Demo 的 ASR/TTS；生产 NLP 进程仍不启动音频服务。欧洲使用 Google EU Gemini 3.8 Flash、ElevenLabs ASR 和火山小何 TTS，中国使用 Ark/火山音频；ElevenLabs 和 Google TTS 保留为显式可选实现。未设置时使用所选服务文件的显式绑定，仓库基础绑定仍为火山；本机 `.env` 选择欧洲不会改变此默认规则。预设不改 token、推理与超时预算，也不改检索、地图或媒体。选中地区时不接受 `ASR_PROFILE` / `TTS_PROFILE` 覆盖，不识别 IP，不跨地区自动回退。详情与凭证要求见[地区预设](SERVICE_PROVIDERS.md#地区预设)。
+
+更改地区后重启相关进程并新建运行；有效角色/profile 配置进入模型策略指纹，旧 checkpoint 和后台任务不能用新配置续跑。运行过程中修改环境变量不会切换已装配的模型。地区名称是部署选择，不代表所有第三方服务都承诺同一数据处理辖区。
+
 | 环境变量 | 用途/默认值 |
 | --- | --- |
+| `SERVICE_REGION` | 可选 `europe` / `china`；启动冻结，未设置使用显式绑定 |
 | `NLP_GATEWAY_URL`、`NLP_GATEWAY_TOKEN` | Gateway 根地址必填；内部 Bearer 凭证可选 |
 | `NLP_GATEWAY_TIMEOUT_SECONDS` | Gateway 单次请求 10 秒 |
 | `NLP_GATEWAY_HEALTH_URL` | 可选显式健康 URL；未设置则不探测 Gateway |
@@ -70,6 +77,8 @@ NLP_GATEWAY_URL=http://gateway.internal .venv/bin/python -m uvicorn backend.nlp_
 | `THINKER_MAX_STEPS`、`THINKER_TIMEOUT_SECONDS`、`TOOL_TIMEOUT_SECONDS` | 后台默认 20 步、60 秒、单工具 12 秒；启动冻结 |
 
 `/health/live` 只报告进程存活；`/health/ready` 报告本地资源和可选 Gateway 探测及发布版本；`/metrics` 返回按模型角色聚合的调用、失败/取消、时长和实际 usage，不保存对话文本。未知 token 数不伪造为已测量。内部接口须由部署层隔离，流式代理关闭缓冲；跨实例排他和取消路由由 Gateway 管理。
+
+角色级模型首输出和累计期限见[服务配置](SERVICE_PROVIDERS.md)。流式重试共用原期限，超时不自动重发；`attempts` 保留每次尝试，顶层 elapsed/首包/首文本按逻辑调用累计。设定期限只能限制等待；冷缓存下的成功响应延迟和失败率仍须独立验收，不能把快速失败当作提速。
 
 当前指标为进程内 JSON 聚合，尚未接入 OpenTelemetry/Prometheus exporter，也未覆盖首 token 延迟和策略拒绝分布；这些需随部署监控补齐。压测、滚动升级和真车联调仍需在实际 Gateway 与设备环境验收。checkpoint 当前不使用 HMAC，依赖可信内部接口及 Gateway 服务器存储边界；若允许终端或其他不可信主体回传，须先增加认证签名或改成服务端引用。
 

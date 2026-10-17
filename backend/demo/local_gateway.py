@@ -24,7 +24,8 @@ def history_records(messages):
         role = message['role']
         if role == 'assistant':
             calls = [{'id': call['id'], 'name': call['function']['name'],
-                      'arguments': json.loads(call['function']['arguments'])}
+                      'arguments': json.loads(call['function']['arguments']),
+                      **({'extra_content': deepcopy(call['extra_content'])} if 'extra_content' in call else {})}
                      for call in message.get('tool_calls', [])]
             records.append({'role': role, 'content': message.get('content'), 'tool_calls': calls})
         elif role == 'tool':

@@ -478,7 +478,9 @@ async def test_queued_cancellation_does_not_spin_claim_loop(db):
     worker = ThinkerWorker(db, FakeArk(message("finish_task", {"summary": "已完成"})), FakeTavily(), concurrency=2)
     loop = asyncio.create_task(worker.run_forever(poll_interval=0.01))
     try:
-        await wait_until(lambda: db.get_task(next_task["id"])["status"] == "completed")
+        # The two workers finish independently; neither completion orders the other.
+        await wait_until(lambda: db.get_task(next_task["id"])["status"] == "completed"
+                         and db.get_task(cancelled["id"])["status"] == "cancelled")
         assert db.get_task(cancelled["id"])["status"] == "cancelled"
     finally:
         worker.stop()

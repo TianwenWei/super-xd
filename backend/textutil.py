@@ -5,14 +5,69 @@ whitespace. Nothing in this module interprets what a user or model meant.
 """
 from __future__ import annotations
 
+import json
+import math
 import os
 from typing import Iterable
+
+from markdown_it import MarkdownIt
 
 ASCII_ALNUM = frozenset('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789')
 SECRET_ENV = ('ARK_API_KEY', 'ARK_EMBEDDING_API_KEY', 'TAVILY_API_KEY', 'OPENAI_API_KEY', 'GOOGLE_MAPS_API_KEY',
               'VOLCENGINE_SPEECH_API_KEY', 'VOLCENGINE_SPEECH_APP_ID', 'VOLCENGINE_SPEECH_ACCESS_TOKEN',
               'VOLCENGINE_ASR_API_KEY', 'VOLCENGINE_ASR_ACCESS_TOKEN')
 URL_TERMINATORS = frozenset(' \t\r\n<>"\'，。！？；）)]】》」』')
+_JSON_MARKDOWN = MarkdownIt('commonmark')
+
+
+def _unique_json_object(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError('Duplicate JSON object key')
+        value[key] = item
+    return value
+
+
+def _invalid_json_constant(value):
+    raise ValueError('Nonfinite JSON number')
+
+
+def _finite_json_float(value):
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError('Nonfinite JSON number')
+    return number
+
+
+def decode_json_object(raw):
+    """Decode a whole JSON object or one closed JSON fence, never an excerpt.
+
+    Markdown accepts unterminated fences and discards reference definitions;
+    verify the source span and closing delimiter so neither hides extra material.
+    """
+    if not isinstance(raw, str) or not raw.strip():
+        raise ValueError('JSON response must be nonempty text')
+    text = raw.strip()
+    if not text.startswith('{'):
+        tokens = _JSON_MARKDOWN.parse(text)
+        lines = text.splitlines()
+        if (len(tokens) != 1 or tokens[0].type != 'fence'
+                or tokens[0].info.strip().lower() != 'json'
+                or tokens[0].map != [0, len(lines)]):
+            raise ValueError('Expected one JSON object or one complete JSON fence')
+        token = tokens[0]
+        closing = lines[-1].strip()
+        if (len(lines) < 3 or len(closing) < len(token.markup)
+                or set(closing) != {token.markup[0]}
+                or len(lines[-1]) - len(lines[-1].lstrip(' ')) > 3):
+            raise ValueError('JSON fence must be explicitly closed')
+        text = token.content
+    value = json.loads(text, object_pairs_hook=_unique_json_object,
+                       parse_constant=_invalid_json_constant, parse_float=_finite_json_float)
+    if not isinstance(value, dict):
+        raise ValueError('JSON response must be an object')
+    return value
 
 
 def halfwidth_alnum(text: str) -> str:

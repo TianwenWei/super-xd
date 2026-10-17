@@ -1,5 +1,6 @@
 """Gateway wire models. No runtime, executor, provider or persistence imports."""
 from __future__ import annotations
+from copy import deepcopy
 from datetime import datetime
 import hashlib
 import json
@@ -144,6 +145,15 @@ class HistoricalCall(Contract):
     id: str = Field(min_length=1, max_length=128)
     name: str = Field(min_length=1, max_length=128)
     arguments: dict[str, Any]
+    extra_content: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator('extra_content')
+    @classmethod
+    def bounded_provider_metadata(cls, value):
+        # Gateway stores opaque continuation data, never synthesizes signatures.
+        if wire_bytes(value) > 64 * 1024:
+            raise ValueError('Historical provider tool metadata exceeds 64 KiB')
+        return value
 
 
 class UserRecord(Contract):
@@ -214,7 +224,8 @@ class HistoryTurn(Contract):
                 record: dict[str, Any] = {'role': 'assistant', 'content': item.content}
                 if item.tool_calls:
                     record['tool_calls'] = [{'id': call.id, 'type': 'function', 'function': {
-                        'name': call.name, 'arguments': json.dumps(call.arguments, ensure_ascii=False)}}
+                        'name': call.name, 'arguments': json.dumps(call.arguments, ensure_ascii=False)},
+                        **({'extra_content': deepcopy(call.extra_content)} if call.extra_content else {})}
                         for call in item.tool_calls]
                 records.append(record)
             else:

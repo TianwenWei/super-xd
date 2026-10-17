@@ -83,7 +83,8 @@ async def test_role_and_mode_requests_do_not_include_other_sections(monkeypatch)
     fixed_time = '2026-10-14T12:00:00+00:00'
     requests = {role: await capture_case(runtime, {'id': role, 'role': role, 'text': '离线输入'}, fixed_time)
                 for role in ('talker', 'thinker_quick', 'thinker_research')}
-    assert requests['talker']['messages'][2:106] == prompts.load_examples()
+    examples = prompts.load_examples()
+    assert requests['talker']['messages'][2:2 + len(examples)] == examples
     for role, request in requests.items():
         text = '\n'.join(message.get('content') or '' for message in request['messages'])
         assert '## [section:' not in text

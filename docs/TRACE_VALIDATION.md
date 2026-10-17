@@ -4,6 +4,12 @@
 
 每个样本按run/turn/task/revision及call/invocation ID关联：实际模型输入、固定工具、原始返回、参数、校验结果、交接、真实回执、最终表达与audio.text。保留provider实际返回的model/usage/cache/finish_reason及错误码，未返回的字段保持缺失；reasoning_content只显示实际收到的字段，不补造内部思考。
 
+模型的`meta.transport`和逐次`attempts[].transport`记录TCP/TLS、请求写入、响应头/正文和关闭阶段及HTTP版本，每次最多64条允许列表事件。超时、取消与失败同样保留；不记录回调中的请求头、凭证或连接对象。`send_request_body.complete`只表示客户端写入完成，不证明远端已确认接收；等待响应头也不能直接等同于模型推理。只有额外的网络或供应商证据才能进一步划分耗时。
+
+Talker首帧以真实PCM为准：`server_first_audio_ms` / `server_first_nonzero_audio_ms`是本轮输入至服务端首帧/首非零帧，浏览器实收另计；`first_speech_ms`只是送入TTS的文字时间。TTS自身耗时、ASR/VAD耗时和渲染时间分别报告。
+
+核对完整答复时同时看`first_useful_ms`和终态，这是独立于Talker首帧的完成度指标。查询预告、失败模板、失败前的部分模型文字都不能代表已经得到答案；失败轮次仅已确认执行的控制回执可保留有用结果时间。首模型文字、首帧音频和有用结果是不同口径。
+
 重点检查：
 
 - 新输入、取消和旧revision结果仍归属原身份；stale记录不能产生新工具或覆盖当前回答。
