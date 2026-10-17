@@ -1,5 +1,4 @@
 """Single-writer session actor. Network/model callbacks only enqueue events."""
-from backend.tool_text_config import tool_text
 import asyncio
 import copy
 import json
@@ -12,22 +11,28 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 from jsonschema import validate, ValidationError
 from backend.catalog import TOOLS, SKILLS, HOT_TOOL_NAMES, initial_vehicle_state, execute_tool
-from backend.vehicle_planner import (VehicleControlPlanner, destination_grounded, validate_vehicle_plan,
+from backend.harness.vehicle_planner import (VehicleControlPlanner, destination_grounded, validate_vehicle_plan,
                                      validate_vehicle_action_keep, _write_paths, _overlap)
 from backend.persona import PERSONAS, style_prompt, render
-from backend.prompt_templates import render_prompt, load_examples
+from backend.prompt_templates import render_prompt, load_prompt
 from backend.types import PersonaConfig, SessionSnapshot
 from backend.settings import TOOL_TIMEOUT
 from backend.models import utcnow, sanitized_error
-from backend.model_context import compact_message, compact_tool_result
+from backend.model_context import compact_tool_result
+from backend.harness.context import ContextPrompts, ContextTurn, build_talker_messages
+from backend.harness.release import get_release_id
+from backend.harness.product_policy import (ProductPolicyError, normalize_search_arguments,
+                                            resolve_task, resolve_place_reference)
+from backend.harness.talker import (CONTROL_BY_NAME, CORE_PROMPT,
+                                    CURRENT_TURN_PROMPT, TASK_SNAPSHOT_NOTICE, TALKER_EXAMPLES, talker_tools)
 from backend.speech_text import speech_text, brief_result, spoken_number
 from backend.google_maps import MapsError
-from backend.web_search import WEB_TOOLS, WEB_BY_NAME
-from backend.manual_search import ManualSearchClient, MANUAL_TOOLS, MANUAL_BY_NAME
+from backend.web_search import WEB_BY_NAME
+from backend.manual_search import ManualSearchClient, MANUAL_BY_NAME
 from backend.vehicle_simulator import VehicleSimulator
 from backend.vehicle_feedback import dispatch_feedback
 from backend.speech_config import count_words, places_sentence, receipt_detail, spoken_reason, validation_feedback, feedback_text
-from backend.maps_tools import MAPS_TOOLS, MAPS_BY_NAME, READ_TOOLS
+from backend.maps_tools import MAPS_BY_NAME, READ_TOOLS
 from backend.textutil import halfwidth_alnum, is_domain, is_identifier, is_snake_code
 from backend.db import TERMINAL as TERMINAL_TASK, task_card
 from backend.task_feedback import task_user_detail
@@ -35,50 +40,12 @@ from backend.speaker import DEFAULT_SPEAKER_SEAT, speaker_context
 from backend.environment_context import environment_context
 from backend.cockpit import CockpitError, initial_cockpit_state
 from backend.cockpit.media import provider_diagnostic
-from backend.cockpit.tools import COCKPIT_TOOLS, COCKPIT_BY_NAME, cockpit_feedback
-from backend.cockpit.controller import prepare_media, prepare_navigation, validated_receipt, scoped_place, finite
+from backend.cockpit.tools import COCKPIT_BY_NAME, cockpit_feedback
+from backend.cockpit.controller import prepare_media, prepare_navigation, validated_receipt, scoped_place, finite, observed_media_state
 from backend.cockpit.device import DeviceRequest, validate_device_receipt, receipt_failure
 from backend.services.audio import PCM24K_TTS
 from backend.services.contracts import ProviderError, redact, ToolCapability
 from backend.services.factory import create_maps, create_search
-
-
-def function(name, description, properties=None, required=None):
-    return {'type': 'function', 'function': {'name': name, 'description': description,
-            'parameters': {'type': 'object', 'properties': properties or {}, 'required': required or [], 'additionalProperties': False}}}
-
-STR = {'type': 'string', 'minLength': 1, 'maxLength': 4000}
-TASK_ID = {'type': 'string', 'minLength': 1, 'pattern': r'[\s\S]*\S[\s\S]*', 'description': tool_text('common.task_id.description')}
-CONTROL_TOOLS = [
-    function('delegate_vehicle_control', tool_text('delegate_vehicle_control.description'),
-             {'skill_ids': {'type': 'array', 'items': {'type': 'string', 'enum': list(SKILLS)},
-                            'maxItems': 10, 'uniqueItems': True,
-                            'description': tool_text('delegate_vehicle_control.parameters.skill_ids.description')}}, ['skill_ids']),
-    function('delegate_task', tool_text('delegate_task.description'),
-             {'goal': STR,
-              'spoken_goal': {'type': 'string', 'maxLength': 80, 'description': tool_text('delegate_task.parameters.spoken_goal.description')},
-              'read_details': {'type': 'boolean', 'description': tool_text('delegate_task.parameters.read_details.description')},
-              'query_domain': {'type': 'string', 'enum': ['weather', 'general'], 'description': tool_text('delegate_task.parameters.query_domain.description')},
-              'query_mode': {'type': 'string', 'enum': ['quick', 'research'], 'description': tool_text('delegate_task.parameters.query_mode.description')},
-              'required_source_domains': {'type': 'array', 'maxItems': 5, 'uniqueItems': True,
-                                          'items': {'type': 'string', 'minLength': 3, 'maxLength': 253},
-                                          'description': tool_text('delegate_task.parameters.required_source_domains.description')}}, ['goal']),
-    function('manage_task', tool_text('manage_task.description'),
-             {'action': {'type':'string','enum':['get','reply','update','cancel'], 'description':tool_text('manage_task.parameters.action.description')}, 'task_id': TASK_ID,
-              'task_ids': {'type':'array','items':TASK_ID,'minItems':1,'maxItems':8,'uniqueItems':True,'description':tool_text('manage_task.parameters.task_ids.description')},
-              'text': {**STR, 'description':tool_text('manage_task.parameters.text.description')},
-              'read_details': {'type':'boolean','description':tool_text('manage_task.parameters.read_details.description')}}, ['action']),
-]
-CONTROL_BY_NAME = {t['function']['name']: t for t in CONTROL_TOOLS}
-CORE_PROMPT = render_prompt(
-    'talker', hot_tool_names=', '.join(HOT_TOOL_NAMES),
-    skill_index='; '.join(f'{key}:{value.name}，{value.description}' for key, value in SKILLS.items()))
-CURRENT_TURN_PROMPT = render_prompt('current_turn')
-TASK_SNAPSHOT_NOTICE = render_prompt('task_snapshot_notice')
-# Native tool-call few-shots for decisions. In live A/B runs prose examples
-# still dropped one of several requested actions (87/100 exact), and "先别开"
-# was sometimes sent as an "off" command; these examples gave 100/100.
-TALKER_EXAMPLES = load_examples()
 
 
 DESTINATION_NOT_GROUNDED = {
@@ -766,66 +733,33 @@ class SessionActor:
         self.launch_model(turn)
 
     def messages_for(self, turn):
-        # Completed results remain attributable alongside unfinished tasks.
-        # Reuse the prompt-copy helper; full reports/raw evidence stay in DB.
-        tasks = compact_tool_result({'tasks': self.task_list()[-8:]}, 'manage_task')['tasks']
-        # Actual read-only state is data, not a cold tool schema. Cold schemas
-        # belong exclusively to the dedicated vehicle planner.
-        vehicle = {skill_id: {key: copy.deepcopy(value) for key, value in values.items() if key != 'memories'}
-                   for skill_id, values in self.vehicle.items()}
-        context = {'vehicle': vehicle, 'background_tasks_reference_only': tasks,
+        def record(previous):
+            return ContextTurn(
+                id=previous.id, messages=previous.messages, proactive=previous.proactive,
+                speaker_seat=previous.speaker_seat,
+                pending_tool_group=bool(previous.group and len(previous.group_results) < len(previous.group)),
+                interrupted_playback=bool(previous.playback_id and previous.audio_cancelled.is_set()),
+                heard_text=previous.played_text or '',
+            )
+
+        context = {'vehicle': self.vehicle, 'background_tasks_reference_only': self.task_list(),
                    'speaker': speaker_context(turn.speaker_seat or self.speaker_seat),
                    'recent_places': self.recent_places,
-                   'cockpit': copy.deepcopy(self.cockpit_state),
-                   'media_choices': list(copy.deepcopy(self.media_choices).values()),
+                   'cockpit': self.cockpit_state,
+                   'media_choices': list(self.media_choices.values()),
                    'cockpit_capabilities': self.cockpit.info() if self.cockpit else {'configured': False},
                    'tool_capabilities': self.tool_capabilities(),
                    **environment_context(self.vehicle, utcnow()),
                    'capabilities': {'gps': False, 'browser_geolocation': False, 'task_priority_change': False}}
-        context['interrupted_playback'] = [
-            {'turn_id': previous.id, 'heard_text': previous.played_text or '', 'status': 'interrupted'}
-            for previous in self.turns[-4:] if previous.playback_id and previous.audio_cancelled.is_set()]
-        previous_user = next((previous for previous in reversed(self.turns[-4:]) if previous is not turn and not previous.proactive), None)
-        context['speaker_changed_since_previous_turn'] = bool(previous_user and previous_user.speaker_seat and
-            previous_user.speaker_seat != context['speaker']['seat'])
-        messages = [{'role': 'system', 'content': CORE_PROMPT},
-                    {'role': 'system', 'content': style_prompt(turn.persona)}]
-        for previous in [*self.turns[-4:], *([] if turn in self.turns[-4:] else [turn])]:
-            if previous is turn:
-                messages.append({'role': 'system', 'content': render_prompt('session_snapshot',
-                    speaker_name=context['speaker']['display_name'],
-                    snapshot_json=json.dumps(context, ensure_ascii=False, separators=(',', ':')))})
-                messages.append({'role': 'system', 'content': CURRENT_TURN_PROMPT})
-            # Keep protocol-valid complete tool groups even when newer user input arrives before a receipt.
-            pending = bool(previous.group and len(previous.group_results) < len(previous.group))
-            segment = copy.deepcopy(previous.messages)
-            if previous.playback_id and previous.audio_cancelled.is_set():
-                # Display/trace keeps the full generated text; model history
-                # makes no claim that unrendered speech reached the listener.
-                for record in segment:
-                    if record.get('role') == 'assistant' and not record.get('tool_calls'):
-                        record['content'] = previous.played_text or ''
-
-            if pending:
-                cutoff = next((i for i, m in reversed(list(enumerate(segment))) if m.get('tool_calls')), len(segment))
-                segment = segment[:cutoff]
-            call_context = {}
-            for record in segment:
-                for call in record.get('tool_calls', []):
-                    fn = call.get('function', {})
-                    try:
-                        args = json.loads(fn.get('arguments', '{}'))
-                    except (TypeError, ValueError):
-                        args = {}
-                    call_context[call['id']] = (fn.get('name'), isinstance(args, dict) and args.get('read_details') is True)
-            compact = [compact_message(record, *call_context.get(record.get('tool_call_id'), (None, False)))
-                       for record in segment]
-            messages.extend(compact)
-        return messages
+        return build_talker_messages(
+            current_turn=record(turn), turns=[record(previous) for previous in self.turns[-4:]], snapshot=context,
+            prompts=ContextPrompts(CORE_PROMPT, style_prompt(turn.persona), CURRENT_TURN_PROMPT,
+                                   load_prompt('session_snapshot')),
+        )
 
     def tools_for(self, turn):
         # This bounded interface never grows after delegation or prior turns.
-        return [TOOLS[name].openai_tool() for name in HOT_TOOL_NAMES] + CONTROL_TOOLS + MAPS_TOOLS + WEB_TOOLS + MANUAL_TOOLS + COCKPIT_TOOLS
+        return talker_tools()
 
     def launch_model(self, turn):
         if turn.model_calls >= 5:
@@ -843,7 +777,7 @@ class SessionActor:
         messages[2:2] = copy.deepcopy(TALKER_EXAMPLES)  # fixed rules, persona, examples, history
         model_call_index, call_id = turn.model_calls, uuid4().hex
         self.trace('model.started', {'model_call_index': model_call_index, 'messages': messages,
-                                    'tools': tools}, turn, call_id=call_id, status='running')
+                                    'tools': tools, 'release_id': get_release_id()}, turn, call_id=call_id, status='running')
         async def generate():
             partial = ''
             try:
@@ -979,17 +913,11 @@ class SessionActor:
                 schema = (MAPS_BY_NAME | WEB_BY_NAME | MANUAL_BY_NAME)[name]
                 validate(arguments, schema['function']['parameters'])
                 if name == 'search_places':
-                    # Provenance of the search area, like destinations: no GPS,
-                    # so "nearest X" needs a place the user actually said.
-                    # Models often append a country ("杭州 中国"); keep the parts the
-                    # user actually said and refuse only when none of them is grounded.
-                    sources = self.destination_sources(turn)
-                    grounded = [part for part in arguments.pop('area').split() if destination_grounded(part, sources)]
-                    if not grounded:
+                    try:
+                        arguments = normalize_search_arguments(arguments, self.destination_sources(turn))
+                    except ProductPolicyError:
+                        arguments.pop('area', None)
                         return name, arguments, dict(AREA_NOT_GROUNDED)
-                    # Places text search has no GPS bias; without the area, results
-                    # fall back to the server's IP location.
-                    arguments['near'] = ' '.join(grounded)
                 elif name == 'start_poi_navigation':
                     error = self.poi_error(turn, arguments['place_id'])
                     if error:
@@ -1121,10 +1049,7 @@ class SessionActor:
                 self.emit('lookup.result', turn_id=turn.id, **record)
 
     def resolve_place_reference(self, reference):
-        if reference in self.places:
-            return reference
-        matches = [key for key, place in self.places.items() if place.get('place_id') == reference]
-        return matches[0] if len(matches) == 1 else None
+        return resolve_place_reference(reference, self.places)
 
     def poi_error(self, turn, place_id):
         place_id = self.resolve_place_reference(place_id)
@@ -1480,20 +1405,7 @@ class SessionActor:
 
 
     def resolve_task(self, task_id=None):
-        tasks = self.task_list()
-        if not tasks:
-            return None, {'ok': False, 'code': 'no_task', 'retry_model': True, 'executed': False,
-                          'reason': '本会话尚无后台任务，不能manage_task。请根据本轮原句重新选择直接回答或实际可用功能；车控缺功能时delegate_vehicle_control，不要创建无关后台任务。'}
-        if task_id:
-            found = next((t for t in tasks if t['id'] == task_id), None)
-            return found, None if found else {'ok': False, 'reason': feedback_text('task.not_found')}
-        active = [t for t in tasks if t['status'] not in {'completed', 'failed', 'cancelled'}]
-        if len(active) == 1:
-            return active[0], None
-        if not active and len(tasks) == 1:
-            return tasks[0], None
-        return None, {'ok': False, 'needs_clarification': True, 'reason': feedback_text('task.select'),
-                      'candidates': [{'id': t['id'], 'goal': t['goal'], 'status': t['status']} for t in (active or tasks)[-8:]]}
+        return resolve_task(self.task_list(), task_id)
 
     def task_context(self, origin_turn_id=None, read_details=False, query_mode='research', spoken_goal=None,
                      query_domain='general', required_source_domains=()):
@@ -1974,27 +1886,7 @@ class SessionActor:
 
 
     def observed_media_state(self, result):
-        incoming, version = result.get('state'), result.get('state_version')
-        if not isinstance(incoming, dict) or type(version) is not int or version < self.cockpit_state['media']['version']:
-            raise CockpitError('stale_receipt', 'Invalid device status version')
-        if incoming.get('status') not in ('playing', 'paused', 'stopped', 'closed'):
-            raise CockpitError('device_failed', 'Invalid device playback status')
-        state = copy.deepcopy(self.cockpit_state['media'])
-        if incoming['status'] != 'closed':
-            if not isinstance(incoming.get('content_id'), str) or not incoming['content_id'] or incoming.get('kind') not in ('music', 'video', 'radio'):
-                raise CockpitError('device_failed', 'Invalid observed device content')
-        if incoming.get('desired_status', incoming['status']) not in ('playing', 'paused', 'stopped', 'closed'):
-            raise CockpitError('device_failed', 'Invalid observed desired status')
-        if 'title' in incoming and (not isinstance(incoming['title'], str) or len(incoming['title']) > 500):
-            raise CockpitError('device_failed', 'Invalid observed title')
-        for key in ('position_seconds', 'duration_seconds', 'volume'):
-            value = incoming.get(key)
-            if value is not None and (not finite(value) or value < 0 or key == 'volume' and value > 100):
-                raise CockpitError('device_failed', 'Invalid observed playback value')
-        for key in ('content_id', 'kind', 'title', 'status', 'desired_status', 'position_seconds', 'duration_seconds', 'volume', 'focus_reason'):
-            if key in incoming: state[key] = copy.deepcopy(incoming[key])
-        state['version'] = version
-        return state
+        return observed_media_state(self.cockpit_state['media'], {**result, 'state_version': result.get('state_version')})
 
     def media_provider_info(self, kind=None, content_id=None):
         if not self.cockpit:

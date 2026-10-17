@@ -1,18 +1,32 @@
-"""Real Ark/Speech acceptance with authoritative, delayed simulated receipts."""
+"""Configured LLM/Volcengine speech acceptance with delayed simulated receipts."""
 import asyncio
+from contextlib import AsyncExitStack
 import json
 from pathlib import Path
 import tempfile
 import time
 
 from backend.db import Database
-from backend.models import ArkClient, utcnow
+from backend.models import utcnow
 from backend.session import SessionActor
-from backend.tts import VolcanoTTS
+from backend.services.audio import build_tts
+from backend.services.config import load_services_config
+from backend.services.factory import create_llm
 
 
-async def run_case(root, name, text, *, driving_race=False):
-    ark, tts = ArkClient(), VolcanoTTS()
+async def run_case(root, name, text, *, driving_race=False, config=None):
+    config = config or load_services_config()
+    if config.profile('tts')['provider'] != 'volcengine':
+        raise ValueError('This speech acceptance requires the selected Volcengine TTS profile')
+    async with AsyncExitStack() as resources:
+        ark = create_llm(config)
+        resources.push_async_callback(ark.aclose)
+        tts = build_tts(config.profile('tts'))
+        resources.push_async_callback(tts.aclose)
+        return await evaluate_case(root, name, text, ark, tts, config, driving_race=driving_race)
+
+
+async def evaluate_case(root, name, text, ark, tts, config, *, driving_race=False):
     actor = SessionActor(name, Database(root / f'{name}.sqlite'), ark, tts)
     control = await actor.attach(); await control.get()
     audio = await actor.attach_audio()
@@ -45,13 +59,16 @@ async def run_case(root, name, text, *, driving_race=False):
                 if event['type']=='stream.done': break
             first_pcm=await audio_job
         await actor.trace_queue.join()
-        traces=actor.db.traces_after(actor.id,limit=1000)
+        traces=await asyncio.to_thread(actor.db.traces_after,actor.id,limit=1000)
         speeches=[r['data'] for r in traces if r['kind']=='audio.text']
         receipts=[e for e in events if e['type']=='vehicle.result']
         result={'case':name,'input':text,'done':event,'first_nonzero_pcm_ms':first_pcm,
-                'receipts':receipts,'speech':speeches,'audio_events':audio_events,'traces':traces}
+                'receipts':receipts,'speech':speeches,'audio_events':audio_events,'traces':traces,
+                'services_config':config.source,'llm':ark.info(),'tts':tts.info()}
         if name=='chat':
-            result['passed']=actor.current.chat_streaming and actor.current.model_calls==2 and first_pcm is not None
+            result['passed']=(actor.current.model_calls == 1 and first_pcm is not None
+                              and bool(event.get('text')) and not event.get('metrics', {}).get('error')
+                              and not any(message.get('tool_calls') for message in actor.current.messages))
         else:
             spoken=[r for r in traces if r['kind']=='vehicle.dispatch_feedback']
             received=[r for r in traces if r['kind']=='vehicle.receipt']
@@ -61,17 +78,20 @@ async def run_case(root, name, text, *, driving_race=False):
     finally:
         for job in jobs: job.cancel()
         await asyncio.gather(*jobs,return_exceptions=True)
-        await actor.close(); await ark.client.aclose(); await tts.aclose()
+        await actor.close()
 
 
 async def main():
-    report={'observed_at':utcnow(),'real_model':True,'real_tts':True,'simulated_vehicle':True,'browser_render_tested':False,'cases':[]}
+    config = load_services_config()
+    report={'observed_at':utcnow(),'real_model':True,'real_tts':True,'simulated_vehicle':True,'browser_render_tested':False,
+            'scope':'configured LLM roles and selected Volcengine TTS; simulated device receipts',
+            'services_config':config.source,'cases':[]}
     with tempfile.TemporaryDirectory() as directory:
         for name,text,race in [('window','打开主驾车窗',False),
                                ('failure','打开主驾车窗',True),
                                ('parallel','打开后视镜加热，并打开全部车内照明',False),
                                ('chat','用三句话介绍一下秋天适合散步的原因。',False)]:
-            record=await run_case(Path(directory),name,text,driving_race=race)
+            record=await run_case(Path(directory),name,text,driving_race=race,config=config)
             report['cases'].append(record)
             Path('docs/engineering-live.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))
             print(json.dumps({'case':name,'passed':record['passed'],'first_nonzero_pcm_ms':record['first_nonzero_pcm_ms']},ensure_ascii=False),flush=True)

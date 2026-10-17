@@ -1,4 +1,4 @@
-"""Format helpers without regular expressions (AGENTS.md §3).
+"""Format helpers without regular expressions (AGENTS.md: 必须保持的不变量).
 
 Only syntax is handled here: identifiers, domains, URLs, secret redaction and
 whitespace. Nothing in this module interprets what a user or model meant.

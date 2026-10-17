@@ -40,7 +40,7 @@ from copy import deepcopy
 from backend.catalog import TOOLS, initial_vehicle_state
 from backend.session import SessionActor
 from backend.vehicle_simulator import VehicleSimulator
-from backend.vehicle_planner import validate_vehicle_plan
+from backend.harness.vehicle_planner import validate_vehicle_plan
 from test_session import FakeArk as TalkerArk, call, wait_for
 from test_audio_session import ControlledArk, StreamingTTS, until
 from test_vehicle_planner import plan, intent, action

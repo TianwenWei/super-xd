@@ -4,10 +4,10 @@ import json
 import pytest
 
 from backend.session import Turn
-from backend.vehicle_planner import VehicleControlPlanner
+from backend.harness.vehicle_planner import VehicleControlPlanner
 from backend.catalog import initial_vehicle_state, TOOLS
 from backend.speaker import speaker_context
-from backend.worker import ThinkerWorker
+from backend.harness.task_runner import TaskRunner
 from tests.test_session import make_actor, wait_for, call
 from tests.vehicle_fakes import FakeVehiclePlanner, plan_response
 
@@ -37,7 +37,7 @@ async def test_speaker_system_snapshot_and_shared_zone_mapping(make_actor, seat,
         'tool': 'delegate_vehicle_control', 'skill_id': 'lights', 'arguments': {'seat': seat}}
     assert speaker['control_defaults']['set_temperature']['arguments'] == {'zone': zone}
     assert speaker['control_defaults']['set_interior_light']['arguments'] == {'zone': row}
-    worker = object.__new__(ThinkerWorker)
+    worker = object.__new__(TaskRunner)
     task = {'goal': '车辆设置建议', 'revision': 1, 'context': actor.task_context()}
     thinker_messages = worker._messages(task)
     assert any(item['role'] == 'system' and '"seat": "' + seat + '"' in item['content'] for item in thinker_messages)

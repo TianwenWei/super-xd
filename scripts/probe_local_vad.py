@@ -37,18 +37,35 @@ def measure(pcm):
 
 
 async def live(pcm, output):
-    from backend.asr import VolcanoASR
+    from contextlib import AsyncExitStack
+    from backend.services.audio import build_asr, build_tts
+    from backend.services.config import load_services_config
+    from backend.services.factory import create_llm, resolved_profile
+
+    config = load_services_config()
+    if any(config.profile(domain)['provider'] != 'volcengine' for domain in ('asr', 'tts')):
+        raise ValueError('This live VAD probe requires selected Volcengine ASR and TTS profiles')
+    async with AsyncExitStack() as resources:
+        ark = create_llm(config)
+        resources.push_async_callback(ark.aclose)
+        asr = build_asr(resolved_profile(config.profile('asr')))
+        resources.push_async_callback(asr.aclose)
+        tts = build_tts(config.profile('tts'))
+        resources.push_async_callback(tts.aclose)
+        if not asr.info().get('configured') or not tts.info().get('configured'):
+            raise RuntimeError('真实验证需要已配置的火山 ASR 和 TTS。')
+        return await probe_live(pcm, output, ark, asr, tts, config)
+
+
+async def probe_live(pcm, output, ark, asr, tts, config):
     from backend.db import Database
     from backend.handsfree_endpoint import listen_socket
-    from backend.models import ArkClient
     from backend.session import SessionActor
-    from backend.tts import VolcanoTTS
 
-    ark, asr, tts = ArkClient(), VolcanoASR(), VolcanoTTS()
-    if not asr.info().get('configured') or not tts.info().get('configured'):
-        raise RuntimeError('真实验证需要已配置的火山 ASR 和 TTS。')
     report = {'physical_microphone_tested': False, 'browser_aec_tested': False,
-              'events': [], 'first_reply_pcm': False, 'reply_interrupted': False}
+              'events': [], 'first_reply_pcm': False, 'reply_interrupted': False,
+              'scope': 'configured LLM roles and selected Volcengine ASR/TTS; synthetic audio only',
+              'services_config': config.source, 'llm': ark.info(), 'asr': asr.info(), 'tts': tts.info()}
     inbox, events, first_pcm = asyncio.Queue(), asyncio.Queue(), asyncio.Event()
 
     class ProbeSocket:
@@ -131,7 +148,6 @@ async def live(pcm, output):
             consumer.cancel()
             await asyncio.gather(consumer, return_exceptions=True)
             await actor.close()
-            await asyncio.gather(ark.aclose(), asr.aclose(), tts.aclose())
     return report
 
 

@@ -1,116 +1,81 @@
-# Super XD — Talker / Thinker 车载语音原型
+# Super XD — NLP Agent Harness
 
-车载语音助手的双层架构原型，车辆全部为模拟：
+车载语音助手的NLP推理与工具编排服务，包含Talker、前台车控Reasoner和后台研究Reasoner。外部Gateway负责鉴权、会话/上下文、任务账本、设备连接和工具交接；设备团队执行动作并返回真实结果。
 
-- **Talker**（`backend/session.py`）：每个会话一个 actor，负责听、说、打断、热车控、即时查询和委托。
-- **Vehicle Planner**（`backend/vehicle_planner.py`）：复合车控和非热车控的结构化计划（intent 账本），按真实回执逐项执行。
-- **Thinker**（`backend/worker.py`）：独立进程，通过 SQLite 任务表做后台调研，结果以事件回流。
-- **前端**（`frontend/src/`）：调试台，同时充当模拟车机。
+生产核心位于[`backend/harness/`](backend/harness/)，入口为[`backend/nlp_app.py`](backend/nlp_app.py)。原座舱Demo作为本地验证适配器保留，使用共享推理核心；生产NLP服务不启动SQLite、ASR/TTS、WebSocket或模拟车辆。
 
-架构约束、不变量和改动规范见 [AGENTS.md](AGENTS.md)。
+- [架构、运行与验证边界](docs/NLP_HARNESS.md)
+- [Gateway V1输入、交接、续跑、取消与任务账本契约](docs/GATEWAY_CONTRACT.md)
+- [开发约束](AGENTS.md)
 
-提示词、模型工具说明和固定播报话术统一在根目录 [prompts/](prompts/README.md)，按 Talker、Planner、Thinker、车控和语音分组。修改入口、模板变量、校验及重启方法见 [配置索引](prompts/README.md)。
+## 启动NLP服务
 
-可替换服务集中在 [config/services.toml](config/services.toml)：LLM、ASR、TTS、网页、地点、天气、路线、车书和 embedding 分别配置；音乐、视频、电台各自绑定独立 CP。内容查询与端侧播放/导航/车控分开，支持端侧只读查询。接入方式与当前支持范围见 [服务配置](docs/SERVICE_PROVIDERS.md)。
+需要Python 3.12。创建虚拟环境并安装`requirements.txt`，把`.env.example`复制为`.env`，填写模型凭证、`NLP_GATEWAY_URL`及所选检索服务配置。
 
-## 准备
-
-需要 Python 3.12、Node.js 22+，推荐安装 [uv](https://github.com/astral-sh/uv)。
-
-### API 密钥
-
-在仓库根目录创建 `.env`（从模板复制），每行一个 `变量名=值`，值不加引号：
-
-```bash
-cp .env.example .env
+```sh
+.venv/bin/python -m scripts.validate_prompt_config
+.venv/bin/python -m scripts.validate_service_config
+.venv/bin/python -m uvicorn backend.nlp_app:configured_app --factory --host 127.0.0.1 --port 8001
 ```
 
-| 变量 | 是否必需 | 用途 |
-|---|---|---|
-| `ARK_API_KEY` | **必需** | 火山方舟大模型（Talker / Planner / Thinker）。控制台 → API Key 管理 |
-| `TAVILY_API_KEY` | 网页搜索和后台调研需要 | Talker 的直接网页搜索、Thinker 的网页搜索与正文读取（tavily.com） |
-| `GOOGLE_MAPS_API_KEY` | 地点/天气查询需要 | Google Places API (New) 与 Weather API，GCP 项目需开通这两个 API 和结算 |
-| `VOLCENGINE_SPEECH_API_KEY` | 朗读需要 | 火山语音合成（小何 2.0，资源 `seed-tts-2.0`）。旧版控制台改填 `VOLCENGINE_SPEECH_APP_ID` + `VOLCENGINE_SPEECH_ACCESS_TOKEN` |
-| `VOLCENGINE_ASR_API_KEY` | 语音输入需要 | 火山流式语音识别，与 TTS 凭证相互独立。旧版控制台改填 `VOLCENGINE_ASR_APP_ID` + `VOLCENGINE_ASR_ACCESS_TOKEN` |
+`/v1/runs/start`与`/v1/runs/resume`返回NDJSON流；`/v1/runs/cancel`取消本实例活动请求。`/v1/tasks/execute`推进Gateway已授权并持有租约的后台任务，`/v1/tasks/mutate`提交reply/update/cancel，`/v1/tasks/present`按真实任务版本生成回流播报和卡片。接口文档在`/docs`，进程版本在`/health/live`。
 
-示例：
+Gateway契约为本项目拟定并实现的目标接口，尚待外部联调。NLP入口只对可信内部Gateway开放；checkpoint与原始诊断不能直接暴露给车端。缺配置或凭证明确报错，无伪造执行或静默替代服务。
 
-```
-ARK_API_KEY=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-TAVILY_API_KEY=tvly-xxxxxxxxxxxxxxxx
-GOOGLE_MAPS_API_KEY=AIzaxxxxxxxxxxxxxxxx
-VOLCENGINE_SPEECH_API_KEY=xxxxxxxxxxxxxxxx
-VOLCENGINE_ASR_API_KEY=xxxxxxxxxxxxxxxx
-```
+模型与资源提供商在[`config/services.toml`](config/services.toml)选择。NLP生产装配只创建模型、任务检索/天气、Gateway任务和诊断客户端；资源及设备动作通过结构化交接执行。服务适配器说明见[服务配置](docs/SERVICE_PROVIDERS.md)。
 
-模型名、超时、并发等其余配置见 `.env.example`，一般保持默认。缺少某项凭证时，对应功能会直接报错，不会生成假回复或换用其他服务。密钥只在服务端读取，`.env` 和 `data/` 不提交。
+## Prompt维护
 
-细节：[TTS 配置](docs/TTS.md)、[ASR 配置](docs/ASR.md)。
+行为主规则只维护三份：
 
-Talker 固定提供 26 个工具，其中 `web_search(query, max_results?, include_domains?)` 通过配置的搜索服务（默认 Tavily）直接搜索网页，在当前轮回答简单实时事实或明确的搜索请求。结果卡显示真实搜索摘要、来源链接与查询时间；摘要不代表已读取或核实页面全文。复杂比较、多步调研及指定来源深入核验仍走 Thinker；天气和地点仍分别使用 `get_weather`、`search_places`。新增 `search_media`、`control_media` 和 `manage_navigation` 用于媒体搜索、实际浏览器播放、导航与途经点；导航设备仍标记为模拟。
+| 文件 | 内容 |
+| --- | --- |
+| [`prompts/talker.md`](prompts/talker.md) | 决策、工具、表达、三种人设及上下文section |
+| [`prompts/reasoner_foreground.md`](prompts/reasoner_foreground.md) | 前台车控计划、权限边界、意图账本和校验反馈 |
+| [`prompts/reasoner_background.md`](prompts/reasoner_background.md) | quick/research、澄清、修订、检索与收尾 |
 
-`search_manual(query, max_results?)` 支持车书问答：使用已下载的腾势 D9 中文右舵版说明书，298 页切成 385 个文字片段。火山方舟仅生成文字向量，SQLite 保存原文与向量，NumPy 在本地排序；同一个 Talker 根据检索资料回答。结果卡展示原文、页码、对应 PDF 整页图片及原始 PDF 链接。此工具不执行车控，当前车况仍来自模拟器；手册版本和文字提取限制随来源展示。配置与重建见 [车书问答](docs/MANUAL_RAG.md)。
+工具说明、原生few-shot、固定播报、embedding指令保留结构化配置。启动时校验并缓存，请求只选择当前模式/阶段需要的section。车况、音区、时间、任务进度和查询结果仍是运行时数据。完整索引见[prompts/README.md](prompts/README.md)。
 
-## 运行
+## 本地座舱验证台
 
-```bash
+```sh
 ./scripts/start.sh
 ```
 
-脚本会安装依赖，并同时启动 API（:8000）、Thinker 和 Vite（:5173）。打开 http://127.0.0.1:5173 使用车机验证台，API 文档在 http://127.0.0.1:8000/docs。日志在 `data/`，Ctrl+C 停止全部进程。服务重启后需要在界面点“新建会话”。
+脚本启动Demo API（8000）、SQLite后台调度和Vite（5173）。需要Node.js 22+；语音、地图、车书功能分别按`.env.example`配置凭证。也可分终端运行：
 
-也可以分三个终端运行：
-
-```bash
+```sh
 .venv/bin/python -m uvicorn backend.app:app --host 127.0.0.1 --port 8000
 .venv/bin/python -m backend.worker
 cd frontend && npm run dev -- --host 127.0.0.1
 ```
 
-## 测试与评测
+Demo车辆为模拟；媒体的浏览器播放结果来自真实播放器事件。设备执行团队接入不依赖Demo前端。车书检索保留原文、页码与整页图片，不根据某一本手册推断其他车型配置，也不从手册资料取得执行权限。
 
-```bash
-.venv/bin/python -m pytest -q                              # 离线单测（tests/、evals/），不调用任何外部服务
+## 测试与行为评测
+
+```sh
+.venv/bin/python -m pytest -q
 (cd frontend && node --test tests/*.test.mjs && npm run build)
+.venv/bin/python -m scripts.validate_prompt_config
+.venv/bin/python -m scripts.validate_service_config
 ```
 
-行为评测用真实模型驱动 Talker 和 Planner，车辆仍是模拟的。用例放在 `evals/cases/*.json`，只比对结构化结果：下发的车控、Talker 工具调用、最终车况和登记的任务，不读回复文本。
+真实模型评测需要供应商访问权限，会产生调用费用；车辆执行仍由测试模拟：
 
-```bash
-.venv/bin/python -m evals.harness                          # 全部用例，需要 ARK_API_KEY；会产生模型费用
-.venv/bin/python -m evals.harness --tag hold --out data/evals/hold.json
-.venv/bin/python -m evals.harness --repeat 3 --out data/evals/run.json   # 模型有采样波动，比较改动前后至少重复 3 次
-```
-
-2026-10-15 的结果（42 组用例×人设，各跑 3 次）：重构前 78/126，当前 124/126。差距主要来自旧代码把人设放进了决定工具调用的那次请求（违反不变量 6）。残余失败是“先别开氛围灯”偶尔多发一条关闭指令（车况不变）。
-
-延迟（从文字进入系统算起，不含 ASR，126 轮）：首句可播 P50 2.1 秒、P90 3.2 秒，平均每轮 1.04 次模型调用。闲聊、车控、查询都只需一次调用，文字边生成边送 TTS。
-
-新增 `web_search` 的同组评测各重复三次，共144次：接入前128/144，最终142/144；新增用例18/18通过，包含三个人设、直接搜索、混合热车控和不搜索车况。剩余两次失败均为原有 `hold_ambient_not_closed`（多发关闭氛围灯指令；基线也有一次失败），没有新增失败用例类型。中间版本的一次闲聊误调风量，通过补充独立的纯情绪回应示例后未再出现。
-
-这两批首句可送TTS的P50/P90为1414/3653ms与798/1690ms，平均模型调用次数为1.05与1.16。这里的首句时间不是首PCM；缓存和供应商延迟有波动，不据此保证线上加速。直接网页搜索需取得真实工具结果后再由Talker回答，通常两次模型调用；相比原来的后台接手，多了当前轮交付答案的调用。真实浏览器搜索一轮取得三个来源、没有后台任务，首非零PCM为5890ms，未达1.5秒目标。报告及完整输入/输出/工具回执审计保存在本机 `data/evals/web-search-{before,final}.json`、`data/web-search-trace-audit.json`。
-
-话术质量另有离线审查（只作参考，不算通过标准）：
-
-```bash
+```sh
+.venv/bin/python -m evals.harness --repeat 3 --out data/evals/run.json
 .venv/bin/python -m evals.speech_review data/evals/run.json
 ```
 
-车控话术改为模型用进行时说一句（“这就把主驾调到二十三度”），成功不再重复、失败按回执补报之后，审查的口语自然度从 3.88 升到 4.57（满分 5），43 句进行时话术里没有一句提前宣布完成。
+评测与服务使用同一份`SERVICES_CONFIG_PATH`、角色模型和profile的`key_env`，报告记录实际配置来源及模型。评测比较结构化调用、参数、结果与人设一致性，报告首句P50/P90和模型调用次数；话术审查只作辅助。本轮结果与评测曾误用凭证的修复说明见[NLP架构文档](docs/NLP_HARNESS.md)。离线合同测试不证明真实模型质量、线上延迟或真车行为；[历史验证记录](docs/VALIDATION.md)不能当作新版本已经通过的结果。
 
-带 `personas` 字段的用例会在每个人设下各跑一遍，并检查工具调用序列完全一致（不变量 6）。带 `maps` 标签的用例还需要 `GOOGLE_MAPS_API_KEY`。修 bug 时先在这里加失败用例，再按 AGENTS.md §6 修改。
+## 其他文档
 
-## 文档
+- [Demo HTTP / WebSocket](docs/INTERFACES.md)、[车控函数与skill](docs/TOOLS.md)
+- [媒体与导航](docs/COCKPIT_SERVICES.md)、[服务适配器](docs/SERVICE_PROVIDERS.md)
+- [车书与来源](docs/MANUAL_RAG.md)、[车书服务](docs/MANUAL_PROVIDERS.md)、[Embedding](docs/EMBEDDING_PROVIDERS.md)
+- [ASR](docs/ASR.md)、[TTS](docs/TTS.md)、[语音适配器](docs/AUDIO_PROVIDERS.md)
+- [轨迹验证](docs/TRACE_VALIDATION.md)、[音频验收](docs/AUDIO_VALIDATION.md)
 
-- [接口（WebSocket / HTTP）](docs/INTERFACES.md)
-- [100 个车控函数与 10 个 skill](docs/TOOLS.md)
-- [Thinker 设计](docs/THINKER.md)
-- [可替换服务与 CP 配置](docs/SERVICE_PROVIDERS.md)、[本轮验证记录](docs/PLUGGABLE_SERVICES_VALIDATION.md)
-- [轨迹记录](docs/TRACE_VALIDATION.md)、[音频验收](docs/AUDIO_VALIDATION.md)
-- [历史状态与验证记录](docs/HISTORY.md)（重构前的 README，含历次测量）
-
-## 数据与隐私
-
-后台任务从登记起最多执行一分钟（排队计入，等待用户澄清暂停）。30秒仍未结束时主动同步一次真实阶段进度，正在对话/朗读则顺延到空闲；最后15秒停止扩展检索，使用已有资料收尾。阶段结果明确保留未核实项；超时仍未能交付则停止，来源留在任务卡。内部异常与原始搜索语句只供诊断，不进入默认播报；任务卡显示计时和阶段结果。旧环境配置即使仍为`THINKER_TIMEOUT_SECONDS=300`也会被硬限制为60秒。
-
-轨迹和任务存放在本机 `data/super_xd.sqlite3`（WAL）。凭证字段、已知密钥值和 Bearer 头会被脱敏，但用户对话、模型输出和工具结果以明文保存。分享数据库或轨迹前请先检查。
+任务、对话和诊断包含用户数据。生产持久化由Gateway负责；Demo存储在`data/`，不提交版本库。密钥、令牌和媒体能力URL在诊断路径脱敏，分享原始记录前仍需核对数据范围。

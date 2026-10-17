@@ -89,7 +89,7 @@ def test_preloaded_templates_render_without_request_time_file_io(template_direct
 
 
 async def test_history_precedes_dynamic_snapshot_and_latest_input(monkeypatch):
-    runtime = import_runtime(None)
+    runtime = import_runtime()
     monkeypatch.setattr(runtime.session, 'utcnow', runtime.session.utcnow)
     case = {'id': 'ordered-history', 'role': 'talker', 'text': '把它关上。',
             'history': [{'user': '打开主驾车窗。', 'assistant': '主驾车窗已打开。'}]}
@@ -100,7 +100,7 @@ async def test_history_precedes_dynamic_snapshot_and_latest_input(monkeypatch):
                           (item.get('content') or '').startswith('当前会话快照'))
     current_index = next(index for index, item in enumerate(messages) if item.get('content') == case['text'])
     assert messages[0]['role'] == 'system' and messages[0]['content'].startswith('# ')
-    # Fixed rules, then persona, then native examples, then history (AGENTS §5).
+    # Fixed rules, then persona, then native examples, then history (AGENTS.md: Prompt与配置).
     persona_header = prompt_templates.load_prompt('persona').split('{{', 1)[0]
     assert messages[1]['role'] == 'system' and messages[1]['content'].startswith(persona_header)
     examples_end = next(i for i, m in enumerate(messages) if m.get('content') == '示例结束。下面才是和当前用户的真实对话。')
@@ -108,7 +108,7 @@ async def test_history_precedes_dynamic_snapshot_and_latest_input(monkeypatch):
 
 
 async def test_dynamic_state_does_not_change_stable_prefix_or_tools(monkeypatch):
-    runtime = import_runtime(None)
+    runtime = import_runtime()
     monkeypatch.setattr(runtime.session, 'utcnow', runtime.session.utcnow)
     first = {'id': 'one', 'role': 'talker', 'text': '你好', 'vehicle_overrides': {'media.volume': 10}}
     second = {'id': 'two', 'role': 'talker', 'text': '现在音量多少？', 'vehicle_overrides': {'media.volume': 70}}
@@ -122,7 +122,7 @@ async def test_dynamic_state_does_not_change_stable_prefix_or_tools(monkeypatch)
 
 @pytest.mark.parametrize('mode', [None, 'route'])
 async def test_voice_and_text_send_the_same_single_request_shape(monkeypatch, mode):
-    runtime = import_runtime(None)
+    runtime = import_runtime()
     monkeypatch.setattr(runtime.session, 'utcnow', runtime.session.utcnow)
     case = {'id': 'speech-contract', 'role': 'talker', 'text': '简单介绍秋天。', 'speech_mode': mode}
     request = await capture_case(runtime, case, '2026-10-14T12:00:00+00:00')
@@ -132,7 +132,7 @@ async def test_voice_and_text_send_the_same_single_request_shape(monkeypatch, mo
 
 
 async def test_native_assistant_and_tool_history_remains_protocol_valid(monkeypatch):
-    runtime = import_runtime(None)
+    runtime = import_runtime()
     monkeypatch.setattr(runtime.session, 'utcnow', runtime.session.utcnow)
     tool_call = {'id': 'historical-window', 'type': 'function', 'function': {
         'name': 'set_window_position', 'arguments': json.dumps({'window': 'driver', 'position': 40})}}

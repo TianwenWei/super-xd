@@ -21,6 +21,7 @@ from backend.models import sanitized_error, utcnow
 from backend.prompt_templates import render_prompt
 from backend.prompt_config import config_text, validate_config
 from backend.settings import VEHICLE_CONTROL_MODEL
+from backend.harness.release import get_release_id
 
 MAX_MODEL_CALLS = 4
 PLAN_FIELDS = ('status', 'intents', 'actions', 'keep_paths', 'question', 'reason')
@@ -413,7 +414,7 @@ class VehicleControlPlanner:
         self.ark = ark.for_role('planner') if hasattr(ark, 'for_role') else ark
 
     async def plan(self, request_text, vehicle, skill_ids, history=None, completed_operations=None, trace=None,
-                   speaker_seat=DEFAULT_SPEAKER_SEAT):
+                   speaker_seat=DEFAULT_SPEAKER_SEAT, capabilities=None):
         plan_call_id = uuid4().hex
         loaded, observations, loads, events = [], [], [], []
         model_call_id = None
@@ -456,7 +457,8 @@ class VehicleControlPlanner:
             'loaded_skills': list(loaded), 'available_action_names': _names(loaded),
             'history_reference_only': deepcopy(history or []), 'completed_operations': deepcopy(completed_operations or []),
             'skills': {key: manifest.model_dump() for key, manifest in SKILLS.items()},
-            'capabilities': {'gps': False, 'real_navigation': False}, 'executed': False}
+            'capabilities': deepcopy(capabilities) if capabilities is not None else {'gps': False, 'real_navigation': False},
+            'executed': False}
         # The stable rules stay first; dynamic device metadata belongs at the end.
         planning_message = {'role': 'user', 'content': json.dumps(planning_input, ensure_ascii=False)}
         messages = [{'role': 'system', 'content': PROMPT},
@@ -480,6 +482,7 @@ class VehicleControlPlanner:
             tools = [loader, submit]
             model_call_id = uuid4().hex
             emit('model.started', {'plan_call_id': plan_call_id, 'model_call_index': index,
+                                  'release_id': get_release_id(),
                                   'model': model_id, 'thinking': False, 'max_tokens': token_budget,
                                   'messages': messages, 'tools': tools}, call_id=model_call_id, status='running')
             try:

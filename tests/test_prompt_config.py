@@ -1,6 +1,9 @@
 """Configuration failures must surface at startup, before serving a turn."""
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 import pytest
 from backend import prompt_config as config, prompt_templates as templates
 
@@ -63,9 +66,28 @@ def test_config_paths_are_restricted(path):
 
 def test_production_inventory_and_contracts():
     summary = config.validate_all()
-    assert summary['templates'] == 18
+    assert summary['templates'] == 21
+    assert summary['prompts']['role_documents'] == 3
+    assert summary['prompts']['role_sections'] == 20
+    assert summary['example_messages'] == 104
+    assert summary['prompts']['example_tool_calls'] == 34
     assert summary['text_files'] == 11
     assert summary['text_entries'] > 500
+
+
+def test_production_validation_does_not_import_demo_runtime():
+    command = '''import sys
+from backend.prompt_config import validate_all
+assert validate_all()['prompts']['role_documents'] == 3
+forbidden = {'backend.app', 'backend.session', 'backend.worker', 'backend.db',
+             'backend.asr', 'backend.asr_endpoint', 'backend.tts', 'backend.tts_endpoint',
+             'backend.speech_stream'}
+assert not forbidden.intersection(sys.modules), forbidden.intersection(sys.modules)
+'''
+    result = subprocess.run([sys.executable, '-c', command], cwd=Path(__file__).resolve().parents[1],
+                            capture_output=True, text=True,
+                            env={**os.environ, 'PYTHON_DOTENV_DISABLED': '1'})
+    assert result.returncode == 0, result.stderr
 
 
 def test_unknown_config_file_rejected_at_startup(tmp_path, monkeypatch):

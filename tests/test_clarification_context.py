@@ -1,5 +1,5 @@
 from backend.db import Database
-from backend.worker import ThinkerWorker
+from backend.harness.task_runner import TaskRunner
 
 
 def test_brief_reply_keeps_original_question_and_initial_vehicle_context(tmp_path):
@@ -11,6 +11,6 @@ def test_brief_reply_keeps_original_question_and_initial_vehicle_context(tmp_pat
     assert updated['context']['clarification_history']==[{'question':'能接受步行十分钟吗？','answer':'可以','revision':2}]
     assert updated['context']['vehicle']['windows']['driver']==40
     # No real provider client is created or called by this test.
-    worker=ThinkerWorker(db,ark=object(),tavily=object())
-    prompt=worker._messages(updated)
+    runner=object.__new__(TaskRunner)
+    prompt=runner._messages(updated)
     assert '能接受步行十分钟吗？' in prompt[-1]['content'] and '可以' in prompt[-1]['content']

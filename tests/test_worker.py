@@ -8,8 +8,10 @@ import pytest
 
 from backend.db import Database
 from backend.catalog import SKILLS
-from backend.worker import (ThinkerWorker, THINKER_TOOLS, QUICK_TOOLS, SYSTEM_PROMPT,
-                            TOOL_SCHEMAS, _weather_finish_guard)
+from backend.worker import ThinkerWorker
+from backend.harness.task_runner import (THINKER_TOOLS, QUICK_TOOLS, SYSTEM_PROMPT,
+                                         TOOL_SCHEMAS, _weather_finish_guard)
+from backend.services.reads import verify_forecast_record
 
 
 def message(name, arguments, call_id="call_1"):
@@ -1298,7 +1300,7 @@ async def test_official_weather_requirement_scopes_real_search_and_extract_selec
     ('https://meteofrance.com.example.org/paris', False), ('https://evil-meteofrance.com/paris', False),
 ])
 def test_required_source_domain_uses_host_boundary(url, allowed):
-    from backend.worker import _source_in_domains
+    from backend.harness.task_runner import _source_in_domains
     assert _source_in_domains(url, ['meteofrance.com']) is allowed
 
 
@@ -1439,15 +1441,15 @@ async def test_forecast_claims_must_equal_current_revision_observations(db):
     sources, observations = await weather_guard_evidence(db)
     current = {'goal': '巴黎明天气温', 'context': {'query_domain': 'weather'}}
     adopted = _weather_finish_guard({'summary': '预报不含降水信息。', 'forecast_claims': [claim()]},
-                                    current, sources, observations)
+                                    current, sources, observations, verifier=verify_forecast_record)
     assert adopted[0]['temperature_min'] == 12.5
     for bad in (claim(temperature_min=17), claim(date='2026-10-13'), claim(source_url='https://example.org/x')):
         with pytest.raises(ValueError, match='forecast_claims'):
-            _weather_finish_guard({'summary': 'x', 'forecast_claims': [bad]}, current, sources, observations)
+            _weather_finish_guard({'summary': 'x', 'forecast_claims': [bad]}, current, sources, observations, verifier=verify_forecast_record)
     with pytest.raises(ValueError, match='forecast_claims'):
-        _weather_finish_guard({'summary': 'x', 'forecast_claims': [claim()]}, current, sources, [])
+        _weather_finish_guard({'summary': 'x', 'forecast_claims': [claim()]}, current, sources, [], verifier=verify_forecast_record)
     # Without a declared weather domain no claim contract applies.
-    assert _weather_finish_guard({'summary': 'x'}, {'goal': '车内温度', 'context': {}}, sources, observations) == []
+    assert _weather_finish_guard({'summary': 'x'}, {'goal': '车内温度', 'context': {}}, sources, observations, verifier=verify_forecast_record) == []
 
 
 @pytest.mark.asyncio
@@ -1456,14 +1458,14 @@ async def test_official_status_is_structured_and_verified_needs_a_real_read(db):
     current = {'goal': '读取法国气象局官网核实巴黎明天天气',
                'context': {'query_domain': 'weather', 'required_source_domains': ['meteofrance.com']}}
     with pytest.raises(ValueError, match='official_source_status'):
-        _weather_finish_guard({'summary': 'x'}, current, sources, observations)
-    _weather_finish_guard({'summary': 'x', 'official_source_status': 'not_verified'}, current, sources, observations)
+        _weather_finish_guard({'summary': 'x'}, current, sources, observations, verifier=verify_forecast_record)
+    _weather_finish_guard({'summary': 'x', 'official_source_status': 'not_verified'}, current, sources, observations, verifier=verify_forecast_record)
     url = 'https://meteofrance.com/previsions-meteo-france/paris/75000'
     sources[url] = {'url': url, 'extracted': False}
     with pytest.raises(ValueError, match='verified'):
-        _weather_finish_guard({'summary': 'x', 'official_source_status': 'verified'}, current, sources, observations)
+        _weather_finish_guard({'summary': 'x', 'official_source_status': 'verified'}, current, sources, observations, verifier=verify_forecast_record)
     sources[url]['extracted'] = True
-    _weather_finish_guard({'summary': 'x', 'official_source_status': 'verified'}, current, sources, observations)
+    _weather_finish_guard({'summary': 'x', 'official_source_status': 'verified'}, current, sources, observations, verifier=verify_forecast_record)
 
 
 @pytest.mark.asyncio
@@ -1485,7 +1487,7 @@ async def test_spoken_temperatures_come_from_verified_claims_not_model_prose(db)
 
 
 def test_forecast_sentence_names_provider_and_unverified_official_source():
-    from backend.worker import _forecast_sentence
+    from backend.harness.task_runner import _forecast_sentence
     record = {'location': {'name': '巴黎'}, 'date': '2026-10-14', 'temperature_min': -1.5, 'temperature_max': 3}
     assert _forecast_sentence([record], 'not_verified') == (
         '巴黎2026-10-14最低负一点五度，最高三度，数据来自Open-Meteo预报。指定的官方来源没能核实。')

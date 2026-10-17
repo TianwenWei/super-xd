@@ -5,7 +5,7 @@ input → vehicle.command → simulator receipt → vehicle.receipt. Grading onl
 compares structured data (dispatched commands, Talker tool calls, vehicle state,
 created tasks). Nothing here reads the assistant's prose to decide pass/fail.
 
-    .venv/bin/python -m evals.harness                 # all cases, needs ARK_API_KEY
+    .venv/bin/python -m evals.harness                 # all cases, uses configured LLM roles
     .venv/bin/python -m evals.harness --tag hold      # subset
     .venv/bin/python -m evals.harness --out data/evals/run.json
 """
@@ -13,20 +13,24 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from collections import Counter
 import copy
+from itertools import combinations
 import json
-import os
-import sys
 import tempfile
 import time
 from pathlib import Path
 
 from backend.db import Database
-from backend.persona import PERSONAS
 from backend.session import SessionActor
+from backend.harness.release import get_release_manifest
+from backend.harness.diagnostics import safe_diagnostic
 
 CASE_DIR = Path(__file__).resolve().parent / 'cases'
 TURN_TIMEOUT = 90
+# Only presentation metadata is exempt. Queries, goals, locations, dates and
+# target identifiers can change behavior even when their schema type is string.
+PERSONA_DISPLAY_FIELDS = {'delegate_task': frozenset({'spoken_goal'})}
 
 
 def load_cases(directory=CASE_DIR):
@@ -188,7 +192,7 @@ async def _drive_turn(actor, outgoing, text):
                 break
     await asyncio.gather(*receipts, return_exceptions=True)
     turn = next(item for item in actor.turns if item.id == turn_id)
-    talker = []
+    talker, created_task_indices = [], {}
     for message in turn.messages:
         for call in message.get('tool_calls', []):
             try:
@@ -196,13 +200,39 @@ async def _drive_turn(actor, outgoing, text):
             except ValueError:
                 arguments = {'_raw': call['function'].get('arguments')}
             talker.append({'name': call['function']['name'], 'arguments': arguments})
-    return {'cockpit_commands':cockpit_commands,'device_queries':device_queries,
+            if call['function']['name'] == 'delegate_task':
+                result = turn.tool_results.get(call['id'], {})
+                task_id = (result.get('task') or {}).get('id')
+                if result.get('ok') is True and isinstance(task_id, str):
+                    # Bind to the creating call, not asynchronous card arrival.
+                    created_task_indices[task_id] = len(talker) - 1
+    return {'turn_id': turn_id, 'cockpit_commands':cockpit_commands,'device_queries':device_queries,
             'cockpit':copy.deepcopy(actor.cockpit_state),'cockpit_device_mode':'explicit_eval_fixture' if actor.cockpit else None,
             'commands': commands, 'talker_calls': talker, 'lookups': lookups, 'lookup_results': lookup_results, 'vehicle': copy.deepcopy(actor.vehicle),
             'vehicle_before': before, 'tasks_created': len(cards), 'route': done['metrics'].get('route'),
+            'created_task_indices': created_task_indices,
             'error': done['metrics'].get('error'), 'text': done['text'], 'preface': done['metrics'].get('preface'),
             'model_calls': done['metrics'].get('model_calls'), 'total_ms': done['metrics'].get('total_ms'),
             'first_speech_ms': done['metrics'].get('first_speech_ms')}
+
+
+async def _case_trace(db, session_id):
+    records, cursor = [], 0
+    while True:
+        batch = await asyncio.to_thread(db.traces_after, session_id, after_id=cursor, limit=500)
+        records.extend(batch)
+        if len(batch) < 500:
+            return records
+        cursor = batch[-1]['trace_id']
+
+
+def _model_secrets(model):
+    # Configured profiles may use custom key_env names outside the legacy list.
+    # Provider adapters already retain their configured secret for redaction.
+    providers = getattr(model, 'providers', {})
+    values = [model, *providers.values()] if isinstance(providers, dict) else [model]
+    return tuple(secret for provider in values for secret in getattr(provider, 'secrets', ())
+                 if isinstance(secret, str) and secret)
 
 
 async def run_case(case, ark, *, persona='warm', planner=None, maps=None, repeat=0):
@@ -212,7 +242,9 @@ async def run_case(case, ark, *, persona='warm', planner=None, maps=None, repeat
         if 'cockpit' in case:
             from backend.cockpit import CockpitServices, LocalMediaCatalog
             cockpit = CockpitServices(LocalMediaCatalog(case['cockpit'].get('items', [])))
-        actor = SessionActor(f"eval-{case['id']}", db, ark, vehicle_planner=planner, maps=maps, cockpit=cockpit)
+        session_id = f"eval-{case['id']}"
+        actor = SessionActor(session_id, db, ark, vehicle_planner=planner, maps=maps, cockpit=cockpit)
+        task_id_aliases = {}
         try:
             outgoing = await actor.attach()
             await outgoing.get()
@@ -225,7 +257,7 @@ async def run_case(case, ark, *, persona='warm', planner=None, maps=None, repeat
                 actor.media_choices = {item['content_id']:media_item(item) for item in case['cockpit'].get('items', [])}
                 for path,value in case['cockpit'].get('state', {}).items():
                     set_state_value(actor.cockpit_state,path,value)
-            for task in case.get('tasks', []):
+            for index, task in enumerate(case.get('tasks', [])):
                 created = await asyncio.to_thread(db.create_task, actor.id, task['goal'], task.get('context', {}))
                 if task.get('state'):
                     await asyncio.to_thread(db.save_task, created['id'], created['revision'], **task['state'])
@@ -233,7 +265,7 @@ async def run_case(case, ark, *, persona='warm', planner=None, maps=None, repeat
                     claimed = await asyncio.to_thread(db.claim_next)
                     await asyncio.to_thread(db.save_task, claimed['id'], claimed['revision'],
                                             status='waiting_clarification', question=task['question'])
-                task['_id'] = created['id']
+                task_id_aliases[created['id']] = f'seeded:{index}'
             # Let the actor's event poller mirror seeded tasks before the first input.
             async with asyncio.timeout(5):
                 while hasattr(actor, 'tasks') and len(actor.tasks) < len(case.get('tasks', [])) or hasattr(actor, 'tasks') and any(
@@ -242,47 +274,45 @@ async def run_case(case, ark, *, persona='warm', planner=None, maps=None, repeat
             if persona != 'warm':
                 await actor.post({'type': 'persona.set', 'preset': persona})
             turns = []
-            for spec in case['turns']:
+            for turn_index, spec in enumerate(case['turns']):
                 if spec.get('speaker_seat') or case.get('speaker_seat'):
                     await actor.post({'type': 'speaker.set', 'seat': spec.get('speaker_seat') or case['speaker_seat']})
                     await actor.queue.join()
                 started = time.perf_counter()
                 try:
                     observed = await _drive_turn(actor, outgoing, spec['input'])
+                    for task_id, index in observed.get('created_task_indices', {}).items():
+                        task_id_aliases[task_id] = f'created:{turn_index}:{index}'
                     failures = grade(spec.get('expect', {}), observed)
                 except TimeoutError:
                     observed, failures = {}, ['turn timed out']
                 turns.append({'input': spec['input'], 'passed': not failures, 'failures': failures,
                               'elapsed_ms': round((time.perf_counter() - started) * 1000),
                               **{k: v for k, v in observed.items() if k not in {'vehicle', 'vehicle_before'}}})
-            return {'id': case['id'], 'persona': persona, 'repeat': repeat, 'tags': case.get('tags', []),
-                    'passed': all(turn['passed'] for turn in turns), 'turns': turns}
+            result = {'id': case['id'], 'persona': persona, 'repeat': repeat, 'tags': case.get('tags', []),
+                      'passed': all(turn['passed'] for turn in turns), 'turns': turns,
+                      'task_id_aliases': task_id_aliases}
         finally:
+            # close cancels producers and drains the ordered trace writer. Read
+            # afterward, while the temporary database still exists.
             await actor.close()
-
-
-def free_text_fields():
-    """Per tool, string parameters without an enum (queries, goals, free text)."""
-    from backend.catalog import TOOLS
-    from backend.session import CONTROL_TOOLS
-    from backend.maps_tools import MAPS_TOOLS
-    from backend.web_search import WEB_TOOLS
-    from backend.manual_search import MANUAL_TOOLS
-    from backend.cockpit.tools import COCKPIT_TOOLS
-    schemas = {name: spec.parameters for name, spec in TOOLS.items()}
-    schemas.update({t['function']['name']: t['function']['parameters']
-                    for t in CONTROL_TOOLS + MAPS_TOOLS + WEB_TOOLS + MANUAL_TOOLS + COCKPIT_TOOLS})
-    return {name: {key for key, prop in schema.get('properties', {}).items()
-                   if prop.get('type') == 'string' and 'enum' not in prop}
-            for name, schema in schemas.items()}
-
-
-FREE_TEXT = free_text_fields()
+        result['traces'] = await _case_trace(db, session_id)
+        result['trace_capture'] = {'after_actor_close': True, 'event_count': len(result['traces']),
+                                   'recording_error': getattr(actor, 'trace_error', None)}
+        for turn in result['turns']:
+            turn['model_errors'] = [record for record in result['traces']
+                if record['kind'] == 'model.error' and record['turn_id'] == turn.get('turn_id')]
+        return safe_diagnostic(result, _model_secrets(ark))
 
 
 def persona_signature(result):
-    """Tool names plus structured arguments. Free-text wording (a search query,
-    a task goal) varies with sampling and is not what invariant 6 is about."""
+    """Compare behavior arguments, preserving text and logical target identity.
+
+    Only task IDs actually allocated by this eval run receive stable aliases;
+    selecting another task, an unknown ID or a different place remains distinct.
+    """
+    task_ids = result.get('task_id_aliases', {})
+
     def canonical(value):
         if isinstance(value, dict):
             return {key: canonical(item) for key, item in value.items()}
@@ -292,8 +322,15 @@ def persona_signature(result):
         return int(value) if type(value) is float and value.is_integer() else value
 
     def key(call):
-        arguments = {k: v for k, v in call['arguments'].items() if k not in FREE_TEXT.get(call['name'], ())} \
+        arguments = {k: v for k, v in call['arguments'].items() if k not in PERSONA_DISPLAY_FIELDS.get(call['name'], ())} \
             if isinstance(call['arguments'], dict) else call['arguments']
+        if call['name'] == 'manage_task' and isinstance(arguments, dict):
+            def task_reference(value):
+                return {'eval_task_ref': task_ids[value]} if isinstance(value, str) and value in task_ids else value
+            if 'task_id' in arguments:
+                arguments['task_id'] = task_reference(arguments['task_id'])
+            if isinstance(arguments.get('task_ids'), list):
+                arguments['task_ids'] = [task_reference(value) for value in arguments['task_ids']]
         return (call['name'], json.dumps(canonical(arguments), sort_keys=True, ensure_ascii=False))
     return [[key(c) for c in turn.get('talker_calls', [])] + [key(c) for c in turn.get('commands', [])]
             for turn in result['turns']]
@@ -314,14 +351,62 @@ async def run_all(cases, ark, *, concurrency=4, planner=None, maps=None, repeat=
     # is shared by every persona across all repeats.
     by_case = {}
     for result in results:
+        result['behavior_passed'] = result['passed']
         by_case.setdefault(result['id'], {}).setdefault(result['persona'], set()).add(json.dumps(persona_signature(result)))
     for identity, personas in by_case.items():
         if len(personas) > 1 and not set.intersection(*personas.values()):
             for result in results:
                 if result['id'] == identity:
                     result['passed'] = False
-                    result.setdefault('failures', []).append('tool calls differ across personas in every repeat')
+                    result.setdefault('failures', []).append('no tool-call sequence is shared by all personas across repeats')
     return results
+
+
+def persona_metrics(results):
+    """Describe observed variation without claiming that persona caused it.
+
+    The compatibility gate needs one shared sequence across repeats. Pairwise
+    differences include every run pair from different personas, so sampling
+    variation remains visible even when that gate passes.
+    """
+    by_case, by_persona = {}, {}
+    for result in results:
+        by_case.setdefault(result['id'], {}).setdefault(result['persona'], []).append(result)
+        by_persona.setdefault(result['persona'], []).append(result)
+
+    def rates(runs):
+        passed = sum(result['passed'] for result in runs)
+        behavior_passed = sum(result.get('behavior_passed', result['passed']) for result in runs)
+        return {'runs': len(runs), 'passed': passed, 'pass_rate': round(passed / len(runs), 4),
+                'behavior_passed': behavior_passed, 'behavior_pass_rate': round(behavior_passed / len(runs), 4)}
+
+    cases = {}
+    for identity, personas in sorted(by_case.items()):
+        sequences = {persona: Counter(json.dumps(persona_signature(result), ensure_ascii=False) for result in runs)
+                     for persona, runs in personas.items()}
+        comparisons, differences = 0, 0
+        for left, right in combinations(sequences.values(), 2):
+            pairs = sum(left.values()) * sum(right.values())
+            comparisons += pairs
+            differences += pairs - sum(count * right[signature] for signature, count in left.items())
+        shared = set.intersection(*(set(counts) for counts in sequences.values()))
+        cases[identity] = {
+            'per_persona': {persona: {**rates(personas[persona]), 'distinct_sequences': len(counts)}
+                            for persona, counts in sorted(sequences.items())},
+            'shared_sequence_count': len(shared),
+            'compatibility_passed': len(personas) < 2 or bool(shared),
+            'all_runs_identical': len(set.union(*(set(counts) for counts in sequences.values()))) == 1,
+            'cross_persona_pairs': comparisons, 'different_cross_persona_pairs': differences,
+            'cross_persona_difference_rate': round(differences / comparisons, 4) if comparisons else None,
+        }
+    comparisons = sum(case['cross_persona_pairs'] for case in cases.values())
+    differences = sum(case['different_cross_persona_pairs'] for case in cases.values())
+    return {'comparison_basis': 'all run pairs from different personas within each case, including different repeats',
+            'compatibility_rule': 'at least one tool-call sequence shared by all personas across repeats',
+            'per_persona': {persona: rates(runs) for persona, runs in sorted(by_persona.items())},
+            'cross_persona_pairs': comparisons, 'different_cross_persona_pairs': differences,
+            'cross_persona_difference_rate': round(differences / comparisons, 4) if comparisons else None,
+            'cases': cases}
 
 
 def summarize(results):
@@ -333,6 +418,7 @@ def summarize(results):
     return {'total': len(results), 'passed': passed,
             'pass_rate': round(passed / len(results), 4) if results else None,
             'failed': {identity: f'{ok}/{total}' for identity, (ok, total) in sorted(per_case.items()) if ok < total},
+            'persona_metrics': persona_metrics(results),
             'latency': latency_summary(results)}
 
 
@@ -356,7 +442,7 @@ def latency_summary(results):
                       'first_speech_p50': percentile(speech, .5), 'first_speech_p90': percentile(speech, .9),
                       'total_p50': percentile([t['total_ms'] for t in group], .5),
                       'total_p90': percentile([t['total_ms'] for t in group], .9),
-                      'model_calls_mean': round(sum(t.get('model_calls') or 0 for t in group) / len(group), 2)}
+                      'model_calls_mean': round(sum(t.get('model_calls') or 0 for t in group) / len(group), 2) if group else None}
     return out
 
 
@@ -368,18 +454,26 @@ async def main(argv=None):
     parser.add_argument('--repeat', type=int, default=1, help='run every case N times to measure flakiness')
     parser.add_argument('--out')
     args = parser.parse_args(argv)
-    if not os.getenv('ARK_API_KEY'):  # backend.settings already loaded .env
-        sys.exit('ARK_API_KEY 未配置：评测需要真实模型，不使用假回复。')
-    from backend.models import ArkClient
+    if args.repeat < 1 or args.concurrency < 1:
+        parser.error('--repeat and --concurrency must be positive integers')
     cases = [c for c in load_cases()
              if (not args.tag or set(args.tag) & set(c.get('tags', [])))
              and (not args.case or c['id'] in args.case)]
-    ark = ArkClient()
+    if not cases:
+        parser.error('No eval cases matched the selected --case/--tag filters')
+    from backend.services.factory import create_llm
+    ark = create_llm()
     try:
+        configuration = {'source': ark.config.source, **ark.info()}
+        missing = [role for role in ('talker', 'planner')
+                   if not configuration['roles'][role]['provider']['configured']]
+        if missing:
+            parser.error('Selected LLM roles are not configured: ' + ', '.join(missing))
         results = await run_all(cases, ark, concurrency=args.concurrency, repeat=args.repeat)
     finally:
-        await ark.client.aclose()
-    report = {'summary': summarize(results), 'results': results}
+        await ark.aclose()
+    report = {'release': get_release_manifest(), 'model_configuration': configuration,
+              'summary': summarize(results), 'results': results}
     for result in results:
         mark = 'PASS' if result['passed'] else 'FAIL'
         print(f"{mark} {result['id']} [{result['persona']} #{result['repeat']}]")
@@ -392,7 +486,8 @@ async def main(argv=None):
     if args.out:
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
         Path(args.out).write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding='utf-8')
+    return 0 if results and all(result['passed'] for result in results) else 1
 
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    raise SystemExit(asyncio.run(main()))

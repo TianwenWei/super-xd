@@ -1,6 +1,8 @@
 # 原型验收与实测
 
-## 2026-10-14 当前：15热＋85 Pro渐进式车控
+本文保留各日期原型的真实调用、失败与测量边界，不作为当前架构或部署规格。当前职责与入口见 [NLP Harness](NLP_HARNESS.md) 和 [Gateway 契约](GATEWAY_CONTRACT.md)。旧版本的工具数量、预算与代码位置只描述当时的验收对象。
+
+## 2026-10-14：15热＋85 Pro渐进式车控
 
 本段取代下文旧版“10热＋Talker动态加载”的当前架构描述；历史报告和失败均保留。Mini固定15个热车控、3个调度及3个地图/天气工具；85个冷车控只在独立Pro规划层按skill渐进加载，thinking关闭。混合车控整句委托，计划和模拟不算完成；actor按依赖串行下发，实际ACK提交前重检最新车况与保持基线，每项成功必须绑定真实提交回执。普通研究Thinker和地图FC均保留。
 
@@ -127,7 +129,19 @@ Chrome实际播放六个样本，确认停止按钮、播放中新输入打断�
 
 - `.venv/bin/python -m pytest -q` 最新整套**558 passed in7.30s**，已含HTTP EOF drain后两次真实本地TCP请求复用同连接、取消可中断等待、元字段与1500/1500.1ms边界回归；显式2000ms仍复现原17条3次达标及完全相同的时钟。默认聚合目标1500ms，当前输出字段使用accepted_within_target等通用命名。本地服务返回受控模型帧，不是实际Ark模型验收。此前相关定向76 passed in1.43s，persona/音频actor另有34 passed in0.34s，早前音频actor/ASGI路由/测量聚合专项为25 passed in0.53s。覆盖100函数执行/原子拒绝、严格schema、导航语义拒绝、actor轮次/回执/超时/重复/迟到、任务修改/取消/澄清/旧异常、轨迹完整性/分页与异步写入、PCM流式协议/连接复用/取消、浏览器测量分母、口语生成契约与完整事实保留及HTTP兼容轮次约束。离线网络客户端均明确注入，不作真实模型或延迟证据；此前431/470/513/542/547/549/552项记录是当时的回归规模。
 - `npm run build`：TypeScript严格检查及Vite构建通过，32 modules，JS280.50kB/gzip88.65kB，CSS36.61kB/gzip8.78kB。最终统一启动 smoke：health 200、Ark预热成功、TTS配置正常。没有embedding运行时依赖、下载或初始化。
-- [独立审查](REVIEW.md)发现的旧revision异常覆盖新任务、澄清短答缺原问句、断线播放占位/新轮次音频问题均已修复，附对应回归及浏览器覆盖边界。
+- 早期独立审查发现的旧revision异常覆盖新任务、澄清短答缺原问句、断线播放占位/新轮次音频问题与验证范围见下方历史故障记录。
 - 本历史版本仅文字输入、无ASR/VAD；当前版本已接入火山ASR，见上方独立验收。全部车控为共享本机模拟状态，导航不算路/订座/支付；后台建议须明确确认。没有完整服务重启恢复、生产部署/真实车辆接入验收。有限样本与预热连接的结果不能保证其他网络、并发规模、模型版本或长输入下的延迟。
 
 复现命令与核心文件见[README](../README.md)。主批次、失败记录、专项及浏览器截图分别留存，未用修复后单次成功覆盖旧失败。
+
+## 历史故障审查与验证边界
+
+以下保留已删除旧架构审查文档中的故障证据，不把当时的离线修复结果算作本轮真实服务验收。原复现使用临时 SQLite 与明确注入的 Fake Ark；审查前 421 项、导航修复后 431 项回归只是当时的测试规模。
+
+- **旧 revision 异常覆盖新任务**：revision 1 请求等待期间更新到 revision 2，旧网络异常曾造成 `{"revision":2,"status":"failed","constraints":["只考虑室内"],"error":"RuntimeError: old revision network failure"}`。修复后异常绑定产生它的 revision，边界和写入都比较版本，累计预算不重置。现由 [任务回归](../tests/test_worker.py) 的 `test_old_model_error_cannot_fail_new_revision`、`test_current_model_error_fails_only_its_own_revision` 与迟到搜索回归覆盖。
+- **澄清短答丢失原问句**：用户对“能接受步行十分钟吗”回答“可以”后，旧输入曾只有 `constraints=["可以"]`，`contains_original_question=false`。修复在清空 question 前保存 question、answer、revision 至 clarification_history。[上下文回归](../tests/test_clarification_context.py) 检查原问句、短答和登记时车况均进入 TaskRunner 输入。
+- **断线播放占位滞留**：旧隔离复现为 `{"speaking_after_reconnect":true,"pending_announcements":1,"proactive_started_after_reconnect":0}`。修复清除最后一个客户端断线时的播放占位，离线期间保留待播结果，重连重新仲裁；有效新 turn 停止旧音频。[会话回归](../tests/test_session.py) 和 [TTS 端点回归](../tests/test_tts_endpoint.py) 覆盖状态与取消；[历史浏览器记录](../frontend/UI_VALIDATION.md) 覆盖 MP3 播放/停止、播放与合成期间新输入、后台完成等候音频结束。没有独立真实验收跨标签新输入或断线场景。
+
+导航地点缩写与跨人设真实结果已保留在本文各专项；原失败、修复中间批次与后续成功分别统计，没有覆盖失败样本。
+
+2026-10-14 工程专项的原始离线回归和真实 Ark/Speech 时序另见 [工程验证数据](engineering-validation.json) 与 [真实调用轨迹](engineering-live.json)。真实服务首 PCM 与浏览器首渲染使用各自测量口径，模拟回执耗时不能当作全链路语音延迟。

@@ -66,7 +66,5 @@ def plan_response(*operations, keep_paths=(), keep_text=None):
 
 
 def expected_talker_tool_names():
-    from backend.session import CONTROL_TOOLS, MAPS_TOOLS, WEB_TOOLS, MANUAL_TOOLS, COCKPIT_TOOLS
-    from backend.catalog import HOT_TOOL_NAMES
-    return [*HOT_TOOL_NAMES, *[t["function"]["name"] for t in CONTROL_TOOLS + MAPS_TOOLS + WEB_TOOLS + MANUAL_TOOLS + COCKPIT_TOOLS]]
-
+    from backend.harness.talker import talker_tools
+    return [item['function']['name'] for item in talker_tools()]

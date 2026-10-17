@@ -1,22 +1,36 @@
-"""Real capability probe. Writes only sanitized metadata, never credentials."""
+"""Configured model/search capability probe; reports selected services, not raw defaults."""
 import asyncio
 import json
 import time
 from pathlib import Path
-from backend.models import ArkClient, TavilyClient, utcnow
-from backend.settings import TALKER_MODEL, THINKER_MODEL
+from contextlib import AsyncExitStack
+from backend.models import sanitized_error, utcnow
+from backend.services.config import load_services_config
+from backend.services.factory import create_llm, create_search
 
 async def main():
-    ark, tavily = ArkClient(), TavilyClient()
+    config = load_services_config()
+    async with AsyncExitStack() as resources:
+        ark = create_llm(config)
+        resources.push_async_callback(ark.aclose)
+        web = create_search(config)
+        resources.push_async_callback(web.aclose)
+        return await probe(ark, web, config)
+
+
+async def probe(ark, web, config):
     tool = {'type': 'function', 'function': {'name': 'probe_temperature', 'description': '设置空调温度', 'parameters': {'type': 'object', 'properties': {'value': {'type': 'number'}}, 'required': ['value'], 'additionalProperties': False}}}
-    output = {'at': utcnow(), 'talker_model': TALKER_MODEL, 'thinker_model': THINKER_MODEL, 'checks': {}}
+    output = {'at': utcnow(), 'talker_model': ark.request([], role='talker').model,
+              'thinker_model': ark.request([], role='thinker').model, 'checks': {},
+              'services_config': config.source, 'llm': ark.info(), 'web': web.info(),
+              'scope': 'selected project LLM roles and search/content profiles'}
     async def check(name, operation):
         start = time.perf_counter()
         try:
             value = await operation()
             output['checks'][name] = {'ok': True, 'elapsed_ms': round((time.perf_counter()-start)*1000,1), **value}
         except Exception as exc:
-            output['checks'][name] = {'ok': False, 'elapsed_ms': round((time.perf_counter()-start)*1000,1), 'error': str(exc)}
+            output['checks'][name] = {'ok': False, 'elapsed_ms': round((time.perf_counter()-start)*1000,1), 'error': sanitized_error(exc)}
     async def stream_probe():
         first, content, message = None, '', None
         start = time.perf_counter()
@@ -35,15 +49,14 @@ async def main():
             raise RuntimeError('模型响应没有工具调用')
         return {'tool_calls': calls, 'has_reasoning_content': bool(msg.get('reasoning_content'))}
     async def search_probe():
-        result = await tavily.search('Tavily Search API documentation', 2)
+        result = await web.search('Tavily Search API documentation', 2)
         urls = [r['url'] for r in result.get('results', [])]
-        extracted = await tavily.extract(urls[:1]) if urls else {'results': []}
+        extracted = await web.extract(urls[:1]) if urls else {'results': []}
         return {'queried_at': result['queried_at'], 'urls': urls, 'search_count': len(urls), 'extract_count':len(extracted.get('results', []))}
-    await asyncio.gather(check('talker_stream', stream_probe), check('talker_function_call', lambda:tool_probe(False)), check('thinker_function_call', lambda:tool_probe(True)), check('tavily_search_extract', search_probe))
-    await ark.aclose()
-    await tavily.aclose()
+    await asyncio.gather(check('talker_stream', stream_probe), check('talker_function_call', lambda:tool_probe(False)), check('thinker_function_call', lambda:tool_probe(True)), check('web_search_extract', search_probe))
     Path('docs/api-probe.json').write_text(json.dumps(output, ensure_ascii=False, indent=2))
     print(json.dumps(output, ensure_ascii=False, indent=2))
+    return output
 
 if __name__=='__main__':
     asyncio.run(main())

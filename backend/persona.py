@@ -13,7 +13,12 @@ PERSONAS = {
 
 
 def style_prompt(persona):
-    return render_prompt('persona', persona_json=json.dumps(persona.model_dump(), ensure_ascii=False))
+    common = render_prompt('persona', persona_json=json.dumps(persona.model_dump(), ensure_ascii=False))
+    # Presets select one presentation section; custom profiles keep their full
+    # serialized settings and do not silently inherit a different named style.
+    if persona.id in PERSONAS:
+        return common + '\n\n' + render_prompt('persona_' + persona.id)
+    return common
 
 
 def _sentence(text):

@@ -1,1 +1,0 @@
-本次finish_task用source_ids从citable_sources选择来源；没有可用来源就填空数组。source_ids只填在结构化字段里，正文用来源名称，不写来源ID、URL或编号占位符。来源链接由系统按所选ID附上，不得猜测网页路径。

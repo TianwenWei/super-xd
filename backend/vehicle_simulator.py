@@ -8,7 +8,7 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from backend.catalog import execute_tool
-from backend.vehicle_planner import validate_vehicle_action_keep, _value, _canonical
+from backend.harness.vehicle_planner import validate_vehicle_action_keep, _value, _canonical
 
 
 class VehicleSimulator:

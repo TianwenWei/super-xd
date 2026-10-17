@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+config/*.local.toml
 .DS_Store
 .venv
 node_modules

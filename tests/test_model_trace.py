@@ -218,6 +218,111 @@ def test_http_error_code_cannot_expose_configured_key():
     assert 'fake-transport-only-credential' not in sanitized_error(httpx.HTTPStatusError('bad', request=response.request, response=response))
 
 
+@pytest.mark.parametrize('streaming', [False, True])
+async def test_http_error_preserves_cause_and_request_id_without_custom_credentials(monkeypatch, streaming):
+    from backend.services.contracts import LLMRequest, ProviderError
+    from backend.services.llm import ChatProvider
+
+    secret = 'configured-project-key-only'
+    monkeypatch.setenv('PROJECT_MODEL_KEY', secret)
+    body = {'error': {'code': 'AccountOverdueError', 'message': 'Account has an overdue balance. ' + secret,
+                      'details': ['https://provider.test/?token=generated-capability']},
+            'authorization': 'another-secret'}
+    wire = Frames([json.dumps(body).encode()])
+    calls = []
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(403, stream=wire, headers={'x-request-id': 'provider-request-1'})
+    client = httpx.AsyncClient(base_url='https://provider.test/', transport=httpx.MockTransport(respond))
+    provider = ChatProvider({'provider': 'ark', 'key_env': 'PROJECT_MODEL_KEY'},
+                           transport=ArkClient(client, key_env='PROJECT_MODEL_KEY'))
+    try:
+        request = LLMRequest([{'role': 'user', 'content': '测试'}])
+        with pytest.raises(ProviderError) as caught:
+            if streaming:
+                _ = [item async for item in provider.stream(request)]
+            else:
+                await provider.complete(request)
+    finally:
+        await provider.aclose()
+    error = caught.value
+    assert error.code == 'AccountOverdueError'
+    assert error.details['status_code'] == 403
+    assert 'overdue balance' in error.details['diagnostic']
+    assert error.trace_partial['meta']['provider_request_id'] == 'provider-request-1'
+    assert error.trace_partial['meta']['raw_response']['error']['code'] == error.code
+    assert 'provider-request-1' in error.details['diagnostic']
+    observed = json.dumps([error.public(), error.details, error.trace_partial])
+    assert secret not in observed and 'another-secret' not in observed
+    assert 'generated-capability' not in observed and 'https://' not in error.details['diagnostic']
+    assert len(calls) == 1 and wire.closed and error.retryable is False
+
+
+@pytest.mark.parametrize('streaming', [False, True])
+async def test_error_body_read_failure_preserves_known_status_without_retry(streaming):
+    class BrokenBody(Frames):
+        async def __aiter__(self):
+            yield b'{'
+            raise httpx.ReadError('diagnostic connection lost')
+    wire = BrokenBody([])
+    calls = []
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(403, stream=wire)
+    async with httpx.AsyncClient(base_url='https://provider.test/', transport=httpx.MockTransport(respond)) as client:
+        ark = ArkClient(client)
+        with pytest.raises(RuntimeError) as caught:
+            if streaming:
+                _ = [item async for item in ark.stream([{'role': 'user', 'content': '测试'}])]
+            else:
+                await ark.complete([{'role': 'user', 'content': '测试'}])
+    assert caught.value.status_code == 403
+    assert 'diagnostic connection lost' in caught.value.trace_partial['meta']['diagnostic_read_error']
+    assert caught.value.trace_partial['meta']['raw_response'] is None
+    assert not getattr(caught.value, 'retryable', False) and len(calls) == 1 and wire.closed
+
+
+async def test_stream_non_json_http_error_keeps_body_and_redacts_error_code(monkeypatch):
+    monkeypatch.setenv('PROJECT_MODEL_KEY', 'custom-key-value')
+    responses = [httpx.Response(403, stream=Frames([b'Forbidden custom-key-value'])),
+                 httpx.Response(403, json={'error': {'code': 'custom-key-value'}})]
+    async with httpx.AsyncClient(base_url='https://provider.test/', transport=httpx.MockTransport(
+            lambda request: responses.pop(0))) as client:
+        ark = ArkClient(client, key_env='PROJECT_MODEL_KEY')
+        for index in range(2):
+            with pytest.raises(RuntimeError) as caught:
+                _ = [item async for item in ark.stream([{'role': 'user', 'content': '测试'}])]
+            error = caught.value
+            assert 'custom-key-value' not in json.dumps([str(error), error.full_diagnostic,
+                                                        error.provider_code, error.trace_partial])
+            if index == 0:
+                assert error.provider_code is None and 'Forbidden [redacted]' in error.full_diagnostic
+            else:
+                assert error.provider_code == '[redacted]'
+
+
+@pytest.mark.parametrize('streaming', [False, True])
+async def test_empty_connection_timeout_keeps_specific_failure_type(streaming):
+    from backend.services.contracts import LLMRequest, ProviderError
+    from backend.services.llm import ChatProvider
+
+    def respond(request):
+        raise httpx.ConnectTimeout('')
+    client = httpx.AsyncClient(base_url='https://provider.test/', transport=httpx.MockTransport(respond))
+    provider = ChatProvider({'provider': 'ark', 'key_env': 'ARK_API_KEY'}, transport=ArkClient(client))
+    try:
+        with pytest.raises(ProviderError) as caught:
+            if streaming:
+                _ = [item async for item in provider.stream(LLMRequest([]))]
+            else:
+                await provider.complete(LLMRequest([]))
+    finally:
+        await provider.aclose()
+    assert caught.value.code == 'timeout'
+    assert str(caught.value) == 'ConnectTimeout'
+    assert caught.value.details['status_code'] is None
+
+
 async def test_complete_optional_tool_choice_and_token_budget_do_not_change_default_calls():
     tools = [{'type': 'function', 'function': {'name': 'finish_task', 'parameters': {'type': 'object'}}}]
     requests = []

@@ -1,20 +1,32 @@
-"""Real Talker + real Places/Weather + simulated vehicle receipt acceptance."""
+"""Configured Talker + selected Google Places/Weather with simulated receipts."""
 import asyncio
 import json
-import os
+from contextlib import AsyncExitStack
 from pathlib import Path
 import tempfile
 
 from backend.db import Database
-from backend.google_maps import GoogleMapsClient
-from backend.models import ArkClient, utcnow
+from backend.models import utcnow
 from backend.session import SessionActor
-from scripts.probe_google_maps import read_key
+from backend.services.config import load_services_config
+from backend.services.factory import create_llm, create_maps
 
 
 async def main():
-    os.environ['GOOGLE_MAPS_API_KEY'] = read_key()
-    maps, ark = GoogleMapsClient(), ArkClient()
+    config = load_services_config()
+    if any(config.profile(domain)['provider'] != 'google' for domain in ('places', 'weather')):
+        raise ValueError('This Google acceptance requires selected Google places and weather profiles')
+    if config.profile('weather').get('coverage_fallback', 'open_meteo') != 'open_meteo':
+        raise ValueError('This Google coverage acceptance requires the configured Open-Meteo fallback')
+    async with AsyncExitStack() as resources:
+        maps = create_maps(config)
+        resources.push_async_callback(maps.aclose)
+        ark = create_llm(config)
+        resources.push_async_callback(ark.aclose)
+        return await evaluate(maps, ark, config)
+
+
+async def evaluate(maps, ark, config):
     cases = [
         ('paris_weather', ['巴黎明天天气怎么样？']),
         ('shenzhen_weather', ['深圳明天天气怎么样？']),
@@ -23,7 +35,9 @@ async def main():
         ('weather_and_control', ['巴黎今天天气怎么样？再把空调调到23度']),
     ]
     report = {'observed_at': utcnow(), 'real_model': True, 'real_google': True,
-              'simulated_vehicle': True, 'audio_tested': False, 'cases': []}
+              'simulated_vehicle': True, 'audio_tested': False, 'cases': [],
+              'scope': 'configured LLM roles; Google Places/Weather with configured Open-Meteo coverage fallback',
+              'services_config': config.source, 'llm': ark.info(), 'maps': maps.info()}
     with tempfile.TemporaryDirectory() as directory:
         async def run(name, inputs):
             db = Database(Path(directory) / f'{name}.sqlite')
@@ -70,8 +84,6 @@ async def main():
         # Bound live concurrency to avoid overwhelming the provider/model account.
         for start in range(0, len(cases), 2):
             await asyncio.gather(*(run(*case) for case in cases[start:start+2]))
-    await maps.aclose()
-    await ark.aclose()
     report['passed'] = sum(c['passed'] for c in report['cases'])
     report['total'] = len(cases)
     output = Path('docs/maps-fc-live.json')

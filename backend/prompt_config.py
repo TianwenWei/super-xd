@@ -122,11 +122,11 @@ def validate_example_tools(messages, tools):
 
 
 def validate_all():
-    """Both service entry points check every module's text before accepting work."""
+    """Validate NLP text without importing the demo session or worker shells."""
     from importlib import import_module
-    for module in ('catalog', 'tool_text_config', 'speech_config', 'vehicle_planner', 'worker', 'cockpit.tools', 'cockpit.controller'):
+    for module in ('catalog', 'tool_text_config', 'speech_config', 'harness.vehicle_planner', 'harness.task_runner', 'cockpit.tools', 'cockpit.controller'):
         import_module(f'backend.{module}')
-    from backend.prompt_templates import PROMPT_FILES, preload_prompts, load_examples
+    from backend.prompt_templates import PROMPT_FILES, preload_prompts, load_examples, prompt_statistics
     actual = {path.relative_to(CONFIG_DIRECTORY).as_posix()
               for path in CONFIG_DIRECTORY.rglob('*.toml')}
     if actual != CONFIG_FILES:
@@ -142,17 +142,13 @@ def validate_all():
     for file in CONFIG_FILES:
         validate_config(file, _CONTRACTS[file])
     preload_prompts()
-    # Importing Session only after module contracts are registered avoids a
-    # template/session import cycle and never constructs a running actor.
-    from backend.catalog import HOT_TOOL_NAMES, TOOLS
-    from backend.session import CONTROL_TOOLS, MAPS_TOOLS, WEB_TOOLS, MANUAL_TOOLS
-    from backend.cockpit.tools import COCKPIT_TOOLS
+    # The same core schemas compile production requests and validate examples.
+    from backend.harness.talker import talker_tools
     examples = load_examples()
-    tools = ([TOOLS[name].openai_tool() for name in HOT_TOOL_NAMES]
-             + CONTROL_TOOLS + MAPS_TOOLS + WEB_TOOLS + MANUAL_TOOLS + COCKPIT_TOOLS)
-    validate_example_tools(examples, tools)
+    validate_example_tools(examples, talker_tools())
     return {'templates': len(PROMPT_FILES), 'example_messages': len(load_examples()),
-            'text_files': len(CONFIG_FILES), 'text_entries': sum(len(load_config(file)) for file in CONFIG_FILES)}
+            'text_files': len(CONFIG_FILES), 'text_entries': sum(len(load_config(file)) for file in CONFIG_FILES),
+            'prompts': prompt_statistics()}
 
 
 def preload_configs():

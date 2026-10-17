@@ -2,36 +2,104 @@
 from functools import lru_cache
 import json
 from pathlib import Path
+from types import MappingProxyType
 from backend.prompt_config import substitute, template_parts
 
 PROMPT_DIRECTORY = Path(__file__).resolve().parent.parent / 'prompts'
+ROLE_DOCUMENTS = {
+    'talker.md': ('# Talker', {
+        'system': {'hot_tool_names', 'skill_index'}, 'persona': {'persona_json'},
+        'persona_professional': set(), 'persona_warm': set(), 'persona_playful': set(),
+        'history_attribution': {'attribution_json'}, 'current_turn': set(),
+        'speaker_context': {'speaker_json'}, 'session_snapshot': {'snapshot_json', 'speaker_name'},
+        'task_snapshot_notice': set(), 'prewarm': set(),
+    }),
+    'reasoner_foreground.md': ('# Foreground Reasoner', {'system': set(), 'retry': set()}),
+    'reasoner_background.md': ('# Background Reasoner', {
+        'common': set(), 'quick': set(), 'research': {'skill_guide'},
+        'source_selection': set(), 'retry': set(), 'finalize': set(), 'revision': set(),
+    }),
+}
+
+# Public names remain compatible with existing compilers. A request receives
+# selected sections, never a whole role document or all persona/mode variants.
+PROMPT_SECTIONS = {
+    'talker': ('talker.md', ('system',)),
+    **{name: ('talker.md', (name,)) for name in (
+        'history_attribution', 'current_turn', 'speaker_context', 'session_snapshot',
+        'task_snapshot_notice', 'persona', 'persona_professional', 'persona_warm',
+        'persona_playful', 'prewarm')},
+    'vehicle_planner': ('reasoner_foreground.md', ('system',)),
+    'planner_retry': ('reasoner_foreground.md', ('retry',)),
+    'thinker_quick': ('reasoner_background.md', ('common', 'quick')),
+    'thinker_research': ('reasoner_background.md', ('common', 'research')),
+    **{f'thinker_{name}': ('reasoner_background.md', (name,)) for name in (
+        'source_selection', 'retry', 'finalize', 'revision')},
+}
 PROMPT_FILES = {
-    'talker': ('talker/system.md', {'hot_tool_names', 'skill_index'}),
-    'history_attribution': ('talker/history_attribution.md', {'attribution_json'}),
-    'current_turn': ('talker/current_turn.md', set()),
-    'speaker_context': ('talker/speaker.md', {'speaker_json'}),
-    'session_snapshot': ('talker/snapshot.md', {'snapshot_json', 'speaker_name'}),
-    'task_snapshot_notice': ('talker/task_snapshot_notice.md', set()),
-    'persona': ('talker/persona.md', {'persona_json'}),
-    'prewarm': ('talker/prewarm.md', set()),
-    'vehicle_planner': ('planner/system.md', set()),
-    'planner_retry': ('planner/retry.md', set()),
-    'thinker_quick': ('thinker/quick.md', set()),
-    'thinker_research': ('thinker/research.md', {'skill_guide'}),
-    'thinker_source_selection': ('thinker/source_selection.md', set()),
-    'thinker_retry': ('thinker/retry.md', set()),
-    'thinker_finalize': ('thinker/finalize.md', set()),
-    'thinker_revision': ('thinker/revision.md', set()),
+    **{name: (file, set().union(*(ROLE_DOCUMENTS[file][1][section] for section in sections)))
+       for name, (file, sections) in PROMPT_SECTIONS.items()},
     'manual_embedding_document': ('manual/embedding_document.md', set()),
     'manual_embedding_query': ('manual/embedding_query.md', set()),
 }
+
+
+def parse_prompt_sections(text: str, *, title: str, contracts: dict, label: str):
+    """Parse a deliberately small Markdown section format without regex."""
+    lines = text.strip().splitlines()
+    if not lines or lines[0] != title:
+        raise ValueError(f'{label}: expected document title {title!r}')
+    sections, current, content = {}, None, []
+
+    def finish():
+        if current is not None:
+            value = '\n'.join(content).strip()
+            if not value:
+                raise ValueError(f'{label}: empty section {current}')
+            parts = template_parts(value, f'{label}:{current}')
+            actual = {value for variable, value in parts if variable}
+            if actual != contracts[current]:
+                raise ValueError(f'{label}:{current}: expected variables={sorted(contracts[current])}, actual={sorted(actual)}')
+            sections[current] = value
+
+    for line in lines[1:]:
+        if line.lstrip().startswith('## [section'):
+            if not line.startswith('## [section: ') or not line.endswith(']'):
+                raise ValueError(f'{label}: invalid section header {line!r}')
+            name = line[len('## [section: '):-1]
+            if name not in contracts:
+                raise ValueError(f'{label}: unknown section {name!r}')
+            if name in sections or name == current:
+                raise ValueError(f'{label}: duplicate section {name}')
+            finish()
+            current, content = name, []
+        elif current is None:
+            if line.strip():
+                raise ValueError(f'{label}: text outside a named section')
+        else:
+            content.append(line)
+    finish()
+    if sections.keys() != contracts.keys():
+        raise ValueError(f'{label}: missing sections={sorted(contracts.keys() - sections.keys())}')
+    return MappingProxyType(sections)
+
+
+@lru_cache(maxsize=None)
+def _load_document(file: str):
+    title, contracts = ROLE_DOCUMENTS[file]
+    return parse_prompt_sections((PROMPT_DIRECTORY / file).read_text(encoding='utf-8'),
+                                 title=title, contracts=contracts, label=file)
 
 
 @lru_cache(maxsize=None)
 def load_prompt(name: str) -> str:
     if not isinstance(name, str) or name not in PROMPT_FILES:
         raise ValueError(f'Unknown prompt name: {name!r}')
-    text = (PROMPT_DIRECTORY / PROMPT_FILES[name][0]).read_text(encoding='utf-8').strip()
+    if name in PROMPT_SECTIONS:
+        file, sections = PROMPT_SECTIONS[name]
+        text = '\n\n'.join(_load_document(file)[section] for section in sections)
+    else:
+        text = (PROMPT_DIRECTORY / PROMPT_FILES[name][0]).read_text(encoding='utf-8').strip()
     if not text:
         raise ValueError(f'Prompt {name} must not be empty')
     return text
@@ -107,6 +175,19 @@ def preload_prompts() -> None:
     # File IO belongs to startup, never the first request in the actor loop.
     for name in PROMPT_FILES:
         _parts(name)
+
+
+def prompt_statistics() -> dict:
+    """Character counts describe actual text, not estimated provider tokens."""
+    examples = load_examples()
+    return {
+        'role_documents': len(ROLE_DOCUMENTS),
+        'role_sections': sum(len(contracts) for _, contracts in ROLE_DOCUMENTS.values()),
+        'template_characters': {name: len(load_prompt(name)) for name in PROMPT_FILES},
+        'example_messages': len(examples),
+        'example_tool_calls': sum(len(message.get('tool_calls', [])) for message in examples),
+        'example_serialized_characters': len(json.dumps(examples, ensure_ascii=False, separators=(',', ':'))),
+    }
 
 
 preload_prompts()

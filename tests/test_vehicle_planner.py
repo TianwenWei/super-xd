@@ -7,7 +7,7 @@ import pytest
 
 from backend.catalog import HOT_TOOL_NAMES, SKILLS, TOOLS, execute_tool, initial_vehicle_state
 from backend.settings import VEHICLE_CONTROL_MODEL
-from backend.vehicle_planner import (VehicleControlPlanner, plan_schema, validate_vehicle_action_keep,
+from backend.harness.vehicle_planner import (VehicleControlPlanner, plan_schema, validate_vehicle_action_keep,
                                      validate_vehicle_plan, _submission_schema as submission_schema,
                                      _resolve_source_spans as resolve_source_spans)
 

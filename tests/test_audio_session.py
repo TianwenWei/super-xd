@@ -35,6 +35,7 @@ class StreamingTTS:
     def __init__(self, *, finish_gate=None, packets=True, error=None):
         self.calls = []
         self.connected = asyncio.Event()
+        self.text_received = asyncio.Event()
         self.cancelled = asyncio.Event()
         self.finish_gate = finish_gate
         self.packets = packets
@@ -47,6 +48,7 @@ class StreamingTTS:
         try:
             async for text in texts:
                 call.append(text)
+                self.text_received.set()
                 if self.error:
                     raise self.error
                 # Metadata is diagnostic and must never count as first audio.
@@ -123,10 +125,12 @@ async def test_tts_connects_early_and_chat_text_streams_before_the_model_finishe
     await asyncio.wait_for(tts.connected.wait(), 1)
     await asyncio.wait_for(ark.delta_sent.wait(), 1)
     await actor.queue.join()
+    await asyncio.wait_for(tts.text_received.wait(), 1)
     assert audio_started['client_request_id'] == started['client_request_id'] == 'request-a'
     assert audio_started['turn_id'] == started['turn_id']
     assert len(audio_started['playback_id']) == 32
     assert audio_started['sample_rate'] == 24000 and audio_started['format'] == 'pcm_s16le'
+    assert not model_gate.is_set()
     assert tts.calls == [['很高兴陪你出发。']]  # Spoken before the model finished.
     assert not actor.current.finished
     model_gate.set()

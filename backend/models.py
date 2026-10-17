@@ -8,7 +8,8 @@ from datetime import datetime, timezone
 import httpx
 from backend.prompt_templates import render_prompt
 from backend.settings import TALKER_MODEL, THINKER_MODEL, MODEL_TIMEOUT
-from backend.textutil import is_domain
+from backend.services.contracts import redact
+from backend.textutil import SECRET_ENV, is_domain, redact as redact_text, remove_urls
 
 
 def utcnow():
@@ -36,7 +37,55 @@ def sanitized_error(exc, secrets=()):
     for secret in secrets:
         if secret:
             value = value.replace(secret, '[redacted]')
+    value = remove_urls(redact_text(value, secrets))[0]
     return value[:240] or type(exc).__name__
+
+
+async def _raise_with_error_body(response, secrets=()):
+    if response.is_success:
+        return
+    read_error = None
+    try:
+        await response.aread()
+    except httpx.HTTPError as exc:
+        # A failed diagnostic read must not turn an already known 403 into a
+        # retryable connection failure. Cancellation still propagates normally.
+        read_error = sanitized_error(exc, secrets)
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        exc.diagnostic_read_error = read_error
+        raise
+
+
+def _http_error_details(exc, secrets=()):
+    """Preserve the provider's cause, without credentials or endpoint URLs."""
+    response = exc.response
+    secrets = (*secrets, *(os.getenv(name, '') for name in SECRET_ENV))
+    try:
+        body = response.json()
+    except ValueError:
+        body = response.text
+    except httpx.ResponseNotRead:
+        body = None
+    def safe(value):
+        if isinstance(value, dict):
+            return {key: safe(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [safe(item) for item in value]
+        return remove_urls(redact_text(value, secrets))[0] if isinstance(value, str) else value
+    body = safe(redact(body, secrets))
+    provider_error = body.get('error', {}) if isinstance(body, dict) else {}
+    code = provider_error.get('code') if isinstance(provider_error, dict) else None
+    request_id = safe(response.headers.get('x-request-id') or response.headers.get('x-tt-logid'))
+    diagnostic = f'HTTP {response.status_code}: ' + json.dumps(body, ensure_ascii=False)
+    if request_id:
+        diagnostic += f' (request_id={request_id})'
+    details = {'raw_response': body, 'provider_request_id': request_id}
+    if getattr(exc, 'diagnostic_read_error', None):
+        details['diagnostic_read_error'] = safe(exc.diagnostic_read_error)
+        diagnostic += '; diagnostic body unavailable: ' + details['diagnostic_read_error']
+    return code[:240] if isinstance(code, str) and code else None, diagnostic, details
 
 
 class ArkClient:
@@ -53,7 +102,7 @@ class ArkClient:
     def payload(self, messages, tools, thinker=False, stream=False, *, tool_choice=None, max_tokens=None,
                 model=None, thinking=None):
         if not os.getenv(self.key_env):
-            raise RuntimeError('ARK_API_KEY 未配置；没有调用模型，也不会使用假回复。')
+            raise RuntimeError(f'{self.key_env} 未配置；没有调用模型，也不会使用假回复。')
         if model is not None and (not isinstance(model, str) or not model.strip()):
             raise ValueError('model must be a nonblank model identifier')
         if thinking is not None and type(thinking) is not bool:
@@ -88,8 +137,8 @@ class ArkClient:
                 # Includes pool/connect/HTTP wait; this does not isolate server
                 # inference or TCP/TLS timing, which we have not observed here.
                 response_headers_ms = (time.perf_counter() - started) * 1000
+                await _raise_with_error_body(response, (os.getenv(self.key_env, ''),))
                 await response.aread()
-                response.raise_for_status()
                 body = response.json()
             message = deepcopy(body['choices'][0]['message'])
             message['_meta'] = {'provider_id': body.get('id'), 'model': body.get('model'),
@@ -105,10 +154,14 @@ class ArkClient:
             error = RuntimeError(f'Ark 调用失败：{sanitized_error(exc, (os.getenv(self.key_env, ""),))}')
             error.status_code = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
             error.provider_code = 'timeout' if isinstance(exc, httpx.TimeoutException) else 'unavailable' if isinstance(exc, httpx.TransportError) else 'invalid_response' if not isinstance(exc, httpx.HTTPError) else None
-            error.full_diagnostic = str(exc)
+            error.full_diagnostic = str(exc) or type(exc).__name__
             if payload is not None:
                 error.trace_partial = {'message': None, 'meta': {'raw_response': body,
                     'actual_request': deepcopy(payload), 'elapsed_ms': (time.perf_counter() - started) * 1000}}
+            if isinstance(exc, httpx.HTTPStatusError):
+                error.provider_code, error.full_diagnostic, details = _http_error_details(
+                    exc, (os.getenv(self.key_env, ''),))
+                error.trace_partial['meta'].update(details)
             raise error from None
 
     async def stream(self, messages, tools=None, **options):
@@ -148,7 +201,7 @@ class ArkClient:
             meta['actual_request'] = deepcopy(payload)
             async with self.client.stream('POST', 'chat/completions', json=payload) as response:
                 meta['response_headers_ms'] = (time.perf_counter() - started) * 1000
-                response.raise_for_status()
+                await _raise_with_error_body(response, (os.getenv(self.key_env, ''),))
                 async for line in response.aiter_lines():
                     if not line.startswith('data:'):
                         continue
@@ -215,8 +268,12 @@ class ArkClient:
             error = RuntimeError(f'Ark 流式调用失败：{sanitized_error(exc, (os.getenv(self.key_env, ""),))}')
             error.status_code = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
             error.provider_code = 'timeout' if isinstance(exc, httpx.TimeoutException) else 'unavailable' if isinstance(exc, httpx.TransportError) else 'invalid_response' if not isinstance(exc, httpx.HTTPError) else None
-            error.full_diagnostic = str(exc)
+            error.full_diagnostic = str(exc) or type(exc).__name__
             error.trace_partial = observed()
+            if isinstance(exc, httpx.HTTPStatusError):
+                error.provider_code, error.full_diagnostic, details = _http_error_details(
+                    exc, (os.getenv(self.key_env, ''),))
+                error.trace_partial['meta'].update(details)
             error.retryable = not raw_chunks and (
                 isinstance(exc, httpx.TransportError) or
                 isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in {502, 503, 504})
