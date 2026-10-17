@@ -9,6 +9,8 @@ import pytest
 from backend.google_maps import GoogleMapsClient, MapsError
 from backend.db import Database, _trace_data
 from backend.session import SessionActor
+from backend.demo.cockpit_device import CockpitDevice
+from backend.cockpit import CockpitServices, LocalMediaCatalog
 from test_session import FakeArk, call, wait_for
 
 
@@ -121,7 +123,7 @@ async def actor_factory(tmp_path):
     actors = []
     async def make(responses):
         maps, ark = FakeMaps(), FakeArk(responses)
-        actor = SessionActor(str(len(actors)), Database(tmp_path / f'{len(actors)}.sqlite'), ark, maps=maps)
+        actor = SessionActor(str(len(actors)), Database(tmp_path / f'{len(actors)}.sqlite'), ark, maps=maps, cockpit=CockpitServices(LocalMediaCatalog()))
         actors.append(actor)
         queue = await actor.attach()
         await queue.get()
@@ -143,19 +145,22 @@ async def test_foreground_weather_continues_same_model_without_task(actor_factor
 async def test_poi_query_then_selection_uses_real_identity_and_receipt(actor_factory):
     actor, q, _, _ = await actor_factory([
         {'tool_calls': [call('search_places', {'query': '巴黎卢浮宫', 'area': '巴黎'})]},
+        {'content': '找到卢浮宫，要去这里吗？'},
         {'tool_calls': [call('start_poi_navigation', {'place_id': POI['place_id']}, id='navigate')]}])
     await actor.post({'type': 'input', 'text': '查巴黎卢浮宫'})
     await wait_for(q, 'stream.done')
     assert not actor.vehicle['navigation']['active']
     await actor.post({'type': 'input', 'text': '导航去第一个'})
-    command, _ = await wait_for(q, 'vehicle.command')
-    assert not actor.vehicle['navigation']['active']
-    await actor.post({'type': 'vehicle.execute', 'command_id': command['command_id']})
+    command, _ = await wait_for(q, 'cockpit.command')
+    assert not actor.cockpit_state['navigation']['active']
+    device = CockpitDevice(actor.cockpit_state)
+    receipt = device.execute(command)
+    await actor.post({'type': 'cockpit.receipt', **receipt})
     done, _ = await wait_for(q, 'stream.done')
-    assert all(actor.vehicle['navigation']['destination_place'][key] == value for key, value in POI.items())
-    assert actor.vehicle['navigation']['destination_place']['provider'] == 'google'
-    assert actor.vehicle['navigation']['destination_place']['place_ref'] == 'google:' + POI['place_id']
-    assert actor.vehicle['navigation']['destination'] == POI['name'] and done['text'] == f"导航设好了，去{POI['name']}。"
+    destination = actor.cockpit_state['navigation']['destination']
+    assert all(destination[key] == value for key, value in POI.items())
+    assert destination['provider'] == 'google' and destination['place_ref'] == 'google:' + POI['place_id']
+    assert actor.cockpit_state['navigation']['active'] and done['metrics']['error'] is None
 
 
 async def test_fabricated_poi_id_never_dispatches(actor_factory):
@@ -165,30 +170,41 @@ async def test_fabricated_poi_id_never_dispatches(actor_factory):
     assert not actor.vehicle['navigation']['active'] and not any(e['type'] == 'vehicle.command' for e in events)
 
 
-async def test_search_results_are_read_from_template_without_another_model_call(actor_factory):
+async def test_search_results_require_model_presentation_and_cannot_authorize_same_turn_navigation(actor_factory):
     actor, q, ark, _ = await actor_factory([
-        {'tool_calls': [call('search_places', {'query': '巴黎卢浮宫', 'area': '巴黎'}, id='search')]}])
+        {'tool_calls': [call('search_places', {'query': '巴黎卢浮宫', 'area': '巴黎'}, id='search')]},
+        {'tool_calls': [call('start_poi_navigation', {'place_id': POI['place_id']}, id='premature')]},
+        {'content': '找到卢浮宫，要去这里吗？'}])
     await actor.post({'type': 'input', 'text': '导航到巴黎卢浮宫'})
     done, events = await wait_for(q, 'stream.done', actor)
-    assert len(ark.requests) == 1 and not any(e['type'] == 'vehicle.command' for e in events)
-    assert done['text'].startswith('找到一个地方') and done['text'].endswith('要去这里吗？')
-    # A result surfaced in this turn is not yet the user's choice.
-    assert actor.poi_error(actor.current, POI['place_id'])['code'] == 'place_not_confirmed'
+    assert len(ark.requests) == 3 and not any(e['type'] in {'vehicle.command', 'cockpit.command'} for e in events)
+    assert done['text'].endswith('要去这里吗？')
+    assert actor.current.tool_results['premature']['code'] == 'place_not_confirmed'
 
 
-async def test_spoken_place_ordinals_match_cards_even_if_model_reorders(actor_factory):
+async def test_place_order_and_real_ids_remain_bound_across_model_presentation(actor_factory):
     actor, q, _, maps = await actor_factory([
         {'tool_calls': [call('search_places', {'query': '巴黎咖啡馆', 'area': '巴黎'})]},
-        {'content': '第一个是乙店，第二个是甲店。'}])
+        {'content': '找到甲店和乙店，要去哪一家？'},
+        {'tool_calls': [call('start_poi_navigation', {'place_id': 'b'}, id='selected')]}])
     places = [{**POI, 'place_id': 'a', 'name': '甲店'}, {**POI, 'place_id': 'b', 'name': '乙店'}]
     async def search(**args):
         return {'ok': True, 'kind': 'places', 'places': places, 'provider': 'Google Maps'}
     maps.search_places = search
     await actor.post({'type': 'input', 'text': '找巴黎咖啡馆'})
     done, _ = await wait_for(q, 'stream.done')
-    assert '找到两个地方：甲店、乙店' in done['text']
+    assert done['text'] == '找到甲店和乙店，要去哪一家？'
     assert actor.current.messages[-1]['content'] == done['text']
     assert [p['place_id'] for p in actor.recent_places] == ['a', 'b']
+    tool = next(item for item in reversed(actor.ark.requests[1]['messages']) if item['role'] == 'tool')
+    assert [item['place_id'] for item in json.loads(tool['content'])['places']] == ['a', 'b']
+    await actor.post({'type': 'input', 'text': '去第二个'})
+    command, _ = await wait_for(q, 'cockpit.command')
+    assert command['arguments']['state']['destination']['place_ref'] == 'google:b'
+    receipt = CockpitDevice(actor.cockpit_state).execute(command)
+    await actor.post({'type': 'cockpit.receipt', **receipt})
+    await wait_for(q, 'stream.done')
+    assert actor.cockpit_state['navigation']['destination']['place_id'] == 'b'
 
 
 async def test_lookup_timeout_returns_error_and_no_background_task(actor_factory):
@@ -226,7 +242,7 @@ async def test_search_area_must_come_from_user_words(actor_factory):
         {'content': '你现在在哪个城市或者哪条路附近？'}])
     await actor.post({'type': 'input', 'text': '导航去最近的机场'})
     done, _ = await wait_for(q, 'stream.done')
-    assert actor.current.tool_results['guess']['code'] == 'area_not_from_user'
+    assert actor.current.tool_results['guess']['code'] == 'area_not_grounded'
     assert not maps.started.is_set() and len(ark.requests) == 2
     assert done['text'] == '你现在在哪个城市或者哪条路附近？'
 

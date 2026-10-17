@@ -5,7 +5,7 @@ import httpx
 
 from backend.cockpit import initial_cockpit_state
 from backend.harness.background import TaskService
-from backend.harness.gateway import TaskReference
+from backend.harness.gateway_contracts import TaskReference
 from backend.harness.release import get_release_id
 from backend.harness.task_transport import GatewayTaskStore
 from test_orchestration import (GatewayLedgerFixture, StreamModel, call, kernel,

@@ -37,6 +37,15 @@ test('real play promise and media playing event precede success receipt; duplica
   assert.equal(receipt.ok,true); assert.equal(receipt.state.status,'playing'); assert.equal(receipt.state_version,1);
   assert.deepEqual(await h.engine.execute(command),receipt); assert.equal(h.audio.plays,1); h.engine.dispose();
 });
+test('the player owns the explicitly supplied queue and reports it independently of command expectations',async()=>{
+  const h=setup(),queue=[{content_id:'music-a',kind:'music',title:'A',provider:'local'}, {content_id:'music-b',kind:'music',title:'B',provider:'local'}];
+  const command=h.command('play',{...content,provider:'local',queue});command.expected={queue:[{content_id:'invented'}]};
+  const first=await h.engine.execute(command);assert.equal(first.ok,true);assert.deepEqual(first.state.queue,queue);assert.equal(first.state.provider,'local');
+  queue[0].title='mutated caller';first.state.queue[1].title='mutated receipt';
+  assert.equal(h.engine.snapshot().queue[0].title,'A');assert.equal(h.engine.snapshot().queue[1].title,'B');
+  const next=await h.engine.execute(h.command('next',{...content,content_id:'music-b',provider:'local',queue:h.engine.snapshot().queue}));
+  assert.equal(next.state.content_id,'music-b');assert.equal(next.state.queue[1].title,'B');h.engine.dispose();
+});
 test('autoplay rejection fails honestly without success or state revision',async()=>{
   const h=setup();h.audio.reject=true; const receipt=await h.engine.execute(h.command('play',content));
   assert.equal(receipt.ok,false);assert.equal(receipt.error.code,'autoplay_blocked');assert.equal(receipt.state_version,0);assert.equal(h.audio.paused,true);h.engine.dispose();

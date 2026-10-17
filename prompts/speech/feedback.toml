@@ -1,25 +1,5 @@
 # 编辑固定话术；{{变量}} 由代码提供，变量名必须保留。
 
-[dispatch]
-grouped = "正在为你执行这组车控操作。"
-text = "正在为你{{action}}。"
-close_all_windows = "关闭全部车窗"
-set_navigation_destination = "设置模拟导航目的地为{{destination}}"
-set_temperature = "将空调温度调到{{temperature}}度"
-fallback = "调整车辆设置"
-
-[dispatch.seat]
-driver = "主驾"
-front_passenger = "副驾"
-rear_left = "左后"
-rear_right = "右后"
-all = "全部"
-
-[dispatch.set_window_position]
-closed = "关闭{{seat}}车窗"
-open = "打开{{seat}}车窗"
-partial = "将{{seat}}车窗调到百分之{{position}}"
-
 [task.phases]
 search_web = "正在查找相关资料。"
 lookup_web = "正在查找并核实资料。"
@@ -77,6 +57,8 @@ range = "{{label}}只能在{{minimum}}到{{maximum}}{{unit}}之间。"
 instruction_format = "这次的执行指令格式出了问题，没有调整。可以再试一次。"
 model_connection_pending = "后续处理时连接出了问题，还有请求没确认。请稍后再试。"
 model_connection = "连接出了问题，暂时没能回答。请稍后再试。"
+operation_incomplete = "这次请求还没有全部完成。"
+outcome_unknown = "部分请求的结果尚未确认，请先核对当前状态。"
 no_function = "这次没能确认可用的功能，请把需求再具体一点。"
 planner_unverified = "这次车控计划未能核实，没有下发其中的动作。请稍后重试。"
 planner_incomplete = "车控规划没有完成，计划中的动作没有下发。"
@@ -100,6 +82,7 @@ default = "这个数值"
 
 [vehicle]
 kept_settings = "要求保持的设置没动。"
+confirmed = "车辆已确认这次操作。"
 
 [maps]
 area_not_found = "没有找到“{{near}}”这个位置，请换个说法。"

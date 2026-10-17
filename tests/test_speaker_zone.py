@@ -5,9 +5,11 @@ import pytest
 
 from backend.session import Turn
 from backend.harness.vehicle_planner import VehicleControlPlanner
-from backend.catalog import initial_vehicle_state, TOOLS
+from backend.catalog import TOOLS
+from backend.demo.vehicle_simulator import initial_vehicle_state
 from backend.speaker import speaker_context
 from backend.harness.task_runner import TaskRunner
+from backend.harness.contracts import ToolRequest
 from tests.test_session import make_actor, wait_for, call
 from tests.vehicle_fakes import FakeVehiclePlanner, plan_response
 
@@ -25,20 +27,25 @@ async def test_speaker_system_snapshot_and_shared_zone_mapping(make_actor, seat,
     await actor.queue.join()
     assert actor.snapshot()['speaker']['seat'] == seat
     turn = Turn('test', '你好', actor.persona, 1)
-    messages = actor.messages_for(turn)
+    start = actor.nlp_start_request(turn)
+    messages = actor.nlp.compile_start(start).messages
     snapshot = next(json.loads(item['content'].splitlines()[-1]) for item in messages
                     if item['role'] == 'system' and item['content'].startswith('当前会话快照'))
     speaker = snapshot['speaker']
     assert speaker['audio_zone'] == seat
     assert speaker['default_targets'] == {'seat': seat, 'window': seat, 'door': seat,
                                           'temperature_zone': zone, 'interior_light_zone': row, 'mirror': mirror}
-    assert actor.task_context()['speaker'] == speaker
+    registered = await actor.nlp.task_service.handle(start, ToolRequest(
+        invocation_id='seat-task-' + seat, tool_call_id='seat-task', idempotency_key='seat-task-' + seat,
+        name='delegate_task', arguments={'goal': '车辆设置建议'}))
+    task = registered['task']
+    assert task['context']['speaker']['seat'] == seat
+    assert task['context']['speaker']['default_targets'] == speaker['default_targets']
     assert speaker['control_defaults']['set_reading_light'] == {
         'tool': 'delegate_vehicle_control', 'skill_id': 'lights', 'arguments': {'seat': seat}}
     assert speaker['control_defaults']['set_temperature']['arguments'] == {'zone': zone}
     assert speaker['control_defaults']['set_interior_light']['arguments'] == {'zone': row}
     worker = object.__new__(TaskRunner)
-    task = {'goal': '车辆设置建议', 'revision': 1, 'context': actor.task_context()}
     thinker_messages = worker._messages(task)
     assert any(item['role'] == 'system' and '"seat": "' + seat + '"' in item['content'] for item in thinker_messages)
 
@@ -78,7 +85,7 @@ async def test_input_metadata_overrides_one_turn_without_changing_default(make_a
     await wait_for(q, 'stream.done')
     first = actor.current
     assert first.speaker_seat == 'rear_right'
-    assert actor.task_context(first.id)['speaker']['seat'] == 'rear_right'
+    assert first.start_request.speaker_seat == 'rear_right'
     await actor.post({'type': 'input', 'text': '继续'})
     await wait_for(q, 'stream.done')
     assert actor.current.speaker_seat == 'front_passenger'

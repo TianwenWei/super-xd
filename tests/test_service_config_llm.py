@@ -243,7 +243,7 @@ async def test_worker_step_limit_uses_configured_finalizer_role(tmp_path):
             return self
     ark = RoleAwareArk(message('finish_task', {'summary': '没有查询新资料，使用已有信息收尾。'}))
     db = Database(tmp_path / 'worker-role.sqlite3')
-    current = task(db)
+    current = task(db, worker_options={'max_steps': 1})
     await ThinkerWorker(db, ark, FakeTavily(), max_steps=1).run_task(current)
     assert ark.options[0]['role'] == 'finalizer'
     assert ark.thinker_modes == [False]

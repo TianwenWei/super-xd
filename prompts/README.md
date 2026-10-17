@@ -4,7 +4,7 @@
 
 | 入口 | 职责 | 每次如何选择 |
 |---|---|---|
-| [talker.md](talker.md) | 前台对话、工具决策、表达风格、上下文包装 | 固定 `system`；当前一个人设；历史；动态快照与本轮输入 |
+| [talker.md](talker.md) | 前台对话、工具决策、表达风格、上下文包装 | 固定 `system` 与 `cold_catalog`；当前一个人设；历史；动态快照与本轮输入 |
 | [reasoner_foreground.md](reasoner_foreground.md) | 前台复杂车控计划，只规划、不执行 | `system`；仅提交协议不符时使用 `retry` |
 | [reasoner_background.md](reasoner_background.md) | 后台快速核验、多步研究与结果交付 | `common` 加 `quick` 或 `research`；按运行阶段使用其余段 |
 
@@ -17,6 +17,7 @@
 | 文件内 section | Python 模板名 | 变量 / 时机 |
 |---|---|---|
 | Talker `system` | `talker` | `hot_tool_names`、`skill_index`；固定规则 |
+| Talker `cold_catalog` | `talker_cold_catalog` | `catalog_json`；按skill组织的完整冷能力语义目录，启动构造并缓存 |
 | Talker `persona` | `persona` | `persona_json`；表达边界和当前 PersonaConfig 数据 |
 | Talker `persona_professional` / `persona_warm` / `persona_playful` | 同名 | 只选当前预设段；自定义人设保留自己的完整配置，不隐式套其他预设 |
 | Talker `history_attribution` | 同名 | `attribution_json`；主动播报的来源标注 |
@@ -33,10 +34,18 @@
 Talker 的消息顺序保持：
 
 ```text
-固定规则 → 当前人设 → 原生示例 → 历史 → 会话快照 → 本轮提示与用户输入
+固定规则与能力语义目录 → 当前人设 → 原生示例 → 历史 → 会话快照 → 本轮提示与用户输入
 ```
 
 地点、时间、音区与任务状态不会进入固定规则前缀。人设只改变表达，工具选择与参数必须仍由跨人设评测约束。后台没有人设段。
+
+## 证据、播放与能力事实
+
+三角色共享行为原则：咨询不自动执行；答案的对象、时段、粒度和确定性须与返回材料一致；局部检索未命中不能证明功能不存在。Talker 一次模型调用同时选择动作并表达。一次用户任务通常只做一次查询预告，内部重试无新增进展时直接用已有材料收束。
+
+历史 assistant 消息保留完整生成内容，`playback_history` 独立记录 `unknown / not_started / partial / completed` 和已确认听到的片段；未知播放不等于空答案。动态快照先列当前 `speaker` 与变化标志，自指使用当前音区，明确回指才沿用历史对象。固定目录从catalog现有文字配置生成85项完整中文说明，不按本轮原话筛选。Talker仍只有26工具，快照只展开这些固定工具的执行事实；`vehicle_skill_capabilities` 按模块列出冷车控 `available / unavailable / missing` 名称及可用数量。完整能力仍保留在 StartRequest 中给 Planner 和执行校验，目录存在或 feature 为 true 不补足缺失的执行声明。
+
+`harness/evidence.py` 根据来源 ID、版本、内容指纹记录检索新证据；重复回执幂等，进展账本跨 checkpoint 恢复。范围注解只描述来源与粒度，不宣称答案已被证据支持。泛化评测在 `evals/cases/general_principles.json`；`evals/response_review.py` 使用配置中的独立评测模型逐项审查 rubric，缺失或失败的审查不能计为语义通过。
 
 ## 独立保留的配置
 

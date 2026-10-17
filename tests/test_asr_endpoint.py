@@ -8,10 +8,11 @@ import pytest
 from backend.app import actors, app
 from backend.db import Database
 from backend.session import SessionActor
+from tests.test_session import configure_task_fixtures, wait_for
 
 
 class Ark:
-    async def stream(self, *args):
+    async def stream(self, *args, **options):
         await asyncio.Event().wait()
         yield  # No model response can accidentally be attributed to ASR.
 
@@ -74,6 +75,7 @@ class ASR:
 @pytest.fixture
 async def context(tmp_path, monkeypatch):
     actor = SessionActor('asr-route', Database(tmp_path / 'asr.sqlite3'), Ark())
+    configure_task_fixtures(actor)
     actors[actor.id] = actor
     await actor.attach()
     asr = ASR()
@@ -217,17 +219,23 @@ async def test_asr_route_preserves_missing_session_and_origin_guards(context, pa
 
 async def test_capture_holds_proactive_result_until_released_and_ignores_old_release(context):
     actor, _ = context
+    control = await actor.attach()
+    await actor.post({'type': 'asr.capture', 'capture_id': 'capture-new', 'active': True})
+    await actor.queue.join()
     task = actor.db.create_task(actor.id, '测试后台结果')
     actor.db.save_task(task['id'], 1, status='completed', summary='已完成',
                        result={'summary': '官方核对已完成。', 'spoken_summary': '官方核对已完成。'})
-    actor.remember_task(actor.db.get_task(task['id']))  # as the event poller would
-    actor.announcements[task['id']] = actor.db.get_task(task['id'])
-    actor.handle({'type': 'asr.capture', 'capture_id': 'capture-new', 'active': True})
-    actor.announce()
+    event = actor.db.events_after(0, actor.id)[-1]
+    event['payload']['task'] = actor.db.get_task(task['id'])
+    await actor.post({'type': '_task_event', 'event': event})
+    await actor.post({'type': '_announce'})
+    await actor.queue.join()
     assert not actor.turns and task['id'] in actor.announcements
-    actor.handle({'type': 'asr.capture', 'capture_id': 'capture-old', 'active': False})
-    actor.announce()
+    await actor.post({'type': 'asr.capture', 'capture_id': 'capture-old', 'active': False})
+    await actor.post({'type': '_announce'})
+    await actor.queue.join()
     assert not actor.turns and actor.asr_capture_id == 'capture-new'
-    actor.handle({'type': 'asr.capture', 'capture_id': 'capture-new', 'active': False})
-    actor.announce()
+    await actor.post({'type': 'asr.capture', 'capture_id': 'capture-new', 'active': False})
+    await actor.post({'type': '_announce'})
+    await wait_for(control, 'stream.done')
     assert actor.current.proactive and task['id'] not in actor.announcements

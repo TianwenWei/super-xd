@@ -1,9 +1,7 @@
-"""Behavior eval runner: real Talker/Planner models, simulated vehicle, structured grading.
+"""Behavior evaluations through production NLPService and a local Gateway.
 
-Each case drives an in-process ``SessionActor`` exactly like the browser does:
-input → vehicle.command → simulator receipt → vehicle.receipt. Grading only
-compares structured data (dispatched commands, Talker tool calls, vehicle state,
-created tasks). Nothing here reads the assistant's prose to decide pass/fail.
+Device fixtures own independent state. Structured behavior and semantic response
+review are reported separately; an unreviewed rubric is never a semantic pass.
 
     .venv/bin/python -m evals.harness                 # all cases, uses configured LLM roles
     .venv/bin/python -m evals.harness --tag hold      # subset
@@ -17,12 +15,14 @@ from collections import Counter
 import copy
 from itertools import combinations
 import json
-import tempfile
 import time
 from pathlib import Path
 
-from backend.db import Database
-from backend.session import SessionActor
+if __name__ == '__main__':
+    from backend.local_environment import load_local_environment
+    load_local_environment()
+
+from evals.gateway_driver import EvaluationGateway, model_secrets
 from backend.harness.release import get_release_manifest
 from backend.harness.diagnostics import safe_diagnostic
 
@@ -87,6 +87,17 @@ def grade(expect, observed):
     failures = []
     if 'model_calls' in expect and observed.get('model_calls') != expect['model_calls']:
         failures.append(f'expected {expect["model_calls"]} model calls, got {observed.get("model_calls")}')
+    if 'talker_model_calls' in expect and observed.get('talker_model_calls') != expect['talker_model_calls']:
+        failures.append('unexpected Talker model call count')
+    if 'max_lookup_calls' in expect:
+        limits = expect['max_lookup_calls']
+        if isinstance(limits, int):
+            if len(observed.get('lookups', [])) > limits:
+                failures.append('lookup call budget exceeded')
+        else:
+            for name, limit in limits.items():
+                if observed.get('lookups', []).count(name) > limit:
+                    failures.append(f'lookup call budget exceeded: {name}')
     commands, talker = observed['commands'], observed['talker_calls']
     for spec in expect.get('commands', []):
         if not any(matches(spec, item) for item in commands):
@@ -147,162 +158,58 @@ def grade(expect, observed):
     return failures
 
 
-async def _drive_turn(actor, outgoing, text):
-    """Send one input and play the device role until the turn completes."""
-    before = copy.deepcopy(actor.vehicle)
-    await actor.post({'type': 'input', 'text': text})
-    commands, cards, turn_id, receipts, lookups, lookup_results = [], [], None, [], [], []
-    cockpit_commands, device_queries = [], []
-
-    async def execute(event):
-        receipt = await actor.simulator.execute(event['command_id'])
-        await actor.post({'type': 'vehicle.receipt', 'command_id': event['command_id'],
-                          'receipt_id': receipt['receipt_id']})
-
-    async with asyncio.timeout(TURN_TIMEOUT):
-        while True:
-            event = await outgoing.get()
-            kind = event['type']
-            if kind == 'turn.started' and not event.get('proactive') and turn_id is None:
-                turn_id = event['turn_id']
-            elif kind == 'vehicle.command' and event.get('turn_id') == turn_id:
-                commands.append({'name': event['name'], 'arguments': event['arguments'],
-                                 'source': event.get('source', 'talker')})
-                receipts.append(asyncio.create_task(execute(event)))
-            elif kind == 'cockpit.command' and event.get('turn_id') == turn_id:
-                # Explicit eval device fixtures; this is not browser playback verification.
-                envelope = {key:event[key] for key in ('command_id','request_id','session_id','turn_id','target_device','kind')}
-                if event['kind'] == 'control':
-                    cockpit_commands.append({'domain':event['domain'],'action':event['action'],'arguments':copy.deepcopy(event['arguments'])})
-                    pending = actor.pending_cockpit[event['command_id']]
-                    await actor.post({'type':'cockpit.receipt',**envelope,'ok':True,
-                        'state_version':event['expected_state_version']+1,'state':copy.deepcopy(pending['expected'])})
-                else:
-                    device_queries.append({'domain':event['domain'],'action':event['action']})
-                    state = actor.cockpit_state['media']
-                    await actor.post({'type':'cockpit.receipt',**envelope,'ok':True,
-                        'result':{'ok':True,'state':copy.deepcopy(state),'state_version':state['version']}})
-            elif kind == 'lookup.result' and event.get('turn_id') == turn_id:
-                lookups.append(event['tool'])
-                lookup_results.append({'tool': event['tool'], 'result': copy.deepcopy(event['result'])})
-            elif kind == 'ui.card' and event.get('origin_turn_id') == turn_id:
-                cards.append(event['task'])
-            elif kind == 'stream.done' and event['turn_id'] == turn_id:
-                done = event
-                break
-    await asyncio.gather(*receipts, return_exceptions=True)
-    turn = next(item for item in actor.turns if item.id == turn_id)
-    talker, created_task_indices = [], {}
-    for message in turn.messages:
-        for call in message.get('tool_calls', []):
-            try:
-                arguments = json.loads(call['function'].get('arguments') or '{}')
-            except ValueError:
-                arguments = {'_raw': call['function'].get('arguments')}
-            talker.append({'name': call['function']['name'], 'arguments': arguments})
-            if call['function']['name'] == 'delegate_task':
-                result = turn.tool_results.get(call['id'], {})
-                task_id = (result.get('task') or {}).get('id')
-                if result.get('ok') is True and isinstance(task_id, str):
-                    # Bind to the creating call, not asynchronous card arrival.
-                    created_task_indices[task_id] = len(talker) - 1
-    return {'turn_id': turn_id, 'cockpit_commands':cockpit_commands,'device_queries':device_queries,
-            'cockpit':copy.deepcopy(actor.cockpit_state),'cockpit_device_mode':'explicit_eval_fixture' if actor.cockpit else None,
-            'commands': commands, 'talker_calls': talker, 'lookups': lookups, 'lookup_results': lookup_results, 'vehicle': copy.deepcopy(actor.vehicle),
-            'vehicle_before': before, 'tasks_created': len(cards), 'route': done['metrics'].get('route'),
-            'created_task_indices': created_task_indices,
-            'error': done['metrics'].get('error'), 'text': done['text'], 'preface': done['metrics'].get('preface'),
-            'model_calls': done['metrics'].get('model_calls'), 'total_ms': done['metrics'].get('total_ms'),
-            'first_speech_ms': done['metrics'].get('first_speech_ms')}
 
 
-async def _case_trace(db, session_id):
-    records, cursor = [], 0
-    while True:
-        batch = await asyncio.to_thread(db.traces_after, session_id, after_id=cursor, limit=500)
-        records.extend(batch)
-        if len(batch) < 500:
-            return records
-        cursor = batch[-1]['trace_id']
-
-
-def _model_secrets(model):
-    # Configured profiles may use custom key_env names outside the legacy list.
-    # Provider adapters already retain their configured secret for redaction.
-    providers = getattr(model, 'providers', {})
-    values = [model, *providers.values()] if isinstance(providers, dict) else [model]
-    return tuple(secret for provider in values for secret in getattr(provider, 'secrets', ())
-                 if isinstance(secret, str) and secret)
 
 
 async def run_case(case, ark, *, persona='warm', planner=None, maps=None, repeat=0):
-    with tempfile.TemporaryDirectory() as directory:
-        db = Database(Path(directory) / 'eval.sqlite3')
-        cockpit = None
+    gateway = EvaluationGateway(case, ark, planner=planner, maps=maps)
+    task_aliases, traces = {}, []
+    try:
+        for path, value in case.get('vehicle', {}).items():
+            set_state_value(gateway.vehicle.state, path, value)
         if 'cockpit' in case:
-            from backend.cockpit import CockpitServices, LocalMediaCatalog
-            cockpit = CockpitServices(LocalMediaCatalog(case['cockpit'].get('items', [])))
-        session_id = f"eval-{case['id']}"
-        actor = SessionActor(session_id, db, ark, vehicle_planner=planner, maps=maps, cockpit=cockpit)
-        task_id_aliases = {}
-        try:
-            outgoing = await actor.attach()
-            await outgoing.get()
-            # Seeding happens before any input is queued, so no handler races it.
-            for path, value in case.get('vehicle', {}).items():
-                set_state_value(actor.vehicle, path, value)
-                set_state_value(actor.simulator.state, path, value)
-            if 'cockpit' in case:
-                from backend.cockpit.media import media_item
-                actor.media_choices = {item['content_id']:media_item(item) for item in case['cockpit'].get('items', [])}
-                for path,value in case['cockpit'].get('state', {}).items():
-                    set_state_value(actor.cockpit_state,path,value)
-            for index, task in enumerate(case.get('tasks', [])):
-                created = await asyncio.to_thread(db.create_task, actor.id, task['goal'], task.get('context', {}))
-                if task.get('state'):
-                    await asyncio.to_thread(db.save_task, created['id'], created['revision'], **task['state'])
-                if task.get('question'):
-                    claimed = await asyncio.to_thread(db.claim_next)
-                    await asyncio.to_thread(db.save_task, claimed['id'], claimed['revision'],
-                                            status='waiting_clarification', question=task['question'])
-                task_id_aliases[created['id']] = f'seeded:{index}'
-            # Let the actor's event poller mirror seeded tasks before the first input.
-            async with asyncio.timeout(5):
-                while hasattr(actor, 'tasks') and len(actor.tasks) < len(case.get('tasks', [])) or hasattr(actor, 'tasks') and any(
-                        actor.tasks[t['id']]['status'] != t['status'] for t in await asyncio.to_thread(db.list_tasks, actor.id)):
-                    await asyncio.sleep(.05)
-            if persona != 'warm':
-                await actor.post({'type': 'persona.set', 'preset': persona})
-            turns = []
-            for turn_index, spec in enumerate(case['turns']):
-                if spec.get('speaker_seat') or case.get('speaker_seat'):
-                    await actor.post({'type': 'speaker.set', 'seat': spec.get('speaker_seat') or case['speaker_seat']})
-                    await actor.queue.join()
-                started = time.perf_counter()
-                try:
-                    observed = await _drive_turn(actor, outgoing, spec['input'])
-                    for task_id, index in observed.get('created_task_indices', {}).items():
-                        task_id_aliases[task_id] = f'created:{turn_index}:{index}'
-                    failures = grade(spec.get('expect', {}), observed)
-                except TimeoutError:
-                    observed, failures = {}, ['turn timed out']
-                turns.append({'input': spec['input'], 'passed': not failures, 'failures': failures,
-                              'elapsed_ms': round((time.perf_counter() - started) * 1000),
-                              **{k: v for k, v in observed.items() if k not in {'vehicle', 'vehicle_before'}}})
-            result = {'id': case['id'], 'persona': persona, 'repeat': repeat, 'tags': case.get('tags', []),
-                      'passed': all(turn['passed'] for turn in turns), 'turns': turns,
-                      'task_id_aliases': task_id_aliases}
-        finally:
-            # close cancels producers and drains the ordered trace writer. Read
-            # afterward, while the temporary database still exists.
-            await actor.close()
-        result['traces'] = await _case_trace(db, session_id)
-        result['trace_capture'] = {'after_actor_close': True, 'event_count': len(result['traces']),
-                                   'recording_error': getattr(actor, 'trace_error', None)}
-        for turn in result['turns']:
-            turn['model_errors'] = [record for record in result['traces']
-                if record['kind'] == 'model.error' and record['turn_id'] == turn.get('turn_id')]
-        return safe_diagnostic(result, _model_secrets(ark))
+            for path, value in case['cockpit'].get('state', {}).items():
+                set_state_value(gateway.device.state, path, value)
+            gateway.media = {item['content_id']: {**item, 'provider': item.get('provider', 'local'),
+                'source_turn_id': 'seeded', 'presented_to_user': True} for item in case['cockpit'].get('items', [])}
+        scope = gateway.ledger.for_scope('eval-' + case['id'])
+        for index, seeded in enumerate(case.get('tasks', [])):
+            identity = f'seeded-{index}'
+            context = {**seeded.get('context', {}), 'release_id': gateway.service.release_id,
+                       'model_policy_id': gateway.service.model_policy_id}
+            task = await scope.create_task(identity, seeded['goal'], context, identity)
+            task.update(seeded.get('state', {}))
+            if seeded.get('question'):
+                task.update(status='waiting_clarification', question=seeded['question'])
+            gateway.ledger.tasks[identity] = task
+            task_aliases[identity] = f'seeded:{index}'
+        turns = []
+        for index, spec in enumerate(case['turns']):
+            previous = set(gateway.ledger.tasks)
+            try:
+                async with asyncio.timeout(TURN_TIMEOUT):
+                    observed = await gateway.turn(spec, persona, spec.get('speaker_seat') or case.get('speaker_seat') or 'driver')
+                failures = grade(spec.get('expect', {}), observed)
+            except Exception as error:
+                observed = gateway.failed_turn(error)
+                failures = ['turn timed out' if isinstance(error, TimeoutError) else f'run failed: {type(error).__name__}']
+            for task_id in [identity for identity in gateway.ledger.tasks if identity not in previous]:
+                task_aliases[task_id] = f'created:{index}:{len(task_aliases)}'
+            traces.extend(observed.pop('trace', []))
+            turns.append({'input': spec['input'], 'passed': not failures, 'failures': failures,
+                'response_rubric': spec.get('expect', {}).get('response_rubric'),
+                'response_review_status': 'pending' if spec.get('expect', {}).get('response_rubric') else 'not_requested',
+                **{key: value for key, value in observed.items() if key not in {'vehicle', 'vehicle_before'}}})
+        result = {'id': case['id'], 'persona': persona, 'repeat': repeat, 'tags': case.get('tags', []),
+            'engine': 'NLPService', 'release_id': gateway.service.release_id,
+            'model_policy_id': gateway.service.model_policy_id, 'semantic_policy_id': gateway.service.semantic_policy.policy_id,
+            'passed': all(turn['passed'] for turn in turns), 'turns': turns, 'task_id_aliases': task_aliases,
+            'traces': traces, 'trace_capture': {'event_count': len(traces), 'recording_error': None}}
+        return safe_diagnostic(result, model_secrets(ark))
+    finally:
+        await gateway.close()
+
 
 
 def persona_signature(result):
@@ -428,21 +335,25 @@ def percentile(values, q):
 
 
 def latency_summary(results):
-    """Per-turn latency from text input (no ASR), grouped by route.
-
-    first_speech_ms: when the first words were ready for TTS. total_ms: turn
-    done, including simulated vehicle receipts. model_calls: Talker calls.
-    """
+    """Production text latency and all-role calls; audio is measured separately."""
     turns = [t for r in results for t in r['turns'] if t.get('total_ms') is not None]
     out = {}
     for route in sorted({t.get('route') for t in turns} | {'all'}):
         group = [t for t in turns if route == 'all' or t.get('route') == route]
         speech = [t['first_speech_ms'] for t in group if t.get('first_speech_ms') is not None]
+        first = [t['first_effective_ms'] for t in group if t.get('first_effective_ms') is not None]
+        useful = [t['first_useful_ms'] for t in group if t.get('first_useful_ms') is not None]
         out[route] = {'turns': len(group),
                       'first_speech_p50': percentile(speech, .5), 'first_speech_p90': percentile(speech, .9),
+                      'first_text_p50': percentile(first, .5), 'first_text_p90': percentile(first, .9),
+                      'first_useful_p50': percentile(useful, .5), 'first_useful_p90': percentile(useful, .9),
                       'total_p50': percentile([t['total_ms'] for t in group], .5),
                       'total_p90': percentile([t['total_ms'] for t in group], .9),
-                      'model_calls_mean': round(sum(t.get('model_calls') or 0 for t in group) / len(group), 2) if group else None}
+                      'model_calls_mean': round(sum(t.get('model_calls') or 0 for t in group) / len(group), 2) if group else None,
+                      'model_calls_by_role': {role: sum(t.get('model_calls_by_role', {}).get(role, 0) for t in group)
+                                              for role in ('talker', 'planner', 'thinker', 'finalizer')},
+                      'prompt_tokens': sum(t.get('usage', {}).get('prompt_tokens', 0) for t in group),
+                      'cached_tokens': sum(t.get('usage', {}).get('cached_tokens', 0) for t in group)}
     return out
 
 
@@ -456,7 +367,11 @@ async def main(argv=None):
     args = parser.parse_args(argv)
     if args.repeat < 1 or args.concurrency < 1:
         parser.error('--repeat and --concurrency must be positive integers')
-    cases = [c for c in load_cases()
+    available = load_cases()
+    unknown = sorted(set(args.case) - {case['id'] for case in available})
+    if unknown:
+        parser.error('Unknown eval case IDs: ' + ', '.join(unknown))
+    cases = [c for c in available
              if (not args.tag or set(args.tag) & set(c.get('tags', [])))
              and (not args.case or c['id'] in args.case)]
     if not cases:
@@ -470,9 +385,26 @@ async def main(argv=None):
         if missing:
             parser.error('Selected LLM roles are not configured: ' + ', '.join(missing))
         results = await run_all(cases, ark, concurrency=args.concurrency, repeat=args.repeat)
+        from evals.response_review import review_results
+        response_review = await review_results(ark, results, concurrency=args.concurrency)
+        for result in results:
+            for turn in result['turns']:
+                if not turn.get('response_rubric'):
+                    continue
+                verdict = turn.get('response_review') or {}
+                turn['structured_passed'] = turn['passed']
+                turn['response_review_status'] = verdict.get('status', 'unreviewed')
+                if verdict.get('status') != 'reviewed' or verdict.get('passed') is not True:
+                    turn['passed'] = False
+                    turn['failures'].append('response rubric failed' if verdict.get('passed') is False else 'response rubric unreviewed')
+            result['passed'] = result['passed'] and all(turn['passed'] for turn in result['turns'])
     finally:
         await ark.aclose()
-    report = {'release': get_release_manifest(), 'model_configuration': configuration,
+    report = {'engine': 'NLPService', 'release': get_release_manifest(), 'model_configuration': configuration,
+              'selection': {'requested_case_ids': args.case, 'tags': args.tag,
+                            'selected_case_ids': [case['id'] for case in cases],
+                            'repeat': args.repeat, 'concurrency': args.concurrency},
+              'response_review': response_review,
               'summary': summarize(results), 'results': results}
     for result in results:
         mark = 'PASS' if result['passed'] else 'FAIL'

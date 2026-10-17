@@ -1,7 +1,7 @@
-"""Pro-only vehicle plans. Validation/simulation never commits vehicle state.
+"""Pro-only vehicle plans validated against contracts and source evidence.
 
 The ledger proves structural bindings and declared constraints, not arbitrary
-natural-language intent coverage. Real execution and receipts belong to actor.
+natural-language intent coverage. Device acceptance requires a real receipt.
 """
 from __future__ import annotations
 
@@ -15,18 +15,19 @@ from uuid import uuid4
 
 from jsonschema import Draft202012Validator, ValidationError
 
-from backend.catalog import HOT_TOOL_NAMES, SKILLS, TOOLS, execute_tool, load_skill
+from backend.catalog import HOT_TOOL_NAMES, SKILLS, TOOLS, action_write_paths, load_skill
 from backend.speaker import DEFAULT_SPEAKER_SEAT, speaker_context
 from backend.models import sanitized_error, utcnow
 from backend.prompt_templates import render_prompt
 from backend.prompt_config import config_text, validate_config
 from backend.settings import VEHICLE_CONTROL_MODEL
 from backend.harness.release import get_release_id
+from backend.harness.model_execution import complete_model
 
 MAX_MODEL_CALLS = 4
 PLAN_FIELDS = ('status', 'intents', 'actions', 'keep_paths', 'question', 'reason')
 PLAN_METADATA_FIELDS = {'ok', 'executed', 'loaded_skills', 'model_calls', 'plan_call_id', 'model_call_id',
-                        'provenance', 'model_observations', 'load_evidence', 'trace_events', 'simulation',
+                        'provenance', 'model_observations', 'load_evidence', 'trace_events',
                         'validation', 'action_ledger'}
 ID = {'type': 'string', 'minLength': 1, 'maxLength': 100, 'pattern': r'[\s\S]*\S[\s\S]*'}
 IDS = {'type': 'array', 'items': ID, 'uniqueItems': True, 'maxItems': 64}
@@ -208,30 +209,6 @@ def _ordered(actions):
     return ordered
 
 
-def _write_paths(name, arguments, state):
-    if TOOLS[name].state_mapping.get('operation') == 'read':
-        return []
-    paths = []
-    for template in TOOLS[name].state_mapping['paths']:
-        nodes = [('', state)]
-        for part in template.split('.'):
-            expanded = []
-            for prefix, node in nodes:
-                key = arguments.get(part[1:-1]) if part.startswith('{') and part.endswith('}') else part
-                keys = list(node) if key in ('*', 'all') and isinstance(node, dict) else [str(key)]
-                for child in keys:
-                    expanded.append((f'{prefix}.{child}' if prefix else child,
-                                     node.get(child) if isinstance(node, dict) else None))
-            nodes = expanded
-        paths.extend(path for path, _ in nodes)
-    # catalog.temperature() rewrites all zones when the driver zone is synced,
-    # even if the requested value already matches each zone's current value.
-    if (name in {'set_temperature', 'adjust_temperature'} and arguments.get('zone') == 'driver'
-            and state.get('climate', {}).get('sync_zones') is True):
-        paths.extend(f'climate.temperatures.{zone}' for zone in state['climate']['temperatures'])
-    return paths
-
-
 def _overlap(a, b):
     return a == b or a.startswith(b + '.') or b.startswith(a + '.')
 
@@ -239,8 +216,8 @@ def _overlap(a, b):
 def validate_vehicle_action_keep(name, arguments, state, keep_paths):
     """Reject declared writes to held paths, including no-op writes.
 
-    This does not prove the action preserves state: the actor must also compare
-    the actual private candidate with its accepted keep baseline before commit.
+    This does not prove the action preserves state: the executing device must
+    enforce the accepted keep baseline and return its actual state in the receipt.
     """
     if name not in TOOLS:
         raise ValueError(f'unknown_vehicle_tool: {name}')
@@ -250,7 +227,7 @@ def validate_vehicle_action_keep(name, arguments, state, keep_paths):
         if not isinstance(keep, str) or not keep:
             raise ValueError('invalid_keep_path')
         _value(state, keep)
-    for path in _write_paths(name, arguments, state):
+    for path in action_write_paths(name, arguments, state):
         if any(_overlap(path, keep) for keep in keep_paths):
             raise ValueError(f'keep_path_write_conflict: {path}')
 
@@ -376,32 +353,20 @@ def validate_vehicle_plan(plan, request_text, vehicle, allowed_tools=None, compl
         raise ValueError('missing_clarification_question')
     elif submitted['status'] == 'refused' and (not submitted['reason'].strip() or not any(i['status'] == 'refused' for i in intents)):
         raise ValueError('missing_refusal_reason')
-    candidate = deepcopy(vehicle)
-    keep_before = {path: deepcopy(_value(vehicle, path)) for path in declared_keep}
-    simulations = []
     for action in ordered:
         name, arguments = action['name'], action['arguments']
-        validate_vehicle_action_keep(name, arguments, candidate, declared_keep)
+        validate_vehicle_action_keep(name, arguments, vehicle, declared_keep)
         if name == 'set_navigation_destination' and not destination_grounded(
                 arguments['destination'], [request_text, *_user_history(history, request_text)]):
             raise ValueError('destination_not_in_request: 目的地须逐字取自用户原话，不能改写或补全')
-        outcome = execute_tool(name, arguments, candidate)
-        if not outcome['ok']:
-            raise ValueError(f'simulation_refused: {action["id"]}: {outcome.get("reason")}')
-        if any(_canonical(_value(candidate, path)) != _canonical(value) for path, value in keep_before.items()):
-            raise ValueError('simulation_changed_keep_path')
-        simulations.append({'action_id': action['id'], 'intent_id': action['intent_id'], 'name': name,
-                            'arguments': deepcopy(arguments), 'ok': True, 'simulated': True, 'executed': False,
-                            'value': deepcopy(outcome.get('value'))})
     validated = deepcopy(plan)
     validated.update(submitted, actions=deepcopy(ordered), ok=submitted['status'] == 'planned', executed=False)
     for intent in validated['intents']:
         intent['text'] = intent['source_text']
-    validated['simulation'] = {'executed': False, 'simulated': True, 'actions': simulations,
-                               'final_state': candidate}
     validated['validation'] = {'submitted_action_order': [action['id'] for action in actions],
                                'execution_order': [action['id'] for action in ordered],
-                               'structurally_valid': True, 'source_spans_accounted': not uncovered,
+                               'structurally_valid': True, 'executor_validation_required': True,
+                               'source_spans_accounted': not uncovered,
                                'warnings': [{'code': 'unaccounted_request_text', 'indices': uncovered}] if uncovered else [],
                                'semantic_coverage_proven': False}
     validated['action_ledger'] = [{'action_id': action['id'], 'intent_id': action['intent_id'],
@@ -486,31 +451,28 @@ class VehicleControlPlanner:
                                   'model': model_id, 'thinking': False, 'max_tokens': token_budget,
                                   'messages': messages, 'tools': tools}, call_id=model_call_id, status='running')
             try:
-                returned = await self.ark.complete(deepcopy(messages), deepcopy(tools),
-                                                   model=model_id, thinking=False, max_tokens=token_budget)
-            except asyncio.CancelledError:
+                completed = await complete_model(self.ark, messages, tools,
+                                                 model=model_id, thinking=False, max_tokens=token_budget)
+            except asyncio.CancelledError as exc:
                 emit('model.cancelled', {'plan_call_id': plan_call_id, 'model_call_index': index,
+                                        'partial': deepcopy(getattr(exc, 'trace_partial', None)),
                                         'received_message': False, 'executed': False},
                      call_id=model_call_id, status='cancelled')
                 raise
             except Exception as exc:
                 reason = sanitized_error(exc)
-                emit('model.error', {'plan_call_id': plan_call_id, 'error': reason}, call_id=model_call_id, status='failed')
+                emit('model.error', {'plan_call_id': plan_call_id, 'error': reason,
+                                     'partial': deepcopy(getattr(exc, 'trace_partial', None))},
+                     call_id=model_call_id, status='failed')
                 return finish({'status': 'refused', 'ok': False, 'reason': reason, 'question': '',
                                'intents': [], 'actions': [], 'keep_paths': []})
-            if not isinstance(returned, dict):
-                observations.append({'model_call_id': model_call_id, 'raw_return': deepcopy(returned)})
-                emit('model.error', {'plan_call_id': plan_call_id, 'error': 'invalid_model_message',
-                                     'raw_return': returned}, call_id=model_call_id, status='failed')
-                return finish({'status': 'refused', 'ok': False, 'reason': 'invalid_model_message', 'question': '',
-                               'intents': [], 'actions': [], 'keep_paths': []})
-            raw = deepcopy(returned)
-            message = {key: deepcopy(value) for key, value in returned.items() if key != '_meta'}
+            raw = completed.raw_return
+            message = completed.message
             observations.append({'model_call_id': model_call_id, 'model_call_index': index,
-                                 'message': message, 'meta': deepcopy(returned.get('_meta', {})),
+                                 'message': message, 'meta': deepcopy(completed.metadata),
                                  'raw_return': raw, 'loaded_skills': list(loaded)})
             emit('model.completed', {'plan_call_id': plan_call_id, 'model_call_index': index,
-                                    'message': message, 'meta': returned.get('_meta', {})}, call_id=model_call_id, status='completed')
+                                    'message': message, 'meta': completed.metadata, 'raw_return': raw}, call_id=model_call_id, status='completed')
             messages.append(message)
             calls = message.get('tool_calls') or []
             if not calls:

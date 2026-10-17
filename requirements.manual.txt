@@ -1,3 +1,0 @@
--r requirements.txt
-pypdf>=6,<7
-numpy>=2,<3

@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 import json
 
-from backend.db import Database
+from test_worker import RegisteredDatabase as Database
 from backend.worker import ThinkerWorker
 from test_worker import FakeArk, FakeTavily, message
 
@@ -37,9 +37,10 @@ async def test_resume_keeps_messages_and_sources(tmp_path):
 
 import pytest
 from copy import deepcopy
-from backend.catalog import TOOLS, initial_vehicle_state
-from backend.session import SessionActor
-from backend.vehicle_simulator import VehicleSimulator
+from backend.catalog import TOOLS
+from backend.demo.vehicle_simulator import initial_vehicle_state
+from backend.session import SessionActor, Turn
+from backend.demo.device import VehicleSimulator
 from backend.harness.vehicle_planner import validate_vehicle_plan
 from test_session import FakeArk as TalkerArk, call, wait_for
 from test_audio_session import ControlledArk, StreamingTTS, until
@@ -79,7 +80,7 @@ def test_polite_words_are_warning_not_retry():
     assert result['ok'] and result['validation']['warnings'][0]['code']=='unaccounted_request_text'
 
 
-async def test_parallel_actions_dispatch_before_first_receipt(tmp_path):
+async def test_plan_actions_advance_serially_after_actual_receipts(tmp_path):
     ark=TalkerArk([{'tool_calls':[call('delegate_vehicle_control',{'skill_ids':['mirrors','lights']},'plan')]}])
     planner=FakeVehiclePlanner(plan_response(('set_mirror_heating',{'enabled':True}),('set_interior_light',{'zone':'all','enabled':True})))
     actor=SessionActor('parallel',Database(tmp_path/'parallel.sqlite'),ark,vehicle_planner=planner)
@@ -87,10 +88,20 @@ async def test_parallel_actions_dispatch_before_first_receipt(tmp_path):
         q=await actor.attach(); await q.get()
         await actor.post({'type':'input','text':'打开后视镜加热并打开车内灯'})
         first,_=await wait_for(q,'vehicle.command')
+        await actor.queue.join()
+        assert actor.completed_commands == {}
+        assert not any(event['type'] == 'vehicle.command' for event in q._queue)
+        receipt = await actor.simulator.execute(first['command_id'])
+        await actor.post({'type': 'vehicle.receipt', 'command_id': first['command_id'], 'receipt_id': receipt['receipt_id']})
         second,_=await wait_for(q,'vehicle.command')
         assert first['command_id'] != second['command_id']
-        assert actor.completed_commands == {}
-        assert len(actor.current.vehicle_plans['plan']['in_flight']) == 2
+        assert actor.completed_commands[first['command_id']]['executed'] is True
+        group = actor.current.checkpoint.orchestration.groups[-1]
+        assert len(group.external_pending) == 1 and len(group.plan_receipts) == 1
+        receipt = await actor.simulator.execute(second['command_id'])
+        await actor.post({'type': 'vehicle.receipt', 'command_id': second['command_id'], 'receipt_id': receipt['receipt_id']})
+        await wait_for(q, 'stream.done')
+        assert actor.current.tool_results['plan']['ok'] is True
     finally: await actor.close()
 
 
@@ -134,7 +145,8 @@ async def test_timezone_comes_from_vehicle_settings(tmp_path):
     try:
         await actor.post({'type':'vehicle.configure','settings':{'timezone':'Asia/Shanghai'}})
         await actor.queue.join()
-        assert actor.task_context()['timezone']=='Asia/Shanghai'
+        turn = Turn('fixture', '读取时区', actor.persona, actor.persona_version)
+        assert actor.nlp_start_request(turn).context.environment.timezone == 'Asia/Shanghai'
         before=deepcopy(actor.vehicle)
         await actor.post({'type':'vehicle.configure','settings':{'timezone':'Invalid/Zone'}})
         await actor.queue.join()
@@ -159,7 +171,7 @@ async def test_confirmed_chat_streams_sentence_before_model_end(tmp_path):
     finally: gate.set(); await actor.close()
 
 
-async def test_played_history_is_completed_sentences_only(tmp_path):
+async def test_played_history_preserves_generation_and_marks_only_completed_heard_sentences(tmp_path):
     ark=TalkerArk([{'content':'第一句。第二句。'},{'content':'收到。'}])
     actor=SessionActor('heard',Database(tmp_path/'heard.sqlite'),ark)
     try:
@@ -176,12 +188,15 @@ async def test_played_history_is_completed_sentences_only(tmp_path):
         await wait_for(q,'stream.done')
         heard=[m['content'] for m in ark.requests[-1]['messages'] if m['role']=='assistant' and m.get('content')]
         assert any('第一句。' in text for text in heard)
-        assert not any('第二句。' in text for text in heard)
+        assert any('第一句。第二句。' in text for text in heard)
+        playback = next(message['content'] for message in ark.requests[-1]['messages'] if 'playback_history' in message.get('content', ''))
+        assert '"heard_text":"第一句。"' in playback.replace(' ', '')
+        assert '"status":"partial"' in playback.replace(' ', '')
         assert old.messages[-1]['content']=='第一句。第二句。'
     finally: await actor.close()
 
 
-async def test_dispatch_speaks_before_receipt_and_success_is_silent(tmp_path):
+async def test_tool_only_speech_follows_verified_receipt_without_demo_preface(tmp_path):
     ark=ControlledArk([{'tool_calls':[call('set_window_position',{'window':'driver','position':100},'window')]}])
     tts=StreamingTTS(); actor=SessionActor('dispatch',Database(tmp_path/'dispatch.sqlite'),ark,tts)
     try:
@@ -189,21 +204,24 @@ async def test_dispatch_speaks_before_receipt_and_success_is_silent(tmp_path):
         await actor.post({'type':'audio.configure','enabled':True})
         await actor.post({'type':'input','text':'打开主驾车窗'})
         command,_=await wait_for(q,'vehicle.command')
-        await until(audio,'pcm')
-        assert '正在' in ''.join(tts.calls[0]) and not actor.completed_commands
+        await actor.queue.join()
+        assert not any(tts.calls) and not actor.completed_commands
         receipt=await actor.simulator.execute(command['command_id'])
         await actor.post({'type':'vehicle.receipt','command_id':command['command_id'],'receipt_id':receipt['receipt_id']})
         await wait_for(q,'stream.done'); await actor.queue.join()
+        await until(audio,'audio.ended')
         assert len(tts.calls[0])==1 and actor.vehicle['windows']['positions']['driver']==100
+        assert ''.join(tts.calls[0]) == actor.current.checkpoint.presentation.speech == actor.current.output
         await actor.trace_queue.join()
         traces=actor.db.traces_after(actor.id)
         kinds=[r['kind'] for r in traces]
-        assert kinds.index('vehicle.dispatch_feedback') < kinds.index('vehicle.receipt')
+        assert kinds.index('vehicle.dispatched') < kinds.index('vehicle.receipt') < kinds.index('audio.text')
     finally: await actor.close()
 
 
 async def test_failed_device_receipt_speaks_followup_and_preserves_state(tmp_path):
-    ark=ControlledArk([{'tool_calls':[call('set_window_position',{'window':'driver','position':100},'window')]}])
+    ark=ControlledArk([{'tool_calls':[call('set_window_position',{'window':'driver','position':100},'window')]},
+                       {'content': '车辆正在行驶，车窗没有打开；请先降低车速。'}])
     tts=StreamingTTS(); actor=SessionActor('failure',Database(tmp_path/'failure.sqlite'),ark,tts)
     actor.simulator.execution_ms=0; actor.simulator.network_rtt_ms=0
     try:
@@ -211,8 +229,8 @@ async def test_failed_device_receipt_speaks_followup_and_preserves_state(tmp_pat
         await actor.post({'type':'audio.configure','enabled':True})
         await actor.post({'type':'input','text':'打开主驾车窗'})
         command,_=await wait_for(q,'vehicle.command')
-        await until(audio,'pcm')
-        assert '正在' in ''.join(tts.calls[0])
+        await actor.queue.join()
+        assert not any(tts.calls)
         # Driving begins after dispatch, so only the device can reject this race.
         await actor.post({'type':'vehicle.configure','settings':{'speed_kph':100,'gear':'D'}})
         await actor.queue.join()
@@ -220,7 +238,9 @@ async def test_failed_device_receipt_speaks_followup_and_preserves_state(tmp_pat
         assert receipt['reason_code']=='speed_limit' and receipt['resume_condition']
         await actor.post({'type':'vehicle.receipt','command_id':command['command_id'],'receipt_id':receipt['receipt_id']})
         await wait_for(q,'stream.done'); await until(audio,'audio.ended')
-        assert '抱歉' in ''.join(tts.calls[0]) and actor.vehicle['windows']['positions']['driver']==0
+        assert '车窗没有打开' in ''.join(tts.calls[0]) and actor.vehicle['windows']['positions']['driver']==0
+        assert actor.current.tool_results['window']['executed'] is False
+        assert actor.current.model_calls == 2
     finally: await actor.close()
 
 

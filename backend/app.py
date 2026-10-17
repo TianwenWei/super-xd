@@ -1,3 +1,7 @@
+from backend.local_environment import load_local_environment
+
+load_local_environment()
+
 import asyncio
 from contextlib import asynccontextmanager
 from uuid import uuid4

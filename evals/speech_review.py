@@ -20,6 +20,10 @@ import json
 import sys
 from pathlib import Path
 
+if __name__ == '__main__':
+    from backend.local_environment import load_local_environment
+    load_local_environment()
+
 from backend.models import sanitized_error
 from backend.services.factory import create_llm
 

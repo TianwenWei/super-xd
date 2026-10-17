@@ -10,15 +10,27 @@
 
 ## 启动NLP服务
 
-需要Python 3.12。创建虚拟环境并安装`requirements.txt`，把`.env.example`复制为`.env`，填写模型凭证、`NLP_GATEWAY_URL`及所选检索服务配置。
+需要Python 3.12及uv。`pyproject.toml`是依赖声明，`uv.lock`锁定实际版本。生产仅安装核心依赖，凭证由部署环境注入：
+
+```sh
+uv sync --locked --no-dev
+```
+
+本地验证安装Demo和开发依赖，复制`.env.example`为`.env`后填写凭证：
+
+```sh
+uv sync --locked --extra demo
+```
+
+`.env`只由Demo与命令行工具显式加载；生产入口不会隐式读取工作目录的凭证文件。本地运行生产入口时，可使用uv的显式环境加载参数：
 
 ```sh
 .venv/bin/python -m scripts.validate_prompt_config
 .venv/bin/python -m scripts.validate_service_config
-.venv/bin/python -m uvicorn backend.nlp_app:configured_app --factory --host 127.0.0.1 --port 8001
+uv run --env-file .env --no-sync uvicorn backend.nlp_app:configured_app --factory --host 127.0.0.1 --port 8001
 ```
 
-`/v1/runs/start`与`/v1/runs/resume`返回NDJSON流；`/v1/runs/cancel`取消本实例活动请求。`/v1/tasks/execute`推进Gateway已授权并持有租约的后台任务，`/v1/tasks/mutate`提交reply/update/cancel，`/v1/tasks/present`按真实任务版本生成回流播报和卡片。接口文档在`/docs`，进程版本在`/health/live`。
+`/v1/runs/start`与`/v1/runs/resume`返回NDJSON流；`/v1/runs/cancel`取消本实例活动请求。`/v1/tasks/execute`推进Gateway已授权并持有租约的后台任务，`/v1/tasks/mutate`提交reply/update/cancel，`/v1/tasks/present`按真实任务版本生成回流播报和卡片。接口文档在`/docs`，进程版本在`/health/live`，部署配置与可选Gateway探活在`/health/ready`，运行计数、耗时和模型用量在`/metrics`。未配置探活不会冒充Gateway连通。
 
 Gateway契约为本项目拟定并实现的目标接口，尚待外部联调。NLP入口只对可信内部Gateway开放；checkpoint与原始诊断不能直接暴露给车端。缺配置或凭证明确报错，无伪造执行或静默替代服务。
 
@@ -61,14 +73,17 @@ Demo车辆为模拟；媒体的浏览器播放结果来自真实播放器事件�
 .venv/bin/python -m scripts.validate_service_config
 ```
 
-真实模型评测需要供应商访问权限，会产生调用费用；车辆执行仍由测试模拟：
+评测直接运行生产`NLPService`的start/resume，与Demo共用本地Gateway适配器。设备夹具维护独立状态并返回实际回执，禁止回显NLP预期状态。真实模型评测需要供应商访问权限，会产生调用费用；车辆执行仍由测试模拟：
 
 ```sh
 .venv/bin/python -m evals.harness --repeat 3 --out data/evals/run.json
+.venv/bin/python -m evals.harness --tag general_principles --repeat 3 --out data/evals/principles.json
 .venv/bin/python -m evals.speech_review data/evals/run.json
 ```
 
-评测与服务使用同一份`SERVICES_CONFIG_PATH`、角色模型和profile的`key_env`，报告记录实际配置来源及模型。评测比较结构化调用、参数、结果与人设一致性，报告首句P50/P90和模型调用次数；话术审查只作辅助。本轮结果与评测曾误用凭证的修复说明见[NLP架构文档](docs/NLP_HARNESS.md)。离线合同测试不证明真实模型质量、线上延迟或真车行为；[历史验证记录](docs/VALIDATION.md)不能当作新版本已经通过的结果。
+评测与服务使用同一份`SERVICES_CONFIG_PATH`、角色模型和profile的`key_env`，报告记录实际配置来源及模型。评测比较结构化调用、参数、结果与人设一致性，报告首句P50/P90和模型调用次数；话术审查只作辅助。通用行为集还用独立语义审查核对意图、证据范围和表达；审查失败或缺失不会记为通过。审查模型调用单独统计，不计入生产轮次。离线合同测试不证明真实模型质量、线上延迟或真车行为；[验收方法](docs/VALIDATION.md)列出各层验证边界。
+
+CI包含离线Python/前端检查、核心独立安装与导入边界、渐进类型检查及容器构建。`Dockerfile`只打包NLP核心，默认端口8001；Docker环境可用时执行`docker build -t super-xd-nlp .`。生产任务与诊断传输仍需外部Gateway部署配套。
 
 ## 其他文档
 

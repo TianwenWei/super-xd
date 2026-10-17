@@ -266,3 +266,35 @@ async def test_core_weather_configuration_never_constructs_an_adapter():
     with pytest.raises(RuntimeError) as failure:
         await core._execute_tool('get_weather_forecast', {'city': 'Paris', 'date': '2026-10-17'}, {}, [], [])
     assert str(failure.value) == 'Weather tool is not configured'
+
+
+@pytest.mark.asyncio
+async def test_no_progress_limit_survives_fresh_runner_and_does_not_call_provider_again():
+    store, search, waiting = MemoryTaskStore(), MemorySearch(), asyncio.Event()
+
+    async def blocked(messages):
+        waiting.set()
+        await asyncio.Event().wait()
+
+    first = runner(store, ScriptedModel(message('search_web', {'query': '首次查询'}, 'one'),
+                                        message('search_web', {'query': '改写查询'}, 'two'), blocked), search)
+    execution = asyncio.create_task(first.run_task(await store.read('task')))
+    await asyncio.wait_for(waiting.wait(), 2)
+    execution.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await execution
+    saved = json.loads(json.dumps(store.task))
+    assert len(saved['checkpoint']['retrieval']['records']) == 2
+    resumed = MemoryTaskStore()
+    resumed.task, resumed.events = saved, deepcopy(store.events)
+    fresh_search = MemorySearch()
+    model = ScriptedModel(message('search_web', {'query': '再换一种表述'}, 'three'),
+                          message('extract_web', {'urls': ['https://example.org/source']}, 'read'),
+                          message('finish_task', {'summary': '已读取已有来源，其他内容尚无法确认。'}))
+    await runner(resumed, model, fresh_search).run_task(await resumed.read('task'))
+    assert fresh_search.calls == [('extract', ['https://example.org/source'])]
+    assert resumed.task['status'] == 'completed', (resumed.task.get('error_code'), resumed.task.get('summary'), resumed.events[-3:])
+    rejected = next(json.loads(row['content']) for row in model.messages[1]
+                    if row.get('tool_call_id') == 'three')
+    assert rejected['executed'] is False and rejected['next_step'] == 'answer_with_available_evidence'
+    assert len(resumed.task['checkpoint']['retrieval']['records']) == 3

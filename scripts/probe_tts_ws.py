@@ -1,4 +1,8 @@
 """Live Speech-only V3 streaming probe; never a query-to-browser benchmark."""
+if __name__ == "__main__":
+    from backend.local_environment import load_local_environment
+    load_local_environment()
+
 import argparse
 import asyncio
 from datetime import datetime, timezone
@@ -9,7 +13,6 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from dotenv import load_dotenv
 from backend.tts import VolcanoTTS, XIAOHE_VOICE, TTS_RESOURCE_ID
 from backend.speech_stream import STREAM_TTS_URL
 
@@ -62,7 +65,6 @@ async def main():
     parser.add_argument('--samples', type=int, default=2)
     parser.add_argument('--output', default='docs/tts-ws-live.json')
     args = parser.parse_args()
-    load_dotenv('.env')
     tts = VolcanoTTS(timeout_seconds=15)
     report = {'provider': 'volcengine-speech-tts', 'endpoint': STREAM_TTS_URL,
               'speaker': XIAOHE_VOICE, 'resource': TTS_RESOURCE_ID, 'source': tts.info()['source'],

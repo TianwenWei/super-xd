@@ -1,5 +1,4 @@
 """Read-only car-manual retrieval; model chooses when to use it."""
-from backend.tool_text_config import tool_text
 from backend.speech_config import feedback_text
 import asyncio
 from collections import OrderedDict
@@ -19,16 +18,6 @@ from backend.settings import ROOT
 
 DEFAULT_INDEX = ROOT / 'data/manuals/denza_d9.sqlite3'
 PAGE_IMAGES_PENDING = feedback_text('manual.images_pending')
-MANUAL_TOOLS = [{
-    'type': 'function', 'function': {
-        'name': 'search_manual',
-        'description': tool_text('search_manual.description'),
-        'parameters': {'type': 'object', 'properties': {
-            'query': {'type': 'string', 'minLength': 1, 'maxLength': 800,
-                      'description': tool_text('search_manual.parameters.query.description')},
-            'max_results': {'type': 'integer', 'minimum': 1, 'maximum': 5}},
-            'required': ['query'], 'additionalProperties': False}}}]
-MANUAL_BY_NAME = {tool['function']['name']: tool for tool in MANUAL_TOOLS}
 
 
 def load_index(path):

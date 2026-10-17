@@ -1,4 +1,8 @@
 """Live complex-intent task using vehicle context, update and persona switch."""
+if __name__ == "__main__":
+    from backend.local_environment import load_local_environment
+    load_local_environment()
+
 import asyncio,json,time
 from pathlib import Path
 from scripts.benchmark import Harness

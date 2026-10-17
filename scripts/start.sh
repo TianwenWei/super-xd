@@ -4,7 +4,9 @@ cd "$(dirname "$0")/.."
 if [ ! -x .venv/bin/python ]; then
   if command -v uv >/dev/null 2>&1; then uv venv --python 3.12 .venv; else python3 -m venv .venv; fi
 fi
-if command -v uv >/dev/null 2>&1; then uv pip sync --python .venv/bin/python requirements.lock.txt; else .venv/bin/python -m pip install -r requirements.lock.txt; fi
+# Keep explicitly installed optional adapters (for example local VAD); exact
+# production environments are built separately with uv sync --locked --no-dev.
+if command -v uv >/dev/null 2>&1; then uv pip install --python .venv/bin/python --require-hashes -r requirements.lock.txt; else .venv/bin/python -m pip install --require-hashes -r requirements.lock.txt; fi
 if [ ! -d frontend/node_modules ]; then (cd frontend && npm ci); fi
 mkdir -p data
 api_port="${PORT:-8000}"

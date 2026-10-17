@@ -1,8 +1,8 @@
 # 免按键语音与本地 VAD
 
-页面默认选择免按键持续对话和语音回复；会话与 ASR/TTS/VAD 配置就绪后会自动尝试启动。已有浏览器授权时自动进入，首次麦克风权限或 AudioContext 声音解锁受限时明确显示“进入语音对话”，点击一次在原始手势内申请麦克风并解锁声音。模式意图与实际就绪分开，不能因为默认选择开启就显示已经监听。允许后，助手回复播放期间仍持续上传麦克风 PCM，说话停顿后自动发送。
+页面打开时麦克风关闭。会话与 ASR/TTS/VAD 配置就绪后，点击麦克风一次，在原始手势内申请麦克风并解锁声音，进入免按键持续对话；启动中可再次点击取消，启动失败显示重试入口。模式意图与实际就绪分开，只有采集与监听连接真正就绪才显示持续监听。开启后，助手回复播放期间仍持续上传麦克风 PCM，说话停顿后自动发送，下一轮无需再点击。
 
-再次点击停止图标或“关闭连续语音”会停止监听并释放麦克风；编辑/发送文字只丢弃当前未提交语音片段，监听继续且迟到 final 失效。控制连接断开时释放旧采集，恢复后按原意图重启；显式关闭的模式不会在重连中偷偷开启。语音与朗读偏好存于标签页，新建会话保留选择，无保存记录时默认开启。浏览器暂停采集 context 时会尝试恢复，无法恢复明确显示一键入口。供应商拒绝/鉴权失败明确分类，不自动无限重试；修复服务后可手动重试。
+再次点击同一个麦克风或“关闭连续语音”会停止监听并释放麦克风，未提交片段与迟到 final 都不发送；编辑/发送文字只丢弃当前未提交语音片段，监听继续。控制连接断开时释放旧采集，恢复后仅延续本页已主动开启且未关闭的模式；显式关闭后不会自动重启。朗读偏好存于标签页，麦克风开启状态不持久化，新建会话或刷新后重新点击开启。浏览器暂停采集 context 时会尝试恢复，无法恢复明确显示一键入口。供应商拒绝/鉴权失败明确分类，不自动无限重试；修复服务后可手动重试。
 
 本地运行的是 **Silero VAD v5.1.2 ONNX**，使用 CPU 单线程。ASR、Talker、TTS 继续使用现有火山服务。浏览器通过 `/ws/{session_id}/listen` 持续发送 16kHz / mono / s16le PCM，每帧 512 samples（32ms）；后端在线程中执行推理，每个监听连接独立持有模型循环状态。
 
@@ -19,7 +19,7 @@
 模型保存在 `data/models/silero-vad/silero_vad_v5.onnx`，来源为[官方 v5.1.2 发布版本](https://github.com/snakers4/silero-vad/tree/v5.1.2)，采用 MIT 许可。下载脚本记录来源和 SHA256 到 `data/models/manifest.json`。权重、数据库、运行报告不提交 Git。
 
 ```bash
-uv pip install --python .venv/bin/python -r requirements.local-models.txt
+uv sync --locked --extra demo --extra local-vad
 .venv/bin/python -m scripts.setup_local_models
 .venv/bin/python -m scripts.probe_local_vad
 .venv/bin/python -m scripts.probe_local_vad --live --out data/local-vad-live.json

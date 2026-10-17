@@ -52,7 +52,7 @@ description = "搜索范围：逐字照抄用户说过的城市、地址或地�
 description = "直接查询天气，在本轮返回，不委托后台。location填明确城市及国家（例如巴黎 法国、深圳 中国），不得猜地点。date为today/tomorrow/day_after_tomorrow/now或YYYY-MM-DD；相对日期由工具按目标当地时区解析。仅按明确配置的服务与回退策略查询，并标明实际来源。指定官网核验或复杂调研才delegate_task。"
 
 [start_poi_navigation]
-description = "用户明确要求导航或选择导航候选后，使用本会话search_places返回的place_id启动模拟导航。不可编造ID；仅查询/推荐不能调用。只设置真实POI目的地，不计算路线、距离或到达时间。"
+description = "用户明确要求导航或选择导航候选后，使用本会话search_places返回且先前已展示的place_id请求设备启动导航，实际效果以回执为准。不可编造ID；仅查询/推荐不能调用。只设置真实POI目的地，不计算路线、距离或到达时间。"
 
 [web_search]
 description = "用当前配置的搜索服务直接搜索网页，在本轮回答简单实时事实或用户明确要求的网页搜索。返回搜索摘要、来源URL和查询时间，不代表已读取或核实网页全文。复杂比较、多步调研和指定来源深入核验交给delegate_task；天气用get_weather，地点用search_places。"

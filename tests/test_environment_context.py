@@ -3,10 +3,10 @@ from zoneinfo import ZoneInfoNotFoundError
 
 import pytest
 
-from backend.catalog import initial_vehicle_state
+from backend.demo.vehicle_simulator import initial_vehicle_state
 from backend.environment_context import environment_context
 from backend.settings import environment_defaults
-from backend.vehicle_simulator import VehicleSimulator
+from backend.demo.device import VehicleSimulator
 
 
 def test_default_location_is_user_configuration_not_a_fixed_city(monkeypatch):

@@ -88,5 +88,12 @@ class RunEvent(Contract):
     identity: RunIdentity
     sequence: int = Field(ge=1)
     type: Literal['text.delta', 'model.started', 'model.completed',
-                  'run.suspended', 'run.completed', 'run.cancelled', 'run.failed']
+                  'run.suspended', 'run.completed', 'run.cancelled', 'run.failed', 'policy.rejected']
     data: dict[str, Any] = Field(default_factory=dict)
+
+
+class ToolGroupRejected(ValueError):
+    """A pre-dispatch semantic rejection that the model may repair within budget."""
+    def __init__(self, result: dict[str, Any]):
+        self.result = {**result, 'ok': False, 'executed': False, 'retry_model': True}
+        super().__init__(str(self.result.get('code', 'tool_group_rejected')))

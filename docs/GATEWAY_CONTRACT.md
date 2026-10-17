@@ -1,6 +1,14 @@
 # NLP / Gateway V1契约
 
-这是本项目实现的目标集成契约，尚未经外部Gateway团队确认。Python模型位于`backend/harness/gateway.py`、`contracts.py`、`background.py`、`task_transport.py`；HTTP入口位于`backend/nlp_app.py`。`gateway-v1`是业务协议版本。未知字段、错误类型、非有限数值、无时区时间戳均拒绝。
+这是本项目实现的目标集成契约，尚未经外部Gateway团队确认。wire模型位于`backend/harness/gateway_contracts.py`，内部运行数据在`contracts.py`、策略/诊断端口在`ports.py`，后台请求与任务账本协议在`background.py`、`task_transport.py`；HTTP入口位于`backend/nlp_app.py`。`gateway-v1`是业务协议版本。未知字段、错误类型、非有限数值、无时区时间戳均拒绝。
+
+## 导出可对接的Schema
+
+```sh
+.venv/bin/python -m scripts.export_gateway_contract --out data/contracts/gateway-v1
+```
+
+脚本直接从生产Pydantic模型导出9份独立Draft2020-12 JSON Schema，并逐份校验；不加载配置、凭证或供应商实例。生成物保存在忽略的data目录，不提交Git，可提供给Gateway团队生成客户端/执行契约测试。业务约束与错误/恢复语义仍以本文和实际实现为准。
 
 ## 所有权
 
@@ -16,7 +24,9 @@ Gateway提供原话与事实，不提交system prompt、工具schema或模型参
 
 | 方法/路径 | 请求 | 响应 |
 | --- | --- | --- |
-| GET `/health/live` | 无 | 本进程ready及release/model/semantic policy版本；不表示外部服务健康 |
+| GET `/health/live` | 无 | `{status:"alive"}`，仅进程存活 |
+| GET `/health/ready` | 无 | 本地资源/可选Gateway健康探测及release/model/semantic policy版本；未就绪503 |
+| GET `/metrics` | 无 | 按模型角色聚合的调用、失败/取消、时长和已报告token用量 |
 | POST `/v1/runs/start` | `StartRequest` | NDJSON事件流 |
 | POST `/v1/runs/resume` | `ResumeRequest` | NDJSON事件流 |
 | POST `/v1/runs/cancel` | `{identity}` | 对本实例活动请求返回`{accepted:true}`，不在本实例返回404 |
@@ -24,7 +34,7 @@ Gateway提供原话与事实，不提交system prompt、工具schema或模型参
 | POST `/v1/tasks/mutate` | `TaskMutationRequest` | Gateway确认的最新任务快照 |
 | POST `/v1/tasks/present` | `TaskPresentationRequest` | 按版本/状态核对后的播报与结果卡 |
 
-请求验证失败422；身份/版本/协议冲突409；并发满429；Gateway不可用503；任务HTTP期限504。校验响应不回显完整输入、checkpoint或凭证。默认每进程32并发、8 MiB请求上限、120秒HTTP推进期限；环境配置见[NLP运行说明](NLP_HARNESS.md)。
+请求验证失败422；身份/版本/协议冲突409；并发满429；Gateway不可用503；任务HTTP期限504。校验响应不回显完整输入、checkpoint或凭证。默认每进程32并发、8 MiB HTTP body上限、30秒body接收期限、120秒HTTP推进期限；环境配置见[NLP运行说明](NLP_HARNESS.md)。
 
 响应已经开始时不能再变更HTTP状态码。传输异常使用独立一行`{protocol_version:"gateway-v1",type:"transport.error",identity,error_code,outcome_unknown:true}`结束；它不是Agent完成事件、不是新checkpoint、更不能授权执行。断线会取消本次模型/子调用。Gateway只能依据已经完整接收并原子保存的交接记录处理后续，不因断线自动重新start或执行动作。
 
@@ -46,17 +56,17 @@ Gateway提供原话与事实，不提交system prompt、工具schema或模型参
 | `context` | 版本化事实，revision必须等于identity.context_revision |
 | `budget` | 累计模型数、工具数及模型等待时间上限 |
 
-`context`包含整体revision/observed_at，独立版本的vehicle与capabilities，environment（IANA timezone、带来源location），cockpit领域状态，以及带来源的tasks/places/media。run/task/conversation等通用标识最大128字符，place_ref最大300字符，媒体content_id最大500字符；带时区时间遵循ISO8601。能力列表可包含前台Planner使用的非热车控，不因此扩大Talker固定26工具。
+`context`包含整体revision/observed_at，独立版本的vehicle与capabilities，environment（IANA timezone、带来源location），cockpit领域状态，以及带来源的tasks/places/media。run/task/conversation等通用标识最大128字符，place_ref最大300字符，媒体content_id最大500字符；带时区时间遵循ISO8601。能力列表最多128行，可包含前台Planner使用的非热车控，不因此扩大Talker固定26工具。NLP给Talker的模型副本只展开常驻工具的声明，冷车控按skill列出available/unavailable/missing名称及可用数；完整StartRequest声明仍用于前台动作校验，压缩不授予新能力。
 
 工具能力显式区分`operation=query/control`、`execution_location=cloud/device`、`action`和`content_kind`。部署binding与能力事实必须同时匹配；缺能力不静默改执行位置。媒体/导航状态需要非负version；其字段契约沿用`backend/cockpit/controller.py`的真实状态/回执校验。
 
-历史原生工具组须闭合；最后未完组可标记`pending_tool_group`，编译时剔除。主动任务历史带`source_task`；打断播放带`interrupted_playback/heard_text`，不能把没听到的全文当已告知。POI必须保留provider、source_turn_id、presented_to_user；本轮刚搜到的POI不视为用户选择。媒体ID来源于真实目录/本轮已接受的目录回执，不能来自模型编造URL。
+历史原生工具组须闭合；最后未完组可标记`pending_tool_group`，编译时剔除。主动任务历史带`source_task`。assistant消息保留完整生成内容；`playback_status=unknown/not_started/partial/completed`与`heard_text`独立描述实际播放，默认unknown，not_started不能带非空heard_text。打断另带`interrupted_playback`。模型可用完整生成内容理解追问，但不能把未播出的全文当作已听；未知反馈也不能将答案替换为空。POI必须保留provider、source_turn_id、presented_to_user；本轮刚搜到的POI不视为用户选择。媒体ID来源于真实目录/本轮已接受的目录回执，不能来自模型编造URL。
 
 发生新的用户输入、说话位置或会影响决策的上下文变更时，终止旧决策，使用新身份与新context revision启动新run。resume不能替换原话、上下文或版本。迟到回执只用于审计/刷新下一轮事实，不能重贴新identity后注入新run。
 
 ## 输出、编排与回执
 
-`GatewayOutput`携带原identity与递增sequence；诊断事件也占sequence，所以允许间隙。
+`GatewayOutput`携带原identity与递增sequence；诊断事件也占sequence，所以允许间隙。终态可带`presentation={speech,source}`，与checkpoint中的presentation必须一致；Gateway按identity与sequence去重并原样展示/送TTS。该表达由NLP根据已接受的真实回执和冻结人设生成，不需要Gateway再猜成功或补话术，也不增加模型调用。已有模型预告/最终答案避免重复；未知或取消不生成完成播报。原始模型transcript仍独立保留，闭合工具组的展示话术进入对话历史。
 
 | type | 意义 |
 | --- | --- |
@@ -76,7 +86,7 @@ NLP内部执行`delegate_vehicle_control/delegate_task/manage_task`：前台Plan
 
 `ResumeRequest={protocol_version,identity,checkpoint,observations,cancel}`。`cancel=true`不能同时提交observations。每条observation包含原identity、invocation_id、status、JSON result：
 
-- `completed`：已有确定执行结果；业务失败使用`result.ok=false`。控制成功须有真实执行确认`executed=true`，不能提交仅预检成功的`ok=true`。每个Planner写动作（含最后一步）还须带完整实际`vehicle_state`。媒体/导航控制回执的state.version或state_version须等于命令expected_state_version+1。
+- `completed`：已有确定执行结果；业务失败使用`result.ok=false`。控制成功须有真实执行确认`executed=true`，不能提交仅预检成功的`ok=true`。热车控及每个Planner写动作（含最后一步）还须带完整实际`vehicle_state`；缺完整事实不能判为确定成功。媒体/导航控制回执的state.version或state_version须等于命令expected_state_version+1。
 - `rejected`：确定未执行/被拒绝，不能伪装成功。
 - `unknown`：结果不确定；等待最终真实结果，不重发动作、不让模型猜测。
 
@@ -86,11 +96,21 @@ NLP内部执行`delegate_vehicle_control/delegate_task/manage_task`：前台Plan
 
 ## Checkpoint与预算
 
-checkpoint包含原StartRequest、内部运行状态、子计划/回执账本和三个版本：源码+prompt的`release_id`、实际模型、任务预算及检索提供商配置的`model_policy_id`、业务bindings的`semantic_policy_id`。生产组合根在启动时解析并冻结上述配置、计算版本，任一变化拒绝继续旧checkpoint；部署升级应保留旧版本完成/取消或启动新run，不自动迁移。
+业务协议仍为`gateway-v1`，运行wire checkpoint为`run.checkpoint_version=2`。它包含原StartRequest、本轮新生成消息（不重复固定prompt/schema/history前缀）、预算/sequence、子计划与回执账本。`prepared_digest`绑定完整编译结果；恢复时用原StartRequest与同版本编译器重建前缀并校验摘要，改动原话、事实或工具定义都会拒绝。子编排车况按领域保存相对初始车况的差量。旧checkpoint_version=1不自动迁移。
+
+checkpoint另绑定三个版本：源码+prompt的`release_id`、实际模型、任务预算及检索提供商配置的`model_policy_id`、业务bindings的`semantic_policy_id`。生产组合根在启动时解析并冻结上述配置、计算版本，任一变化拒绝继续旧checkpoint；部署升级应保留旧版本完成/取消或启动新run，不自动迁移。
 
 checkpoint只允许Gateway可信服务器存储回传，不能发给终端UI。内部包含完整上下文。一致性校验不等于数字签名，不能证明任意客户端构造的数据真实性。
 
+大小按紧凑JSON的UTF-8字节计：StartRequest≤6 MiB，checkpoint除start以外≤1 MiB，单批observations≤256 KiB。超限类型校验返回422及start_size_exceeded/checkpoint_size_exceeded/observations_size_exceeded。resume还在接收任何回执前预留其在账本/消息中的空间；不足返回409/checkpoint_size_exceeded，此批回执未被接收。已开始的流若无法构造下一checkpoint，返回transport.error/checkpoint_size_exceeded，不能当作新执行授权。Gateway保留此前已确认交接与真实结果；不因超限重新执行动作。完整provider请求、schema和诊断由独立trace保存，不能静默截断业务事实。HTTP body仍受独立8 MiB默认上限约束。
+
 模型/工具计数与模型等待预算跨resume累计，含前台子计划。HTTP期限独立；Gateway等待设备结果不消耗模型等待预算。后台任务有独立步骤、执行时间、quick查询和收尾预算；所有版本/租约仍需保持。
+
+## 证据与检索收束
+
+NLP在模型结果副本中附加evidence_scope、evidence_refs和retrieval_progress，不改写原始回执。引用由来源ID、版本及内容/范围指纹构成；分数、排序和再次查询时间不算新增证据。范围只说明材料覆盖和粒度，answer_support_assessed=false明确表示未替模型判断答案是否被支持。
+
+前台OrchestrationCheckpoint.retrieval按已接受、确定的检索回执累计，恢复时与原回执账本核对；unknown不计作确定结果。首次空结果允许一次重查，后续无新增证据阻止继续调用同一工具并返回retrieval_progress_exhausted，提示使用已有材料回答。默认每工具最多4次、全部检索最多8次；后台TaskRunner在自己的任务checkpoint保存同一进展模型，并受任务预算共同限制。没有额外自然语言分类器，也不以引用数量证明事实覆盖完整。
 
 ## Gateway任务账本HTTP接口
 
@@ -132,4 +152,4 @@ Gateway拥有任务计时与状态规则：排队时间计入60秒上限，澄�
 1. 用模型替身与MockTransport运行本仓库合同测试，确认完整请求/回执/任务字段。
 2. Gateway实现可信checkpoint存储、完整交接、幂等和租约/CAS；在同一版本跑start→工具→resume及登记→执行→澄清→修订链路。
 3. 接真实工具/设备并覆盖断线、重复/迟到回执、未知结果、取消、能力变化及滚动升级。
-4. 模型权限恢复后跑真实行为评测与延迟报告，再做实际座舱验证。离线替身通过不代表真实执行验收通过。
+4. 按目标部署配置跑重复真实行为评测与延迟报告，再做实际座舱验证。离线替身通过不代表真实执行验收通过。

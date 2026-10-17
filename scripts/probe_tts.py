@@ -1,4 +1,8 @@
 """Real Xiaohe2.0 probe, safe metadata only; never print credential values."""
+if __name__ == "__main__":
+    from backend.local_environment import load_local_environment
+    load_local_environment()
+
 import asyncio
 import hashlib
 import json

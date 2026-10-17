@@ -1,4 +1,8 @@
 """Configured Talker + selected Google Places/Weather with simulated receipts."""
+if __name__ == "__main__":
+    from backend.local_environment import load_local_environment
+    load_local_environment()
+
 import asyncio
 import json
 from contextlib import AsyncExitStack

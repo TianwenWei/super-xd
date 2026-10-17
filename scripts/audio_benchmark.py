@@ -4,6 +4,10 @@ Input is the UI's audio measurement JSON (a list or {records: [...]}); optional
 manifest metadata may label each client_request_id with scenario_id/sample_phase.
 Missing observations and failed attempts remain in the acceptance denominator.
 """
+if __name__ == "__main__":
+    from backend.local_environment import load_local_environment
+    load_local_environment()
+
 import argparse
 import json
 import math

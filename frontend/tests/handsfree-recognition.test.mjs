@@ -85,6 +85,36 @@ test('cancel before microphone permission resolves releases late media and creat
   const permission=deferred(), h=harness({media:()=>permission.promise});
   const start=h.engine.start('session'); h.engine.cancel(); permission.resolve(h.stream); await start;
   assert.equal(h.track.stopped,1); assert.equal(sockets.length,0); assert.equal(contexts[0].state,'closed');
+  assert.equal(h.engine.active,false); assert.equal(h.phases.at(-1),'idle');
+});
+test('cancel during connection closes capture and ignores late socket readiness or speech', async () => {
+  const h=harness(); await h.engine.start('session');
+  const socket=h.socket(), node=h.node();
+  assert.equal(h.phases.at(-1),'connecting');
+  h.engine.cancel('user_cancel');
+  socket.open();
+  socket.message({type:'voice.ready',listen_id:'late-listener'});
+  socket.message({type:'voice.speech_start',listen_id:'late-listener',capture_id:'late-capture'});
+  node.emit({type:'pcm',capture_id:'late-listener',buffer:new ArrayBuffer(1024)});
+  await tick();
+  assert.equal(socket.sent.length,0,'A cancelled connection cannot start a server listener or upload PCM.');
+  assert.equal(h.track.stopped,1); assert.equal(contexts[0].state,'closed');
+  assert.equal(h.engine.active,false); assert.equal(h.phases.at(-1),'idle');
+  assert.deepEqual(h.captures,[]); assert.deepEqual(h.finals,[]); assert.equal(sockets.length,1);
+});
+test('cancel drops both an in-flight final callback and later server packets without restarting capture', async () => {
+  const finalGate=deferred(), h=harness({finalGate}), id=await ready(h), socket=h.socket(), node=h.node();
+  event(h,id,'voice.speech_start'); event(h,id,'voice.speech_end'); event(h,id,'voice.final','a',{text:'pending'});
+  assert.equal(h.phases.at(-1),'finalizing');
+  h.engine.cancel('user_cancel'); finalGate.resolve(); await tick();
+  const sent=socket.sent.length;
+  event(h,id,'voice.final','a',{text:'late'}); event(h,id,'voice.speech_start','late-capture');
+  node.emit({type:'pcm',capture_id:id,buffer:new ArrayBuffer(1024)}); await tick();
+  assert.deepEqual(h.finals,[]); assert.equal(h.engine.active,false); assert.equal(h.phases.at(-1),'idle');
+  assert.equal(h.track.stopped,1); assert.equal(contexts[0].state,'closed');
+  assert.equal(h.records()[0].status,'cancelled'); assert.equal(h.records()[0].reason,'user_cancel');
+  assert.equal(socket.sent.length,sent); assert.equal(sockets.length,1);
+  assert.deepEqual(JSON.parse(socket.sent.at(-1)),{type:'voice.stop',listen_id:id});
 });
 test('backpressure stops microphone and releases the capture without submitting partial text', async () => {
   const h=harness(), id=await ready(h); event(h,id,'voice.speech_start');

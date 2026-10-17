@@ -69,6 +69,32 @@ async def test_pause_resume_stop_exit_seek_volume_and_queue_commands_are_distinc
         state = command['expected']
 
 
+async def test_media_queue_is_explicit_device_payload_and_must_be_actually_confirmed():
+    from backend.demo.cockpit_device import CockpitDevice
+    services = CockpitServices(LocalMediaCatalog(ITEMS))
+    choices = {item['content_id']: item for item in (await services.media.search(kind='music', query='测试乐曲'))['items']}
+    prepared = await prepare_media(services, 'play', {'content_id': 'local:a'}, initial_cockpit_state()['media'], choices)
+    wire = {'command_id': 'play', 'request_id': 'play', 'session_id': 'session', 'turn_id': 'turn',
+            'target_device': 'player', 'kind': 'control', 'domain': 'media', 'action': 'play',
+            'arguments': prepared['arguments'], 'expected_state_version': 0}
+    prepared['wire'] = wire
+    device = CockpitDevice()
+    receipt = device.execute(wire)
+    actual = validated_receipt(prepared, receipt)
+    assert [item['content_id'] for item in actual['queue']] == ['local:a', 'local:b']
+    assert actual['queue'] == device.state['media']['queue'] == wire['arguments']['queue']
+    next_track = await prepare_media(services, 'next', {}, actual, {})
+    assert next_track['arguments']['content_id'] == 'local:b'
+    for queue in ([], [choices['local:b']]):
+        with pytest.raises(CockpitError, match='requested queue'):
+            validated_receipt(prepared, {**receipt, 'state': {**receipt['state'], 'queue': queue}})
+    partial = {key: value for key, value in receipt['state'].items() if key not in {'title', 'queue'}}
+    pause = {'expected': {**actual, 'status': 'paused'}, 'arguments': {},
+             'wire': {'domain': 'media', 'expected_state_version': 1}}
+    observed = validated_receipt(pause, {'state_version': 2, 'state': {**partial, 'status': 'paused'}})
+    assert observed['queue'] == [] and 'title' not in observed
+
+
 def test_provider_scoped_place_identity_and_receipt_itinerary_binding():
     google, amap = scoped_place(PLACE, 'google'), scoped_place(PLACE, 'amap')
     assert google['place_ref'] != amap['place_ref'] and google['place_id'] == amap['place_id']
@@ -221,6 +247,7 @@ async def test_device_places_query_preserves_scope_and_does_not_start_navigation
         async def search_places(self, **arguments): raise AssertionError('must not query cloud')
     actor, queue = await cockpit_actor([{'tool_calls': [call('search_places', {'area':'巴黎','query':'咖啡'})]}])
     actor.maps = DevicePlaces()
+    actor.configure_nlp()
     await actor.post({'type':'input','text':'巴黎找一家咖啡馆'})
     request, _ = await wait_for(queue, 'cockpit.command')
     assert request['kind'] == 'query' and request['domain'] == 'places'
@@ -262,11 +289,12 @@ async def test_same_turn_media_controls_wait_for_each_real_receipt(cockpit_actor
     actor, queue = await cockpit_actor([{'tool_calls':[
         call('control_media',{'action':'play','content_id':'local:a'},id='first'),
         call('control_media',{'action':'pause'},id='second')]}])
-    actor.media_choices = {item['content_id']:item for item in ITEMS[:2]}
+    actor.media_choices = {item['content_id']:item for item in (await actor.cockpit.media.search(kind='music', query='测试乐曲'))['items']}
     await actor.post({'type':'input','text':'播放之后暂停'})
     first, _ = await wait_for(queue,'cockpit.command')
     await actor.queue.join()
-    assert len(actor.pending_cockpit)==1 and len(actor.cockpit_deferred['media'])==1
+    assert len(actor.pending_cockpit)==1
+    assert not any(event['type'] == 'cockpit.command' for event in list(queue._queue))
     await acknowledge(actor,first)
     second, _ = await wait_for(queue,'cockpit.command')
     assert first['action']=='play' and second['action']=='pause' and second['expected_state_version']==1
@@ -542,8 +570,8 @@ async def test_cp_raw_search_diagnostics_never_enter_next_model_request(cockpit_
         assert tool_result['items'][0]['content_id']==broker.scoped_id('music','raw-id')
         await actor.trace_queue.join()
         traces=await asyncio.to_thread(actor.db.traces_after,actor.id)
-        trace=next(row for row in traces if row['kind']=='cockpit.prepared')
-        assert trace['data']['provider_trace']['response']['body']['upstream_request_id']=='raw-response-id'
+        trace=next(row for row in traces if row['kind']=='observations.received')
+        assert trace['data']['observations'][0]['result']['_provider_trace']['response']['body']['upstream_request_id']=='raw-response-id'
 
 
 @pytest.mark.parametrize('version', [None, True, '1', 1.0, 2])
@@ -579,7 +607,7 @@ async def test_unsupported_device_places_query_keeps_terminal_error_and_complete
             self.cloud_calls+=1
             raise AssertionError('No cloud fallback is permitted')
     actor,queue=await cockpit_actor([{'tool_calls':[call('search_places',{'area':'巴黎','query':'公园'})]}, {'content':'这台设备暂时没有地点查询能力。'}])
-    device=DevicePlaces();actor.maps=device
+    device=DevicePlaces();actor.maps=device;actor.configure_nlp()
     await actor.post({'type':'input','text':'帮我找巴黎的公园'})
     request,_=await wait_for(queue,'cockpit.command')
     raw_error={'code':'unsupported_capability','retryable':True,'message':'TECHNICAL_ONLY https://device.example/handler?signature=private-capability','details':{'vendor_code':'missing_places_handler','token':'private-device-token'}}

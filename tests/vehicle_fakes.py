@@ -11,7 +11,7 @@ class FakeVehiclePlanner:
         self.requests = []
 
     async def plan(self, request_text, vehicle, skill_ids, history=None,
-                   completed_operations=None, trace=None, speaker_seat='driver'):
+                   completed_operations=None, trace=None, speaker_seat='driver', capabilities=None):
         self.requests.append(deepcopy({
             "request_text": request_text, "vehicle": vehicle, "skill_ids": skill_ids,
             "history": history, "completed_operations": completed_operations,
@@ -27,6 +27,9 @@ class FakeVehiclePlanner:
             await asyncio.sleep(delay)
         if callable(response):
             response = response(request_text)
+        if trace:
+            trace('model.started', {'agent': 'vehicle_planner', 'messages': [], 'tools': []})
+            trace('model.completed', {'agent': 'vehicle_planner', 'message': {'role': 'assistant', 'content': None}})
         return deepcopy(response)
 
 
@@ -48,7 +51,6 @@ def planned(request_text, operations, *, intent_text=None, keep_paths=(), keep_t
                      "status": "planned", "action_ids": [a["id"] for a in actions],
                      "keep_paths": [], "question": "", "reason": ""}],
         "actions": actions, "keep_paths": list(keep_paths),
-        "simulation": {"executed": False},
     }
     if keep_paths:
         if not keep_text:

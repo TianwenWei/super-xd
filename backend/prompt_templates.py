@@ -8,7 +8,7 @@ from backend.prompt_config import substitute, template_parts
 PROMPT_DIRECTORY = Path(__file__).resolve().parent.parent / 'prompts'
 ROLE_DOCUMENTS = {
     'talker.md': ('# Talker', {
-        'system': {'hot_tool_names', 'skill_index'}, 'persona': {'persona_json'},
+        'system': {'hot_tool_names', 'skill_index'}, 'cold_catalog': {'catalog_json'}, 'persona': {'persona_json'},
         'persona_professional': set(), 'persona_warm': set(), 'persona_playful': set(),
         'history_attribution': {'attribution_json'}, 'current_turn': set(),
         'speaker_context': {'speaker_json'}, 'session_snapshot': {'snapshot_json', 'speaker_name'},
@@ -25,6 +25,7 @@ ROLE_DOCUMENTS = {
 # selected sections, never a whole role document or all persona/mode variants.
 PROMPT_SECTIONS = {
     'talker': ('talker.md', ('system',)),
+    'talker_cold_catalog': ('talker.md', ('cold_catalog',)),
     **{name: ('talker.md', (name,)) for name in (
         'history_attribution', 'current_turn', 'speaker_context', 'session_snapshot',
         'task_snapshot_notice', 'persona', 'persona_professional', 'persona_warm',

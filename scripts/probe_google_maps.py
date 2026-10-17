@@ -3,6 +3,10 @@
 Uses public Paris landmarks, never user location. Saves only selected evidence;
 credentials and authenticated request URLs are never logged.
 """
+if __name__ == "__main__":
+    from backend.local_environment import load_local_environment
+    load_local_environment()
+
 import asyncio
 from datetime import datetime, timedelta, date
 import json

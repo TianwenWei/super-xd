@@ -5,7 +5,8 @@ import json
 
 import pytest
 
-from backend.catalog import HOT_TOOL_NAMES, SKILLS, TOOLS, execute_tool, initial_vehicle_state
+from backend.catalog import HOT_TOOL_NAMES, SKILLS, TOOLS
+from backend.demo.vehicle_simulator import execute_tool, initial_vehicle_state
 from backend.settings import VEHICLE_CONTROL_MODEL
 from backend.harness.vehicle_planner import (VehicleControlPlanner, plan_schema, validate_vehicle_action_keep,
                                      validate_vehicle_plan, _submission_schema as submission_schema,
@@ -78,7 +79,7 @@ def action_names(request):
     return set(submit['function']['parameters']['properties']['actions']['items']['properties']['name']['enum'])
 
 
-async def test_one_pro_submission_returns_bound_plan_and_only_simulates_private_state():
+async def test_one_pro_submission_returns_bound_plan_without_predicting_device_state():
     query = '把所有温区设为23度。'
     state = initial_vehicle_state(); before = deepcopy(state)
     raw = response(temperature_plan(query))
@@ -86,9 +87,10 @@ async def test_one_pro_submission_returns_bound_plan_and_only_simulates_private_
     result = await VehicleControlPlanner(ark).plan(query, state, [], trace=lambda kind, data, **fields: traces.append((kind, data, fields)))
     assert result['status'] == 'planned' and result['ok'] and not result['executed']
     assert result['model_calls'] == 1 and result['loaded_skills'] == []
-    assert state == before and result['simulation']['executed'] is False
-    assert result['simulation']['final_state']['climate']['temperatures'] == {'driver': 23, 'front_passenger': 23, 'rear': 23}
-    assert result['simulation']['actions'][0]['executed'] is False
+    assert state == before and 'simulation' not in result
+    assert result['validation']['executor_validation_required'] is True
+    assert result['action_ledger'] == [{'action_id': 'temperature', 'intent_id': 'temperature',
+                                        'status': 'planned', 'executed': False}]
     assert result['intents'][0]['text'] == query
     assert result['validation']['semantic_coverage_proven'] is False
     assert ark.requests[0]['model'] == VEHICLE_CONTROL_MODEL and ark.requests[0]['thinking'] is False
@@ -203,7 +205,9 @@ def test_dependency_execution_order_is_topological_and_arguments_are_not_rewritt
     original=deepcopy(value);state=initial_vehicle_state()
     result=validate_vehicle_plan(value,query,state)
     assert [a['id'] for a in result['actions']]==['all','rear']
-    assert result['simulation']['final_state']['climate']['temperatures']=={'driver':23,'front_passenger':23,'rear':21}
+    assert [a['arguments'] for a in result['actions']] == [
+        {'zone': 'all', 'temperature': 23}, {'zone': 'rear', 'temperature': 21}]
+    assert 'simulation' not in result
     assert value==original and state['climate']['temperatures']['rear']==22
 
 
@@ -224,10 +228,12 @@ def window_keep_plan():
     return query,value,state
 
 
-def test_declared_keep_path_preserved_at_each_simulated_action():
+def test_declared_keep_path_checked_without_applying_any_action():
     query,value,state=window_keep_plan();before=deepcopy(state)
     result=validate_vehicle_plan(value,query,state)
-    assert state==before and result['simulation']['final_state']['windows']['positions']=={'driver':0,'front_passenger':50,'rear_left':0,'rear_right':0}
+    assert state == before and 'simulation' not in result
+    assert result['keep_paths'] == ['windows.positions.front_passenger']
+    assert [a['arguments']['window'] for a in result['actions']] == ['driver', 'rear_left', 'rear_right']
 
 
 def test_public_action_keep_check_rejects_declared_noop_write_without_mutation():
@@ -282,14 +288,17 @@ def test_keep_paths_reject_overlapping_or_same_value_writes_and_fake_paths(mutat
     with pytest.raises(ValueError):validate_vehicle_plan(value,query,state)
 
 
-def test_simulation_refusal_on_late_action_rejects_entire_group_and_state_stays_original():
+def test_demo_speed_guard_does_not_decide_production_plan_acceptance():
     query='打开空调，并打开尾门。';state=initial_vehicle_state();state['_meta']['speed_kph']=10
     value=plan([intent('both',query,actions=['power','tailgate'])],
               [action('power','both','set_climate_power',{'enabled':True}),
                action('tailgate','both','set_tailgate_open',{'open':True},['power'])])
     before=deepcopy(state)
-    with pytest.raises(ValueError,match='simulation_refused'):validate_vehicle_plan(value,query,state,TOOLS)
-    assert state==before and not state['climate']['power']
+    result = validate_vehicle_plan(value, query, state, TOOLS)
+    assert result['ok'] and not result['executed']
+    assert [a['id'] for a in result['actions']] == ['power', 'tailgate']
+    assert state == before and not state['climate']['power']
+    assert execute_tool('set_tailgate_open', {'open': True}, deepcopy(state))['ok'] is False
 
 
 def test_real_completed_receipt_closes_only_its_bound_intent_and_cannot_be_reexecuted():
@@ -310,12 +319,13 @@ def test_real_completed_receipt_closes_only_its_bound_intent_and_cannot_be_reexe
         with pytest.raises(ValueError):validate_vehicle_plan(bad,query,state,TOOLS,proof)
 
 
-def test_read_plan_uses_actual_snapshot_value_without_generated_answer():
+def test_read_plan_requires_real_receipt_instead_of_returning_snapshot_as_read_result():
     query='主驾车窗现在开到多少？';state=initial_vehicle_state();state['windows']['positions']['driver']=37
     value=plan([intent('read',query,actions=['read'])],[action('read','read','get_window_state',{'window':'driver'})])
     result=validate_vehicle_plan(value,query,state,TOOLS)
-    assert result['simulation']['actions'][0]['value']['position']==37
-    assert result['simulation']['actions'][0]['executed'] is False and state['windows']['positions']['driver']==37
+    assert 'simulation' not in result and 'value' not in result['actions'][0]
+    assert result['action_ledger'][0]['executed'] is False
+    assert state['windows']['positions']['driver'] == 37
 
 
 @pytest.mark.parametrize('status',['clarification','refused'])
@@ -472,13 +482,16 @@ async def test_invalid_skill_inputs_fail_before_any_model_call(skills):
     assert result['status']=='refused' and result['model_calls']==0 and ark.requests==[]
 
 
-def test_latest_actor_snapshot_revalidation_rejects_new_dynamic_safety_condition():
+def test_device_guard_remains_demo_authority_after_snapshot_changes():
     query='打开尾门。';value=plan([intent('tailgate',query,actions=['tailgate'])],
                                [action('tailgate','tailgate','set_tailgate_open',{'open':True})])
     value['loaded_skills']=['tailgate'];stopped=initial_vehicle_state()
     checked=validate_vehicle_plan(value,query,stopped)
     now=deepcopy(stopped);now['_meta']['speed_kph']=20
-    with pytest.raises(ValueError,match='simulation_refused'):validate_vehicle_plan(checked,query,now)
+    refreshed = validate_vehicle_plan(checked, query, now)
+    assert refreshed['ok'] and not refreshed['executed']
+    receipt = execute_tool('set_tailgate_open', {'open': True}, now)
+    assert receipt['ok'] is False and receipt['reason_code'] == 'vehicle_moving'
     assert now['tailgate']['open'] is False
 
 

@@ -15,16 +15,17 @@ from pathlib import Path
 
 MANIFEST_VERSION = 1
 SOURCE_FILES = (
-    'backend/catalog.py', 'backend/environment_context.py', 'backend/maps_tools.py',
-    'backend/manual_embeddings.py', 'backend/manual_search.py', 'backend/model_context.py',
-    'backend/models.py', 'backend/nlp_app.py', 'backend/persona.py', 'backend/prompt_config.py',
-    'backend/prompt_templates.py', 'backend/session.py', 'backend/settings.py',
+    'backend/__init__.py', 'backend/catalog.py', 'backend/environment_context.py',
+    'backend/model_context.py', 'backend/models.py', 'backend/nlp_app.py', 'backend/nlp_settings.py',
+    'backend/persona.py', 'backend/prompt_config.py', 'backend/prompt_templates.py', 'backend/settings.py',
     'backend/speaker.py', 'backend/speech_config.py', 'backend/speech_text.py',
     'backend/task_feedback.py', 'backend/textutil.py', 'backend/tool_text_config.py',
-    'backend/types.py', 'backend/vehicle_feedback.py',
-    'backend/web_search.py', 'backend/worker.py',
+    'backend/types.py', 'backend/google_maps.py', 'backend/weather.py',
+    'backend/services/__init__.py', 'backend/services/config.py', 'backend/services/contracts.py',
+    'backend/services/factory.py', 'backend/services/llm.py', 'backend/services/reads.py', 'backend/services/routes.py',
 )
-SOURCE_DIRECTORIES = ('backend/harness', 'backend/services', 'backend/cockpit')
+SOURCE_DIRECTORIES = ('backend/harness', 'backend/cockpit', 'backend/tool_schemas')
+
 REQUIRED_PROMPTS = ('prompts/talker.md', 'prompts/reasoner_foreground.md',
                     'prompts/reasoner_background.md', 'prompts/talker/examples.json')
 

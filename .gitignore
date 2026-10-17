@@ -13,3 +13,6 @@ __pycache__/
 *.tsbuildinfo
 data/*
 !data/.gitkeep
+
+# Browser screenshots and full trace exports belong to local validation output.
+frontend/validation/

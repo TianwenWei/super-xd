@@ -80,7 +80,6 @@ def test_persona_selects_exactly_one_style_without_changing_configuration(identi
 
 async def test_role_and_mode_requests_do_not_include_other_sections(monkeypatch):
     runtime = import_runtime()
-    monkeypatch.setattr(runtime.session, 'utcnow', runtime.session.utcnow)
     fixed_time = '2026-10-14T12:00:00+00:00'
     requests = {role: await capture_case(runtime, {'id': role, 'role': role, 'text': '离线输入'}, fixed_time)
                 for role in ('talker', 'thinker_quick', 'thinker_research')}

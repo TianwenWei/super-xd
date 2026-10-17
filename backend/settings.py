@@ -1,10 +1,8 @@
 import os
 from pathlib import Path
 from zoneinfo import ZoneInfo
-from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(ROOT / '.env')
 TALKER_MODEL = os.getenv('TALKER_MODEL', 'doubao-seed-2-0-mini-260428')
 THINKER_MODEL = os.getenv('THINKER_MODEL', 'doubao-seed-2-1-pro-260915')
 VEHICLE_CONTROL_MODEL = os.getenv('VEHICLE_CONTROL_MODEL', 'doubao-seed-2-1-pro-260915')

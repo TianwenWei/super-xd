@@ -8,7 +8,7 @@ from backend.session import SessionActor
 
 
 class Ark:
-    async def stream(self, messages, tools):
+    async def stream(self, messages, tools, **options):
         yield {'type':'delta','text':'当前轮次的一句话。'}
         yield {'type':'message','message':{'role':'assistant','content':'当前轮次的一句话。'}}
 

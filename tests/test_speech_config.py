@@ -4,24 +4,20 @@ from pathlib import Path
 
 import pytest
 
-from backend.catalog import TOOLS, execute_tool, initial_vehicle_state
+from backend.catalog import TOOLS
+from backend.demo.vehicle_simulator import execute_tool, initial_vehicle_state
 from backend.persona import PERSONAS, render
 from backend.speech_config import feedback_text, places_sentence, receipt_detail
 from backend.task_feedback import task_user_detail
-from backend.vehicle_feedback import dispatch_feedback
 
 
 @pytest.mark.parametrize('name', tuple(TOOLS))
-def test_receipt_and_dispatch_cover_the_full_vehicle_catalog_without_mutating_receipts(name):
+def test_receipt_templates_cover_the_full_vehicle_catalog_without_mutating_receipts(name):
     arguments = deepcopy(TOOLS[name].example)
     result = execute_tool(name, arguments, initial_vehicle_state())
     before_arguments, before_result = deepcopy(arguments), deepcopy(result)
     if result['ok']:
         assert isinstance(receipt_detail(name, arguments, result), str)
-    acknowledgement = dispatch_feedback(name, arguments)
-    assert isinstance(acknowledgement, str)
-    if TOOLS[name].state_mapping.get('operation') == 'read':
-        assert acknowledgement == ''
     assert arguments == before_arguments and result == before_result
 
 
@@ -30,7 +26,6 @@ def test_rendering_never_reopens_configuration_files(monkeypatch):
         raise AssertionError('Rendering must use the startup text cache')
     monkeypatch.setattr(Path, 'open', forbidden)
     assert receipt_detail('set_window_position', {'window': 'driver', 'position': 50}, {})
-    assert dispatch_feedback('set_temperature', {'zone': 'driver', 'temperature': 23})
     assert task_user_detail({'status': 'running', 'progress': {'phase': 'extract_web', 'read_sources': 2}})
     assert places_sentence(['甲', '乙'])
     for persona in PERSONAS.values():

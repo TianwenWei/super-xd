@@ -7,11 +7,12 @@ import json
 import httpx
 import pytest
 
-from backend.catalog import execute_tool, initial_vehicle_state
+from backend.demo.vehicle_simulator import execute_tool, initial_vehicle_state
 from backend.cockpit import initial_cockpit_state
 from backend.harness.background import (TaskExecutionRequest, TaskMutationRequest, TaskPresentationRequest,
                                        TaskPresentationResult, TaskService)
-from backend.harness.gateway import GatewayOutput, NLPService, ResumeRequest, StartRequest, TaskReference
+from backend.harness.gateway import NLPService
+from backend.harness.gateway_contracts import GatewayOutput, ResumeRequest, StartRequest, TaskReference
 from backend.harness.contracts import ToolObservation
 from backend.harness.product_policy import ProductTalkerPolicy
 from backend.harness.release import get_release_id
@@ -83,7 +84,7 @@ async def outputs(run):
 
 def resume(service, event, result=None, *, status='completed', cancel=False):
     observations = [] if result is None else [ToolObservation(identity=event.identity,
-        invocation_id=event.checkpoint.orchestration.groups[-1].external_pending[0]['request']['invocation_id'],
+        invocation_id=event.checkpoint.orchestration.groups[-1].external_pending[0].request.invocation_id,
         status=status, result=result)]
     supplied = ResumeRequest(identity=event.identity, checkpoint=event.checkpoint, observations=observations, cancel=cancel)
     return service.resume(ResumeRequest.model_validate_json(supplied.model_dump_json()))
@@ -127,8 +128,8 @@ async def test_planner_is_internal_and_actions_advance_only_on_true_receipts():
     assert complete.type == 'run.completed'
     assert len(talker.inputs) == len(planner.inputs) == 1
     group = complete.checkpoint.orchestration.groups[-1]
-    assert len(group.completed_plans[0]['receipts']) == 2
-    assert group.completed_plans[0]['plan']['load_evidence'][0]['skill_id'] == 'mirrors'
+    assert len(group.completed_plans[0].receipts) == 2
+    assert group.completed_plans[0].plan.load_evidence[0]['skill_id'] == 'mirrors'
     assert complete.checkpoint.orchestration.tool_calls == 2
 
 
@@ -183,7 +184,7 @@ async def test_last_planner_write_requires_actual_snapshot_before_completion():
     waiting = (await outputs(resume(service, second, {'ok': True, 'executed': True})))[-1]
     assert waiting.type == 'run.suspended' and waiting.checkpoint.run.status == 'waiting_reconciliation'
     assert not waiting.requests
-    assert waiting.checkpoint.orchestration.groups[-1].vehicle_state == vehicle
+    assert {**input_.context.vehicle.state, **waiting.checkpoint.orchestration.groups[-1].vehicle_state} == vehicle
     execute_tool('set_mirror_fold', {'folded': True}, vehicle)
     done = (await outputs(resume(service, waiting, {'ok': True, 'executed': True, 'vehicle_state': vehicle})))[-1]
     assert done.type == 'run.completed'
@@ -329,8 +330,8 @@ async def test_background_unknown_commit_is_explicit_and_never_retried():
         service = kernel(StreamModel(message('delegate_task', {'goal': '核实信息'})), input_, task_service=tasks)
         failed = (await outputs(service.start(input_)))[-1]
         assert failed.type == 'run.failed' and failed.error_code == 'task_commit_unknown'
-        assert failed.checkpoint.orchestration.groups[-1].task_commit['status'] == 'unknown'
-        assert failed.checkpoint.orchestration.groups[-1].task_commit['task_id'].startswith('task-')
+        assert failed.checkpoint.orchestration.groups[-1].task_commit.status == 'unknown'
+        assert failed.checkpoint.orchestration.groups[-1].task_commit.task_id.startswith('task-')
         assert len(calls) == 1
 
 
@@ -404,3 +405,97 @@ async def test_waiting_confirmation_cannot_execute_or_be_presented_as_a_result()
         with pytest.raises(RunProtocolError, match='confirmation contract'):
             await service.present(TaskPresentationRequest(conversation_id='conversation', task_id='task', revision=1,
                                                          expected_status='awaiting_confirm'))
+
+
+async def test_planned_keep_constraint_is_handed_to_executor_and_checked_against_actual_state():
+    input_ = request(text='加热再折叠后视镜，音量保持不变', tools=[
+        ('set_mirror_heating', {}, 'control', 'device'), ('set_mirror_fold', {}, 'control', 'device')])
+    proposed = planner_submission(input_.user_text)
+    body = json.loads(proposed['tool_calls'][0]['function']['arguments'])
+    body['intents'][0]['source_text'] = '加热再折叠后视镜'
+    body['intents'].append({'id': 'keep', 'source_text': '音量保持不变', 'status': 'keep',
+        'action_ids': [], 'completed_operation_ids': [], 'keep_paths': ['media.volume'], 'question': '', 'reason': ''})
+    body['keep_paths'] = ['media.volume']
+    talker = StreamModel({'tool_calls': [call('delegate_vehicle_control', {'skill_ids': ['mirrors']})]},
+                         {'content': '设备回执显示音量发生变化，已停止后续折叠操作。'})
+    service = kernel(talker, input_, planner=VehicleControlPlanner(CompleteModel(message('submit_vehicle_plan', body))))
+    first = (await outputs(service.start(input_)))[-1]
+    assert first.requests[0].dispatch.execution_constraints == {
+        'keep_baseline': {'media.volume': input_.context.vehicle.state['media']['volume']}}
+    actual = deepcopy(input_.context.vehicle.state)
+    actual['mirrors']['heating'] = True
+    actual['media']['volume'] += 1
+    done = (await outputs(resume(service, first, {'ok': True, 'executed': True, 'vehicle_state': actual})))[-1]
+    assert done.type == 'run.completed' and not done.requests
+    result = next(iter(done.checkpoint.orchestration.groups[0].results.values())).result
+    assert result['code'] == 'keep_constraint_violated' and result['executed'] is True
+    assert result['vehicle_state'] == actual and result['remaining_actions_not_executed'] is True
+
+
+async def test_pending_planner_action_cannot_change_during_restore():
+    input_, talker, planner, service = planned_fixture()
+    first = (await outputs(service.start(input_)))[-1]
+    checkpoint = first.checkpoint.model_copy(deep=True)
+    checkpoint.orchestration.groups[-1].external_pending[0].request.arguments['enabled'] = False
+    with pytest.raises(RunProtocolError, match='differs from the accepted plan'):
+        service.resume(ResumeRequest(identity=input_.identity, checkpoint=checkpoint))
+
+
+async def test_followup_planner_cannot_reissue_an_accepted_hot_operation():
+    start = request(text='音量设为40，然后开启后视镜加热', tools=[
+        ('set_volume', {}, 'control', 'device'), ('set_mirror_heating', {}, 'control', 'device')])
+    class RepeatingPlanner:
+        async def plan(self, text, vehicle, skills, **options):
+            self.operations = options['completed_operations']
+            return {'status': 'planned', 'ok': True, 'executed': False, 'loaded_skills': ['mirrors'],
+                'intents': [{'id': 'whole', 'source_text': text, 'source_start': 0, 'source_end': len(text),
+                    'status': 'planned', 'action_ids': ['repeat', 'heat'], 'keep_paths': [], 'question': '', 'reason': ''}],
+                'actions': [{'id': 'repeat', 'intent_id': 'whole', 'name': 'set_volume',
+                    'arguments': {'volume': 40}, 'depends_on': []},
+                    {'id': 'heat', 'intent_id': 'whole', 'name': 'set_mirror_heating',
+                    'arguments': {'enabled': True}, 'depends_on': ['repeat']}],
+                'keep_paths': [], 'question': '', 'reason': ''}
+    planner = RepeatingPlanner()
+    model = StreamModel({'tool_calls': [call('set_volume', {'volume': 40}, 'volume')]},
+                        {'tool_calls': [call('delegate_vehicle_control', {'skill_ids': ['mirrors']}, 'remaining')]},
+                        {'content': '音量已经设为40；后续计划重复了该动作，没有继续执行。'})
+    service = kernel(model, start, planner=planner, receipt_fast_path=False)
+    first = (await outputs(service.start(start)))[-1]
+    actual = deepcopy(start.context.vehicle.state)
+    execute_tool('set_volume', {'volume': 40}, actual)
+    cockpit_actual = deepcopy(start.context.cockpit['media'])
+    cockpit_actual.update(volume=40, version=1)
+    done = (await outputs(resume(service, first, {'ok': True, 'executed': True, 'vehicle_state': actual,
+        'state': cockpit_actual, 'state_version': 1})))[-1]
+    assert done.type == 'run.completed' and not done.requests
+    assert len(planner.operations) == 1 and planner.operations[0]['arguments'] == {'volume': 40}
+    rejected = next(iter(done.checkpoint.orchestration.groups[-1].results.values())).result
+    assert rejected['code'] == 'vehicle_plan_invalid' and rejected['reason'] == 'already_completed_action'
+    assert rejected['executed'] is False and rejected['receipts'] == []
+
+
+async def test_cancelled_child_partial_is_diagnostic_only_and_redacted():
+    entered = asyncio.Event()
+    class Planner:
+        async def plan(self, *args, **options):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError as error:
+                error.trace_partial = {'late_return': {'content': '过期模型内容', 'token': 'secret-fixture'}}
+                raise
+    class Diagnostics:
+        def __init__(self): self.records = []
+        async def emit(self, record): self.records.append(record)
+    start = request(tools=[('set_mirror_heating', {}, 'control', 'device')])
+    diagnostics = Diagnostics()
+    service = kernel(StreamModel({'tool_calls': [call('delegate_vehicle_control', {'skill_ids': ['mirrors']})]}),
+                     start, planner=Planner(), diagnostics=diagnostics)
+    run = service.start(start)
+    pending = asyncio.create_task(outputs(run))
+    await entered.wait()
+    run.cancel()
+    delivered = await asyncio.wait_for(pending, 1)
+    assert delivered[-1].type == 'run.cancelled' and not any(item.requests or item.text for item in delivered)
+    event = next(record.event for record in diagnostics.records if record.event and record.event.type == 'run.cancelled')
+    assert event.data['partial']['late_return'] == {'content': '过期模型内容', 'token': '[redacted]'}

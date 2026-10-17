@@ -39,7 +39,7 @@ def split_plan(original, definitions):
     return {"ok": True, "status": "planned", "intents": intents, "actions": actions,
             "keep_paths": keeps, "question": "", "reason": "", "plan_call_id": "fake-multi-plan",
             "loaded_skills": list(dict.fromkeys(TOOLS[a["name"]].skill_id for a in actions)),
-            "simulation": {"executed": False}}
+            "executed": False}
 
 
 async def test_fixed_vehicle_talker_schema_cannot_expand_after_any_cold_plan(make_actor):
@@ -53,15 +53,18 @@ async def test_fixed_vehicle_talker_schema_cannot_expand_after_any_cold_plan(mak
     await actor.post({"type": "input", "text": "打开后视镜加热。"})
     await wait_for(q, "stream.done", actor)
     await actor.post({"type": "input", "text": "把后视镜折叠。"})
+    denied, events = await wait_for(q, "stream.done", actor)
+    assert denied['metrics']['error'] == 'unknown_tool'
+    assert not any(event['type'] == 'vehicle.command' for event in events)
+    assert actor.current.checkpoint.run.pending == []
+    await actor.post({"type": "input", "text": "请通过车控规划把后视镜折叠。"})
     done, events = await wait_for(q, "stream.done", actor)
-    assert actor.current.tool_results["cold-direct"]["code"] == "cold_vehicle_requires_delegation"
     assert [e["name"] for e in events if e["type"] == "vehicle.command"] == ["set_mirror_fold"]
     names = [[tool["function"]["name"] for tool in request["tools"]] for request in ark.requests]
     assert all(row == expected_talker_tool_names() and row[:15] == HOT_TOOL_NAMES for row in names)
     assert all(set(row).isdisjoint(COLD_TOOL_NAMES) and "load_skill" not in row for row in names)
-    assert names[0] == names[1] == names[2] and len(planner.requests) == 2
+    assert len(names) == 3 and len(planner.requests) == 2
     assert done["metrics"]["model_calls"] == 2
-
 
 async def test_legacy_load_skill_is_rejected_instead_of_promoting_cold_schemas(make_actor):
     planner = FakeVehiclePlanner(plan_response(("set_mirror_heating", {"enabled": True})))
@@ -70,12 +73,13 @@ async def test_legacy_load_skill_is_rejected_instead_of_promoting_cold_schemas(m
         {"tool_calls": [delegate(["mirrors"])]},
     ], planner)
     await actor.post({"type": "input", "text": "打开后视镜加热。"})
+    denied, events = await wait_for(q, "stream.done", actor)
+    assert denied['metrics']['error'] == 'unknown_tool'
+    assert not any(event['type'] == 'vehicle.command' for event in events)
+    await actor.post({"type": "input", "text": "通过车控规划打开后视镜加热。"})
     _, events = await wait_for(q, "stream.done", actor)
-    assert actor.current.tool_results["legacy"]["executed"] is False
-    assert actor.current.tool_results["legacy"]["code"] == "cold_vehicle_requires_delegation"
     assert [e["name"] for e in events if e["type"] == "vehicle.command"] == ["set_mirror_heating"]
     assert all([t["function"]["name"] for t in request["tools"]] == expected_talker_tool_names() for request in ark.requests)
-
 
 async def test_planner_receives_original_request_latest_snapshot_and_actual_history(make_actor):
     planner = FakeVehiclePlanner(plan_response(("set_mirror_heating", {"enabled": True})))
@@ -85,6 +89,7 @@ async def test_planner_receives_original_request_latest_snapshot_and_actual_hist
     await actor.post({"type": "input", "text": "你好，准备出发。"})
     await wait_for(q, "stream.done")
     actor.vehicle["windows"]["positions"]["front_passenger"] = 37
+    actor.simulator.state = deepcopy(actor.vehicle)
     snapshot = deepcopy(actor.vehicle)
     original = "打开后视镜加热；副驾车窗保持37%，别调整温度。"
     await actor.post({"type": "input", "text": original})
@@ -112,9 +117,14 @@ async def test_mini_mixed_execution_groups_reject_before_any_partial_dispatch(ma
     ], planner)
     await actor.post({"type": "input", "text": "音量设为35，并打开后视镜加热。"})
     _, events = await wait_for(q, "stream.done", actor)
-    expected_code = "cold_vehicle_requires_delegation" if mixed == "cold_and_hot" else "planned_vehicle_group_conflict"
-    assert all(actor.current.tool_results[item["id"]]["code"] == expected_code for item in bad)
-    assert all(actor.current.tool_results[item["id"]]["executed"] is False for item in bad)
+    if mixed == 'cold_and_hot':
+        assert not any(event['type'] == 'vehicle.command' for event in events)
+        assert actor.current.checkpoint.run.error_code == 'unknown_tool'
+        await actor.post({'type': 'input', 'text': '音量设为35，并打开后视镜加热。'})
+        _, events = await wait_for(q, 'stream.done', actor)
+    else:
+        assert all(actor.current.tool_results[item['id']]['code'] == 'planned_vehicle_group_conflict' for item in bad)
+        assert all(actor.current.tool_results[item['id']]['executed'] is False for item in bad)
     assert [e["name"] for e in events if e["type"] == "vehicle.command"] == ["set_volume", "set_mirror_heating"]
     assert len(planner.requests) == 1 and len(ark.requests) == 2
     assert actor.vehicle["media"]["volume"] == 35 and actor.vehicle["mirrors"]["heating"] is True
@@ -130,14 +140,16 @@ async def test_multi_intent_hot_cold_and_keep_have_separate_actual_receipt_state
     actor, q, _ = await make_actor([{"tool_calls": [delegate(["mirrors", "windows", "media"])]}],
                                   FakeVehiclePlanner(plan))
     actor.vehicle["windows"]["positions"]["front_passenger"] = 42
+    actor.simulator.state = deepcopy(actor.vehicle)
     done, events = None, None
     await actor.post({"type": "input", "text": original})
     done, events = await wait_for(q, "stream.done", actor)
     result = actor.current.tool_results["delegate"]
-    assert result["status"] == "completed" and result["executed"] is True
-    assert [intent["status"] for intent in result["intents"]] == ["completed", "kept", "completed"]
-    assert [item["name"] for item in result["action_receipts"]] == ["set_mirror_fold", "set_volume"]
-    assert all(item["result"]["ok"] for item in result["action_receipts"])
+    assert result['ok'] is True and result['executed'] is True
+    accepted = actor.current.checkpoint.orchestration.groups[-1].completed_plans[-1]
+    assert [intent.status for intent in accepted.plan.intents] == ['planned', 'keep', 'planned']
+    assert [item['name'] for item in result['receipts']] == ['set_mirror_fold', 'set_volume']
+    assert all(item['result']['ok'] and item['result']['executed'] for item in result['receipts'])
     assert actor.vehicle["windows"]["positions"]["front_passenger"] == 42
     assert len([e for e in events if e["type"] == "vehicle.command"]) == 2
     for event in events:
@@ -155,17 +167,20 @@ async def test_dependency_is_topologically_ordered_and_only_one_action_is_in_fli
     plan["actions"].reverse()  # The dependency, not provider array order, controls execution.
     actor, q, _ = await make_actor([{"tool_calls": [delegate(["mirrors"])]}], FakeVehiclePlanner(plan))
     actor.vehicle["mirrors"]["folded"] = True
+    actor.simulator.state = deepcopy(actor.vehicle)
     await actor.post({"type": "input", "text": original})
     first, _ = await wait_for(q, "vehicle.command")
     assert first["name"] == "set_mirror_fold"
     await actor.queue.join()
     assert not any(e["type"] == "vehicle.command" for e in q._queue)
     assert actor.vehicle["mirrors"]["folded"] is True
-    await actor.post({"type": "vehicle.execute", "command_id": first["command_id"]})
+    receipt = await actor.simulator.execute(first["command_id"])
+    await actor.post({'type': 'vehicle.receipt', 'command_id': first["command_id"], 'receipt_id': receipt['receipt_id']})
     second, events = await wait_for(q, "vehicle.command")
     assert second["name"] == "set_mirror_angle" and actor.vehicle["mirrors"]["folded"] is False
     assert any(e["type"] == "vehicle.result" and e["command_id"] == first["command_id"] for e in events)
-    await actor.post({"type": "vehicle.execute", "command_id": second["command_id"]})
+    receipt = await actor.simulator.execute(second["command_id"])
+    await actor.post({'type': 'vehicle.receipt', 'command_id': second["command_id"], 'receipt_id': receipt['receipt_id']})
     done, _ = await wait_for(q, "stream.done")
     assert actor.vehicle["mirrors"]["positions"]["left"] == {"horizontal": 5, "vertical": 3}
     assert done["metrics"]["error"] is None
@@ -204,12 +219,18 @@ async def test_entire_plan_is_rejected_before_first_dispatch_for_any_invalid_act
 async def test_planner_timeout_does_not_dispatch_or_claim_execution(make_actor):
     planner = FakeVehiclePlanner((.1, plan_response(("set_mirror_heating", {"enabled": True}))))
     actor, q, _ = await make_actor([{"tool_calls": [delegate(["mirrors"])]}], planner)
-    actor.vehicle_planning_timeout = .01
+    original_start = actor.nlp_start_request
+    def short_budget(turn):
+        value = original_start(turn)
+        value.budget.active_timeout_seconds = .01
+        return value
+    actor.nlp_start_request = short_budget
     before = deepcopy(actor.vehicle)
     await actor.post({"type": "input", "text": "打开后视镜加热。"})
     done, events = await wait_for(q, "stream.done")
     assert actor.vehicle == before and not any(e["type"] == "vehicle.command" for e in events)
-    assert not actor.current.tool_results["delegate"].get("executed")
+    assert actor.current.checkpoint.run.status == 'failed'
+    assert actor.current.checkpoint.run.error_code == 'active_time_budget_exhausted'
     assert "开了" not in done["text"]
 
 
@@ -219,15 +240,16 @@ async def test_plan_read_values_are_actual_executor_values_and_never_fake_talker
         {"tool_calls": [delegate(["windows"])]}, {"content": "主驾车窗开到百分之三十七。"},
     ], planner)
     actor.vehicle["windows"]["positions"]["driver"] = 37
+    actor.simulator.state = deepcopy(actor.vehicle)
     before = deepcopy(actor.vehicle)
     await actor.post({"type": "input", "text": "读一下主驾车窗开度。"})
     done, events = await wait_for(q, "stream.done", actor)
     outer = actor.current.tool_results["delegate"]
-    assert outer["read_results"][0]["result"]["value"]["position"] == 37
+    assert outer["receipts"][0]["result"]["value"]["position"] == 37
     assert actor.vehicle == before and done["text"] == "主驾车窗开到百分之三十七。"
     assert any(e["type"] == "vehicle.result" and e["result"].get("value", {}).get("position") == 37 for e in events)
     assert [c["function"]["name"] for m in actor.history() for c in m.get("tool_calls", [])] == ["delegate_vehicle_control"]
-    assert "read_results" in json.loads(next(m["content"] for m in ark.requests[-1]["messages"] if m.get("tool_call_id") == "delegate"))
+    assert "receipts" in json.loads(next(m["content"] for m in ark.requests[-1]["messages"] if m.get("tool_call_id") == "delegate"))
 
 
 async def test_interrupted_late_plan_never_dispatches_into_new_turn(make_actor):
@@ -256,9 +278,9 @@ async def test_interrupted_late_plan_never_dispatches_into_new_turn(make_actor):
     assert done["turn_id"] != old.id and actor.vehicle["mirrors"]["heating"] is False
     assert not any(e["type"] == "vehicle.command" for e in [*events, *q._queue])
     await actor.trace_queue.join()
-    assert any(e["kind"] in {"vehicle.plan.cancelled", "vehicle.plan.received"} and e.get("status") in {"stale", "cancelled"} or
-               e["kind"] == "tool.error" and e["data"].get("result", {}).get("code") == "vehicle_plan_interrupted"
-               for e in actor.db.traces_after(actor.id))
+    assert old.interrupted and old.audio_cancelled.is_set()
+    assert not any(row['kind'] == 'vehicle.dispatched' and row['turn_id'] == old.id
+                   for row in actor.db.traces_after(actor.id))
 
 
 async def test_completed_hot_operation_is_bound_to_real_receipt_and_not_reexecuted_by_plan(make_actor):
@@ -275,11 +297,17 @@ async def test_completed_hot_operation_is_bound_to_real_receipt_and_not_reexecut
         ])
     planner.responses = [complete_remaining]
     actor, q, ark = await make_actor([
-        # A retryable sibling error returns control to the Talker after the hot receipt.
+        # A real query receipt returns control after the accepted hot action.
         {'tool_calls': [call('set_ambient_light', {'enabled': True}, 'ambient-first'),
-                        call('manage_task', {'action': 'get'}, 'no-task')]},
+                        call('web_search', {'query': '操作参考资料'}, 'query')]},
         {'tool_calls': [delegate(['locks'], 'remaining')]},
     ], planner)
+    class QueryFixture:
+        def info(self): return {'configured': True}
+        async def web_search(self, **arguments): return {'ok': False, 'reason': 'No reference available'}
+        async def aclose(self): pass
+    actor.web = QueryFixture()
+    actor.configure_nlp()
     await actor.post({'type': 'input', 'text': original})
     done, events = await wait_for(q, 'stream.done', actor)
     commands = [e for e in events if e['type'] == 'vehicle.command']
@@ -289,13 +317,14 @@ async def test_completed_hot_operation_is_bound_to_real_receipt_and_not_reexecut
     assert operation['result']['name'] == operation['name'] and operation['result']['arguments'] == operation['arguments']
     assert planner.requests[0]['request_text'] == original and len(ark.requests) == 2
     outer = actor.current.tool_results['remaining']
-    assert outer['intents'][0]['completed_operation_ids'] == [commands[0]['command_id']]
-    assert [intent['status'] for intent in outer['intents']] == ['completed', 'completed']
-    assert [item['name'] for item in outer['action_receipts']] == ['set_child_lock']
+    accepted = actor.current.checkpoint.orchestration.groups[-1].completed_plans[-1].plan
+    assert accepted.intents[0].completed_operation_ids == [commands[0]['command_id']]
+    assert [intent.status for intent in accepted.intents] == ['completed', 'planned']
+    assert [item['name'] for item in outer['receipts']] == ['set_child_lock']
     assert '氛围灯' in done['text'] and '儿童安全锁' in done['text']
 
 
-async def test_preflight_rechecks_latest_vehicle_before_any_action_dispatch(make_actor):
+async def test_device_rechecks_latest_vehicle_when_planner_snapshot_is_stale(make_actor):
     entered, release = asyncio.Event(), asyncio.Event()
     class WaitingPlanner(FakeVehiclePlanner):
         async def plan(self, request_text, vehicle, skill_ids, **kwargs):
@@ -304,16 +333,20 @@ async def test_preflight_rechecks_latest_vehicle_before_any_action_dispatch(make
             assert vehicle['mirrors']['folded'] is False  # Original independent snapshot.
             return planned(request_text, [('set_volume', {'volume': 35}),
                                           ('set_mirror_angle', {'mirror': 'left', 'horizontal': 5, 'vertical': 3})])
-    actor, q, _ = await make_actor([{'tool_calls': [delegate(['media', 'mirrors'])]}], WaitingPlanner())
+    actor, q, _ = await make_actor([{'tool_calls': [delegate(['media', 'mirrors'])]},
+        {'content': '音量已调到35；后视镜处于折叠状态，角度没有调整。'}], WaitingPlanner())
     await actor.post({'type': 'input', 'text': '音量设为35，左后视镜水平调到5、垂直调到3。'})
     await asyncio.wait_for(entered.wait(), 1)
     actor.vehicle['mirrors']['folded'] = True
+    actor.simulator.state = deepcopy(actor.vehicle)
     release.set()
     done, events = await wait_for(q, 'stream.done', actor)
-    assert actor.vehicle['media']['volume'] == 30
-    assert not any(e['type'] == 'vehicle.command' for e in events)
-    assert actor.current.tool_results['delegate']['code'] == 'vehicle_plan_invalid'
-    assert '动作都没有下发' in done['text']
+    assert actor.vehicle['media']['volume'] == 35
+    assert [e['name'] for e in events if e['type'] == 'vehicle.command'] == ['set_volume', 'set_mirror_angle']
+    result = actor.current.tool_results['delegate']
+    assert result['code'] == 'plan_action_failed' and result['executed'] is True
+    assert result['receipts'][0]['result']['ok'] is True and result['receipts'][1]['result']['executed'] is False
+    assert '角度没有调整' in done['text']
 
 
 async def test_failed_actual_action_blocks_its_dependent_without_using_simulated_success(make_actor):
@@ -321,19 +354,23 @@ async def test_failed_actual_action_blocks_its_dependent_without_using_simulated
     plan = planned(original, [('set_window_position', {'window': 'driver', 'position': 80}),
                               ('set_volume', {'volume': 35})])
     plan['actions'][1]['depends_on'] = ['action-1']
-    actor, q, _ = await make_actor([{'tool_calls': [delegate(['windows', 'media'])]}], FakeVehiclePlanner(plan))
+    actor, q, _ = await make_actor([{'tool_calls': [delegate(['windows', 'media'])]},
+        {'content': '车辆正在行驶，车窗未打开，后续音量操作也未执行。'}], FakeVehiclePlanner(plan))
     await actor.post({'type': 'input', 'text': original})
     command, _ = await wait_for(q, 'vehicle.command')
     actor.vehicle['_meta']['speed_kph'] = 90  # State changed after validation but before real execution.
-    await actor.post({'type': 'vehicle.execute', 'command_id': command['command_id']})
+    actor.simulator.state = deepcopy(actor.vehicle)
+    receipt = await actor.simulator.execute(command['command_id'])
+    await actor.post({'type': 'vehicle.receipt', 'command_id': command['command_id'], 'receipt_id': receipt['receipt_id']})
     done, events = await wait_for(q, 'stream.done')
     outer = actor.current.tool_results['delegate']
-    assert outer['ok'] is False and outer['status'] == 'partial' and outer['executed'] is False
-    assert [item['status'] for item in outer['action_receipts']] == ['failed', 'blocked']
-    assert not outer['action_receipts'][0]['result']['ok']
+    assert outer['ok'] is False and outer['executed'] is False
+    assert outer['remaining_actions_not_executed'] is True and len(outer['receipts']) == 1
+    assert not outer['receipts'][0]['result']['ok']
     assert not any(e['type'] == 'vehicle.command' for e in events)
     assert actor.vehicle['windows']['positions']['driver'] == 0 and actor.vehicle['media']['volume'] == 30
-    assert done['metrics']['error'] == 'vehicle_plan_partial'
+    assert done['metrics']['error'] is None
+    assert outer['code'] == 'plan_action_failed'
 
 
 async def test_plan_read_uses_changed_actual_value_instead_of_preflight_simulation(make_actor):
@@ -342,13 +379,16 @@ async def test_plan_read_uses_changed_actual_value_instead_of_preflight_simulati
         {'tool_calls': [delegate(['windows'])]}, {'content': '主驾车窗开到百分之六十一。'},
     ], planner)
     actor.vehicle['windows']['positions']['driver'] = 37
+    actor.simulator.state = deepcopy(actor.vehicle)
     await actor.post({'type': 'input', 'text': '读取主驾车窗开度。'})
     command, _ = await wait_for(q, 'vehicle.command')
     actor.vehicle['windows']['positions']['driver'] = 61
-    await actor.post({'type': 'vehicle.execute', 'command_id': command['command_id']})
+    actor.simulator.state = deepcopy(actor.vehicle)
+    receipt = await actor.simulator.execute(command['command_id'])
+    await actor.post({'type': 'vehicle.receipt', 'command_id': command['command_id'], 'receipt_id': receipt['receipt_id']})
     done, _ = await wait_for(q, 'stream.done')
     outer = actor.current.tool_results['delegate']
-    assert outer['read_results'][0]['result']['value']['position'] == 61
+    assert outer['receipts'][0]['result']['value']['position'] == 61
     assert '六十一' in done['text']
     assert planner.requests[0]['vehicle']['windows']['positions']['driver'] == 37
 
@@ -364,7 +404,8 @@ async def test_interruption_discards_late_receipt_and_cancels_dependent_actions(
     old_turn = actor.current
     await actor.post({'type': 'input', 'text': '停下，聊点别的。'})
     done, _ = await wait_for(q, 'stream.done')
-    await actor.post({'type': 'vehicle.execute', 'command_id': command['command_id']})
+    receipt = await actor.simulator.execute(command['command_id'])
+    await actor.post({'type': 'vehicle.receipt', 'command_id': command['command_id'], 'receipt_id': receipt['receipt_id']})
     await actor.queue.join()
     assert actor.vehicle['mirrors']['folded'] is False and actor.vehicle['mirrors']['heating'] is False
     assert not any(e['type'] in {'vehicle.command', 'vehicle.result'} for e in q._queue)
@@ -401,5 +442,5 @@ async def test_new_delegation_cannot_receive_or_execute_previous_planners_late_r
     assert actor.vehicle['mirrors']['folded'] is True and actor.vehicle['mirrors']['heating'] is False
     assert [e['parent_call_id'] for e in events if e['type'] == 'vehicle.command'] == ['new']
     assert not any(e['type'] == 'vehicle.command' for e in q._queue)
-    assert actor.current.tool_results['new']['status'] == 'completed'
-    assert old_turn.tool_results['old']['status'] == 'interrupted'
+    assert actor.current.tool_results['new']['ok'] is True
+    assert old_turn.interrupted and old_turn.audio_cancelled.is_set()

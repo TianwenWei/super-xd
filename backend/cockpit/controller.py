@@ -109,6 +109,9 @@ def prepare_media_action(action, arguments, state, choices, *, resolved_content=
                         duration_seconds=item.get('duration_seconds'))
         if action == 'play' and identifier in choices:
             expected['queue'] = [deepcopy(item) for item in choices.values() if item['kind'] == expected['kind']]
+        if identifier not in {entry['content_id'] for entry in expected.get('queue', [])}:
+            expected['queue'] = [deepcopy(item)]
+        payload['queue'] = [media_item(entry) for entry in expected['queue']]
     else:
         if action not in {'volume', 'exit'} and not state.get('content_id'):
             raise CockpitError('no_content', 'Player has no content')
@@ -201,6 +204,7 @@ def validated_receipt(command, receipt):
     state = receipt.get('state')
     if not isinstance(state, dict):
         raise CockpitError('device_failed', 'Device did not return actual state')
+    actual = deepcopy(state)
     if command['wire']['domain'] == 'navigation':
         for key in ('mode', 'active', 'destination', 'waypoints', 'origin'):
             if state.get(key) != expected.get(key):
@@ -217,8 +221,16 @@ def validated_receipt(command, receipt):
             if value is not None:
                 if not finite(value) or value < 0 or key == 'volume' and value > 100:
                     raise CockpitError('device_failed', 'Player reported invalid numeric state')
-                expected[key] = value
-        expected['status'] = status
-        expected['focus_reason'] = state.get('focus_reason') if focus_paused else None
-    expected['version'] = version
-    return expected
+        queue = state.get('queue', [])
+        if not isinstance(queue, list) or len(queue) > 100:
+            raise CockpitError('device_failed', 'Invalid actual media queue')
+        queue = [media_item(item) for item in queue]
+        if len({item['content_id'] for item in queue}) != len(queue):
+            raise CockpitError('device_failed', 'Actual queue requires unique content IDs')
+        requested_queue = command.get('arguments', {}).get('queue')
+        if requested_queue is not None and queue != [media_item(item) for item in requested_queue]:
+            raise CockpitError('device_failed', 'Player did not confirm the requested queue')
+        # Expected state validates intent; only device facts advance playback.
+        actual['queue'] = queue
+    actual['version'] = version
+    return actual

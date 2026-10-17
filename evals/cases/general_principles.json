@@ -1,0 +1,713 @@
+[
+  {
+    "id": "principle_explanation_then_explicit_action",
+    "tags": [
+      "general_principles",
+      "authorization",
+      "manual"
+    ],
+    "lookup_fixtures": {
+      "search_manual": [
+        {
+          "ok": true,
+          "kind": "manual",
+          "manual": {
+            "id": "fixture-seat",
+            "title": "座椅功能说明",
+            "version": "2026"
+          },
+          "hits": [
+            {
+              "chunk_id": 11,
+              "page": 8,
+              "text": "前排座椅通风可在座椅设置中开启，共有三档。"
+            }
+          ],
+          "notice": "配置以实际车辆为准"
+        }
+      ]
+    },
+    "turns": [
+      {
+        "input": "座椅通风的开关该怎么用？先教我，不用替我操作。",
+        "expect": {
+          "no_commands": true,
+          "tasks_created": 0,
+          "talker_calls": [
+            {
+              "name": "search_manual"
+            }
+          ],
+          "max_lookup_calls": 1,
+          "response_rubric": [
+            "解释说明书支持的开启方式，不声称已经操作，不擅自增加未返回的按键位置。"
+          ]
+        }
+      },
+      {
+        "input": "说明我明白了，现在请把驾驶位通风开到一档。",
+        "expect": {
+          "commands": [
+            {
+              "name": "set_seat_ventilation",
+              "arguments": {
+                "seat": "driver",
+                "level": 1
+              }
+            }
+          ],
+          "commands_exact": true,
+          "tasks_created": 0,
+          "response_rubric": [
+            "切换为明确执行请求；执行回执前只预告，不把上轮咨询继续当成拒绝执行的理由。"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "principle_media_advice_does_not_control",
+    "tags": [
+      "general_principles",
+      "authorization"
+    ],
+    "turns": [
+      {
+        "input": "暂停和停止播放有什么区别？我只想了解区别，当前播放先保持。",
+        "expect": {
+          "no_commands": true,
+          "tasks_created": 0,
+          "forbid_talker_calls": [
+            "control_playback",
+            "play_media",
+            "delegate_vehicle_control",
+            "delegate_task"
+          ],
+          "max_lookup_calls": 1,
+          "response_rubric": [
+            "简洁解释暂停保留进度与停止的区别，不主动改变播放状态，也不声称已暂停。"
+          ],
+          "cockpit_commands": [],
+          "cockpit_commands_exact": true
+        }
+      }
+    ]
+  },
+  {
+    "id": "principle_navigation_options_are_not_destination",
+    "tags": [
+      "general_principles",
+      "authorization",
+      "maps"
+    ],
+    "lookup_fixtures": {
+      "search_places": [
+        {
+          "ok": true,
+          "provider": "fixture",
+          "places": [
+            {
+              "place_id": "park-17",
+              "place_ref": "fixture:park-17",
+              "name": "滨河停车场",
+              "address": "南京滨河路",
+              "provider": "fixture",
+              "location": {
+                "latitude": 32.06,
+                "longitude": 118.79
+              },
+              "coordinate_system": "WGS84"
+            }
+          ]
+        }
+      ]
+    },
+    "turns": [
+      {
+        "input": "查查南京滨河路有哪些停车场，我要先看看选项。",
+        "expect": {
+          "no_commands": true,
+          "tasks_created": 0,
+          "talker_calls": [
+            {
+              "name": "search_places"
+            }
+          ],
+          "forbid_talker_calls": [
+            "start_poi_navigation",
+            "set_navigation_destination",
+            "manage_navigation"
+          ],
+          "max_lookup_calls": 1,
+          "response_rubric": [
+            "展示返回的选项，不自动选择目的地，不编造距离、空位或到达时间。"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "principle_daily_evidence_and_partial_followup",
+    "tags": [
+      "general_principles",
+      "evidence_scope",
+      "playback",
+      "maps"
+    ],
+    "lookup_fixtures": {
+      "get_weather": [
+        {
+          "ok": true,
+          "kind": "weather",
+          "provider": "fixture",
+          "mode": "forecast",
+          "date": "2026-10-17",
+          "timezone": "Asia/Shanghai",
+          "place": {
+            "name": "南京",
+            "country_code": "CN"
+          },
+          "summary": {
+            "min_c": 12,
+            "max_c": 21
+          },
+          "details": {
+            "interval": {
+              "startTime": "2026-10-17T00:00:00+08:00",
+              "endTime": "2026-10-18T00:00:00+08:00"
+            }
+          },
+          "source_url": "https://weather.example.test/daily/nanjing",
+          "notice": "仅提供全天最高最低气温，没有逐小时温度。"
+        }
+      ]
+    },
+    "turns": [
+      {
+        "input": "南京今天傍晚六点有多少度？",
+        "playback": {
+          "status": "partial",
+          "heard_text": "目前只有全天预报。"
+        },
+        "expect": {
+          "no_commands": true,
+          "tasks_created": 0,
+          "talker_calls": [
+            {
+              "name": "get_weather"
+            }
+          ],
+          "max_lookup_calls": 1,
+          "response_rubric": [
+            "明确只有全天预报，不能把21度最高温当作18点温度；可提供全天12到21度作为有范围限定的参考。"
+          ]
+        }
+      },
+      {
+        "input": "刚才你提到的数值具体对应什么时段？",
+        "expect": {
+          "no_commands": true,
+          "tasks_created": 0,
+          "forbid_lookups": [
+            "search_manual",
+            "web_search"
+          ],
+          "max_lookup_calls": 1,
+          "response_rubric": [
+            "追问绑定上一轮天气数据，说明数值属于全天最高最低温；不因用户只听到开头而丢失生成过的答案或转换到其他历史主题。"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "principle_partial_manual_is_not_absence",
+    "tags": [
+      "general_principles",
+      "evidence_scope",
+      "manual"
+    ],
+    "lookup_fixtures": {
+      "search_manual": [
+        {
+          "ok": true,
+          "kind": "manual",
+          "manual": {
+            "id": "fixture-options",
+            "title": "车辆选装说明",
+            "version": "A"
+          },
+          "hits": [
+            {
+              "chunk_id": 9,
+              "page": 4,
+              "text": "本文档列出部分舒适性配置：座椅加热、后排遮阳帘。车辆配置随选装包变化。"
+            }
+          ],
+          "notice": "本次为局部检索结果，非完整配置清单。"
+        }
+      ]
+    },
+    "turns": [
+      {
+        "input": "这辆车是否配有自动泊车？",
+        "expect": {
+          "no_commands": true,
+          "tasks_created": 0,
+          "talker_calls": [
+            {
+              "name": "search_manual"
+            }
+          ],
+          "max_lookup_calls": 2,
+          "response_rubric": [
+            "局部资料未覆盖自动泊车时说明无法确认本车配置，不能说该功能不存在，也不凭别的车型或相近功能推断。"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "principle_forecast_plan_is_not_completed_fact",
+    "tags": [
+      "general_principles",
+      "evidence_scope",
+      "web"
+    ],
+    "lookup_fixtures": {
+      "web_search": [
+        {
+          "ok": true,
+          "kind": "web_search",
+          "provider": "fixture",
+          "evidence": "search_snippets",
+          "results": [
+            {
+              "url": "https://maker.example.test/update",
+              "title": "厂商产品计划公告",
+              "content": "厂商计划在明年第二季度开放远程泊车测试，具体日期和地区待后续公告。目前尚未开放。",
+              "version": "2026-10"
+            }
+          ],
+          "notice": "搜索摘要，未读取完整网页。"
+        }
+      ]
+    },
+    "turns": [
+      {
+        "input": "帮我上网查查这家厂商的远程泊车现在是否开放，什么时候能用？",
+        "expect": {
+          "no_commands": true,
+          "tasks_created": 0,
+          "talker_calls": [
+            {
+              "name": "web_search"
+            }
+          ],
+          "max_lookup_calls": 1,
+          "response_rubric": [
+            "区分目前未开放与未来计划，保留时间和地区尚未确定的限制，不把计划表述为保证交付，也不声称阅读全文。",
+            "资料未明确品牌或车型时保留该主体边界，不把会话车辆或先前话题的实体名称补入公告。"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "principle_no_new_evidence_converges",
+    "tags": [
+      "general_principles",
+      "retrieval_progress",
+      "manual"
+    ],
+    "lookup_fixtures": {
+      "search_manual": [
+        {
+          "ok": true,
+          "kind": "manual",
+          "manual": {
+            "id": "fixture-lighting",
+            "title": "车辆照明说明",
+            "version": "1"
+          },
+          "hits": [
+            {
+              "chunk_id": 20,
+              "page": 6,
+              "text": "阅读灯可通过顶棚开关控制。"
+            }
+          ],
+          "notice": "仅返回相关性排序片段，未证明覆盖全部功能。"
+        }
+      ]
+    },
+    "turns": [
+      {
+        "input": "车内的儿童遗留提醒能设定提醒延迟吗？说明书有写吗？",
+        "expect": {
+          "no_commands": true,
+          "tasks_created": 0,
+          "talker_calls": [
+            {
+              "name": "search_manual"
+            }
+          ],
+          "max_lookup_calls": 2,
+          "response_rubric": [
+            "返回材料没有儿童遗留提醒设置时说明无法确认，不编造设置入口；最多一次查询预告，内部改写重试不反复播报准备动作。"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "principle_unknown_playback_keeps_generated_context",
+    "tags": [
+      "general_principles",
+      "playback",
+      "web"
+    ],
+    "lookup_fixtures": {
+      "web_search": [
+        {
+          "ok": true,
+          "kind": "web_search",
+          "provider": "fixture",
+          "evidence": "search_snippets",
+          "results": [
+            {
+              "url": "https://museum.example.test/hours",
+              "title": "城市科技馆开放公告",
+              "content": "每周二至周日09:30至17:00开放，周一闭馆，法定节假日安排另行公告。"
+            }
+          ],
+          "notice": "搜索摘要，未读取全文。"
+        }
+      ]
+    },
+    "turns": [
+      {
+        "input": "上网查一下城市科技馆一般几点关门？",
+        "playback": {
+          "status": "unknown",
+          "heard_text": ""
+        },
+        "expect": {
+          "no_commands": true,
+          "tasks_created": 0,
+          "talker_calls": [
+            {
+              "name": "web_search"
+            }
+          ],
+          "max_lookup_calls": 1,
+          "response_rubric": [
+            "说明通常17点闭馆，保留周一闭馆或节假日另行公告的适用限制。"
+          ]
+        }
+      },
+      {
+        "input": "你刚才的时间也适用于周一吗？",
+        "expect": {
+          "no_commands": true,
+          "tasks_created": 0,
+          "max_lookup_calls": 1,
+          "response_rubric": [
+            "基于上一轮证据说明周一闭馆，不因为播放状态未知而忘记之前查询的对象或时间，不把未知播放当成用户没有听到。"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "principle_explicit_subject_and_matched_evidence",
+    "tags": [
+      "general_principles",
+      "evidence_scope",
+      "web"
+    ],
+    "lookup_fixtures": {
+      "web_search": [
+        {
+          "ok": true,
+          "kind": "web_search",
+          "provider": "fixture",
+          "evidence": "search_snippets",
+          "results": [
+            {
+              "url": "https://product.example.test/x3",
+              "title": "云峰X3预约充电公告",
+              "content": "云峰X3的预约充电功能已于本月向中国大陆用户开放，其他地区安排尚未公布。",
+              "version": "2026-10"
+            }
+          ],
+          "notice": "搜索摘要，未读取全文。"
+        }
+      ]
+    },
+    "turns": [
+      {
+        "input": "上网查一下云峰X3预约充电现在能用了吗？",
+        "expect": {
+          "no_commands": true,
+          "tasks_created": 0,
+          "talker_calls": [
+            {
+              "name": "web_search"
+            }
+          ],
+          "max_lookup_calls": 1,
+          "response_rubric": [
+            "只将公告结论归于用户询问且资料确认的云峰X3，保留中国大陆用户这一适用范围；不替换成会话车辆，不推断其他车型或地区。"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "principle_requested_subject_missing_in_evidence",
+    "tags": [
+      "general_principles",
+      "evidence_scope",
+      "web"
+    ],
+    "lookup_fixtures": {
+      "web_search": [
+        {
+          "ok": true,
+          "kind": "web_search",
+          "provider": "fixture",
+          "evidence": "search_snippets",
+          "results": [
+            {
+              "url": "https://product.example.test/booking",
+              "title": "预约充电功能公告",
+              "content": "预约充电功能已向部分车型开放，本摘要没有列出具体适用车型。",
+              "version": "2026-10"
+            }
+          ],
+          "notice": "搜索摘要，未读取全文，未确认适用车型。"
+        }
+      ]
+    },
+    "turns": [
+      {
+        "input": "帮我上网确认云峰X3的预约充电功能开放了吗？",
+        "expect": {
+          "no_commands": true,
+          "tasks_created": 0,
+          "talker_calls": [
+            {
+              "name": "web_search"
+            }
+          ],
+          "max_lookup_calls": 1,
+          "response_rubric": [
+            "说明资料没有确认适用车型，不能据此确认云峰X3已开放；用户提到的目标车型和搜索词不构成资料适用性证明，也不改答会话车辆。"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "principle_hot_cold_batch_uses_one_route",
+    "tags": [
+      "general_principles",
+      "capability_semantics",
+      "planner"
+    ],
+    "turns": [
+      {
+        "input": "将主驾座椅通风调至二档，同时把外后视镜收起来。",
+        "expect": {
+          "commands": [
+            {
+              "name": "set_seat_ventilation",
+              "arguments": {
+                "seat": "driver",
+                "level": 2
+              }
+            },
+            {
+              "name": "set_mirror_fold",
+              "arguments": {
+                "folded": true
+              }
+            }
+          ],
+          "commands_exact": true,
+          "tasks_created": 0,
+          "max_lookup_calls": 0,
+          "response_rubric": [
+            "预告与实际功能一致；混合常驻与冷能力应整体委托，不分成独立热控制与委托，也不以其他功能替代。"
+          ],
+          "talker_calls": [
+            {
+              "name": "delegate_vehicle_control"
+            }
+          ],
+          "forbid_talker_calls": [
+            "set_seat_ventilation"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "principle_distinct_cold_skills_keep_both_functions",
+    "tags": [
+      "general_principles",
+      "capability_semantics",
+      "planner"
+    ],
+    "turns": [
+      {
+        "input": "方向盘加热和后风挡除雾一起打开。",
+        "expect": {
+          "commands": [
+            {
+              "name": "set_steering_heating",
+              "arguments": {
+                "enabled": true
+              }
+            },
+            {
+              "name": "set_rear_defrost",
+              "arguments": {
+                "enabled": true
+              }
+            }
+          ],
+          "commands_exact": true,
+          "tasks_created": 0,
+          "max_lookup_calls": 0,
+          "response_rubric": [
+            "保留两个不同子系统的明确功能，不把加热与除雾映射为开空调、调温度或座椅加热；实际回执前不声称已完成。"
+          ],
+          "talker_calls": [
+            {
+              "name": "delegate_vehicle_control"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "principle_neighboring_lock_functions_stay_distinct",
+    "tags": [
+      "general_principles",
+      "capability_semantics",
+      "planner"
+    ],
+    "turns": [
+      {
+        "input": "把后窗的控制锁启用，后车门的儿童安全锁别改。",
+        "expect": {
+          "commands": [
+            {
+              "name": "set_window_child_lock",
+              "arguments": {
+                "enabled": true
+              }
+            }
+          ],
+          "commands_exact": true,
+          "tasks_created": 0,
+          "max_lookup_calls": 0,
+          "response_rubric": [
+            "区分后窗控制锁与后车门儿童安全锁，话术和调用均只启用前者，保持项不能被当成开启或关闭请求。"
+          ],
+          "talker_calls": [
+            {
+              "name": "delegate_vehicle_control"
+            }
+          ],
+          "unchanged": [
+            "locks.child_lock.left",
+            "locks.child_lock.right"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "principle_current_speaker_rebinds_self_reference",
+    "tags": [
+      "general_principles",
+      "speaker_binding"
+    ],
+    "turns": [
+      {
+        "speaker_seat": "rear_right",
+        "input": "我这张座椅的加热开一档。",
+        "expect": {
+          "commands": [
+            {
+              "name": "set_seat_heating",
+              "arguments": {
+                "seat": "rear_right",
+                "level": 1
+              }
+            }
+          ],
+          "commands_exact": true,
+          "tasks_created": 0,
+          "max_lookup_calls": 0,
+          "response_rubric": [
+            "未指定其他对象的自身座椅绑定本轮右后排音区，预告和执行位置一致。"
+          ]
+        }
+      },
+      {
+        "speaker_seat": "front_passenger",
+        "input": "我这边加热设成三档。",
+        "expect": {
+          "commands": [
+            {
+              "name": "set_seat_heating",
+              "arguments": {
+                "seat": "front_passenger",
+                "level": 3
+              }
+            }
+          ],
+          "commands_exact": true,
+          "tasks_created": 0,
+          "max_lookup_calls": 0,
+          "response_rubric": [
+            "换说话人后，自指绑定本轮副驾座椅，不能沿用上一轮右后排对象。"
+          ],
+          "unchanged": [
+            "seats.positions.rear_right.heating"
+          ]
+        }
+      },
+      {
+        "speaker_seat": "driver",
+        "input": "刚才副驾那张座椅的加热关掉。",
+        "expect": {
+          "commands": [
+            {
+              "name": "set_seat_heating",
+              "arguments": {
+                "seat": "front_passenger",
+                "level": 0
+              }
+            }
+          ],
+          "commands_exact": true,
+          "tasks_created": 0,
+          "max_lookup_calls": 0,
+          "response_rubric": [
+            "本轮明确回指副驾时保留该目标，不能因为当前音区变成主驾就覆盖明确对象。"
+          ],
+          "unchanged": [
+            "seats.positions.driver.heating",
+            "seats.positions.rear_right.heating"
+          ]
+        }
+      }
+    ]
+  }
+]

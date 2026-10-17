@@ -143,7 +143,7 @@ async def test_bad_second_call_prevents_entire_group_from_being_exposed():
     run = AgentRun(prepared(), ScriptedModel([{'tool_calls': [call('Paris', 'a'), bad]}]))
     events = await collect(run)
     assert not any(event.data.get('requests') for event in events)
-    assert events[-1].type == 'run.failed'
+    assert events[-1].type == 'policy.rejected'
 
 
 async def test_product_validation_runs_before_any_request_is_exposed():

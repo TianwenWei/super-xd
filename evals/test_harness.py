@@ -29,7 +29,7 @@ def test_persona_signature_uses_number_value_but_keeps_boolean_and_strings_disti
 
 def test_cases_load_with_unique_ids_and_known_expectations():
     known = {'commands', 'commands_exact', 'no_commands', 'forbid_commands', 'talker_calls', 'talker_call_options',
-             'forbid_talker_calls', 'forbid_lookups', 'no_talker_calls', 'state', 'unchanged', 'tasks_created', 'route', 'allow_error', 'manual_pages_any', 'cockpit_commands', 'cockpit_commands_exact', 'cockpit_state', 'model_calls'}
+             'forbid_talker_calls', 'forbid_lookups', 'no_talker_calls', 'state', 'unchanged', 'tasks_created', 'route', 'allow_error', 'manual_pages_any', 'cockpit_commands', 'cockpit_commands_exact', 'cockpit_state', 'model_calls', 'talker_model_calls', 'max_lookup_calls', 'response_rubric'}
     cases = load_cases()
     assert len(cases) >= 20
     for case in cases:
@@ -79,7 +79,7 @@ async def test_runner_drives_simulated_device_and_checks_persona_invariance():
         def __init__(self):
             self.inner = None
 
-        async def stream(self, messages, tools):
+        async def stream(self, messages, tools, **options):
             async for item in FakeArk([{'tool_calls': [call('set_volume', {'volume': 35})]}]).stream(messages, tools):
                 yield item
 
@@ -150,41 +150,26 @@ async def test_runner_assigns_stable_task_aliases_without_mutating_shared_cases(
             'tasks': [{'goal': '第一个任务'}, {'goal': '第二个任务'}],
             'turns': [{'input': '取消第一个任务', 'expect': {}}]}
     archive = deepcopy(case)
-
-    async def drive(actor, outgoing, text):
-        task_id = actor.task_list()[0]['id']
+    async def drive(gateway, spec, persona, speaker_seat):
+        task_id = next(iter(gateway.ledger.tasks))
         return observed(talker_calls=[{'name': 'manage_task', 'arguments': {'action': 'cancel', 'task_id': task_id}}])
-
-    monkeypatch.setattr(harness, '_drive_turn', drive)
+    monkeypatch.setattr(harness.EvaluationGateway, 'turn', drive)
     results = await run_all([case], FakeArk([]), repeat=2)
     assert case == archive
     assert all(result['passed'] for result in results)
-    assert len({next(iter(result['task_id_aliases'])) for result in results}) == 4
     assert all(persona_signature(result) == persona_signature(results[0]) for result in results)
 
 
-async def test_created_task_aliases_follow_creating_calls_despite_reversed_receipt_order():
-    calls = [call('delegate_task', {'goal': 'first'}, id='call-first'),
-             call('delegate_task', {'goal': 'second'}, id='call-second')]
-    turn = SimpleNamespace(id='turn', messages=[{'role': 'assistant', 'tool_calls': calls}], tool_results={
-        'call-second': {'ok': True, 'task': {'id': 'task-second'}},
-        'call-first': {'ok': True, 'task': {'id': 'task-first'}},
-    })
 
-    async def post(event):
-        pass
+async def test_created_task_aliases_follow_registration_order_with_duplicate_goals():
+    calls = [call('delegate_task', {'goal': 'same'}, id='call-first'),
+             call('delegate_task', {'goal': 'same'}, id='call-second')]
+    case = {'id': 'two-tasks', 'turns': [{'input': '分别登记两项调研', 'expect': {'tasks_created': 2}}]}
+    result = await harness.run_case(case, FakeArk([{'tool_calls': calls}]), planner=FakeVehiclePlanner())
+    assert result['passed'], result['turns']
+    assert list(result['task_id_aliases'].values()) == ['created:0:0', 'created:0:1']
+    assert len(result['task_id_aliases']) == 2
 
-    actor = SimpleNamespace(vehicle={}, post=post, turns=[turn], cockpit=None, cockpit_state={})
-    outgoing = asyncio.Queue()
-    for event in [
-        {'type': 'turn.started', 'turn_id': 'turn'},
-        {'type': 'ui.card', 'origin_turn_id': 'turn', 'task': {'id': 'task-second'}},
-        {'type': 'ui.card', 'origin_turn_id': 'turn', 'task': {'id': 'task-first'}},
-        {'type': 'stream.done', 'turn_id': 'turn', 'metrics': {}, 'text': ''},
-    ]:
-        outgoing.put_nowait(event)
-    result = await harness._drive_turn(actor, outgoing, '两项调研')
-    assert result['created_task_indices'] == {'task-first': 0, 'task-second': 1}
 
 
 def persona_result(persona, repeat, goal, *, passed=True):
@@ -275,12 +260,14 @@ async def test_cli_returns_failure_status_after_writing_report(monkeypatch, tmp_
     assert report['results'][0]['passed'] is passed
 
 
-@pytest.mark.parametrize('arguments', [['--case', 'missing'], ['--tag', 'missing']])
-async def test_cli_rejects_empty_selection_before_creating_client(monkeypatch, capsys, arguments):
+@pytest.mark.parametrize('arguments,message', [(['--case', 'missing'], 'Unknown eval case IDs: missing'),
+    (['--tag', 'missing'], 'No eval cases matched'),
+    (['--case', 'research', '--case', 'missing'], 'Unknown eval case IDs: missing')])
+async def test_cli_rejects_unknown_ids_and_empty_selection_before_creating_client(monkeypatch, capsys, arguments, message):
     from backend.services import factory
 
     def unexpected_client():
-        pytest.fail('An empty selection must not construct a provider client')
+        pytest.fail('An invalid selection must not construct a provider client')
 
     monkeypatch.delenv('ARK_API_KEY', raising=False)
     monkeypatch.setattr(factory, 'create_llm', unexpected_client)
@@ -288,7 +275,7 @@ async def test_cli_rejects_empty_selection_before_creating_client(monkeypatch, c
     with pytest.raises(SystemExit) as error:
         await harness.main(arguments)
     assert error.value.code == 2
-    assert 'No eval cases matched' in capsys.readouterr().err
+    assert message in capsys.readouterr().err
 
 
 @pytest.mark.parametrize('arguments', [['--repeat', '0'], ['--repeat', '-1'], ['--concurrency', '0']])
@@ -375,34 +362,24 @@ async def test_cli_closes_all_role_providers_when_evaluation_raises(monkeypatch)
     assert closed == [True]
 
 
-async def test_case_report_retains_paginated_trace_after_actor_close(monkeypatch):
-    class FlushEvidenceActor(harness.SessionActor):
-        async def close(self):
-            await super().close()
-            def append_after_flush():
-                with self.db.connection() as connection:
-                    for index in range(501):
-                        self.db._append_trace(connection, self.id, 'fixture.after_close', {'index': index})
-            await asyncio.to_thread(append_after_flush)
-    monkeypatch.setattr(harness, 'SessionActor', FlushEvidenceActor)
+async def test_case_report_retains_full_production_trace_and_device_receipt():
     model = FakeArk([{'content': '这就调整音量。', 'tool_calls': [call('set_volume', {'volume': 35})]}])
     case = {'id': 'trace-control', 'turns': [{'input': '把音量调到35', 'expect': {
         'commands': [{'name': 'set_volume', 'arguments': {'volume': 35}}], 'commands_exact': True}}]}
     result = await harness.run_case(case, model, planner=FakeVehiclePlanner())
-    assert result['passed']
+    assert result['passed'], result['turns']
     records = result['traces']
     assert [row['trace_id'] for row in records] == sorted({row['trace_id'] for row in records})
-    assert len([row for row in records if row['kind'] == 'fixture.after_close']) == 501
-    assert records[-1]['data'] == {'index': 500}
     kinds = [row['kind'] for row in records]
     for kind in ('turn.started', 'model.started', 'model.completed', 'vehicle.dispatched',
                  'vehicle.receipt', 'tool.completed', 'turn.completed'):
         assert kind in kinds
-    assert result['trace_capture'] == {'after_actor_close': True, 'event_count': len(records), 'recording_error': None}
-    assert result['turns'][0]['model_errors'] == []
+    assert result['engine'] == 'NLPService'
+    assert result['trace_capture'] == {'event_count': len(records), 'recording_error': None}
     started = next(row for row in records if row['kind'] == 'model.started')
     assert started['data']['messages'][-1]['content'].endswith('把音量调到35')
     assert started['turn_id'] == result['turns'][0]['turn_id']
+
 
 
 async def test_case_error_trace_retains_provider_cause_partial_and_redacts_custom_key():

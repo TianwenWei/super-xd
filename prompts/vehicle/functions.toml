@@ -6,222 +6,222 @@ name = "空调与空气管理"
 description = "温区温度、风量、送风、内外循环、除雾、空气净化与香氛。"
 
 [functions.get_climate_state]
-description = "读取空调与空气管理全部状态（模拟车控）"
+description = "请求设备读取空调与空气管理全部状态"
 
 [functions.set_climate_power]
-description = "开启或关闭空调电源（模拟车控）"
+description = "请求设备开启或关闭空调电源"
 
 [functions.set_climate_power.parameters]
 enabled = "是否开启"
 
 [functions.set_temperature]
-description = "设置温区目标温度，单位摄氏度，自动打开空调（模拟车控）"
+description = "请求设备设置温区目标温度，单位摄氏度，自动打开空调"
 
 [functions.set_temperature.parameters]
 zone = "温区：全部=all，主驾/左前=driver，副驾/右前=front_passenger，后排=rear"
 temperature = "目标摄氏温度"
 
 [functions.adjust_temperature]
-description = "相对调高或调低温区温度，自动打开空调，超范围拒绝整条指令（模拟车控）"
+description = "请求设备相对调高或调低温区温度，自动打开空调，超范围拒绝整条指令"
 
 [functions.adjust_temperature.parameters]
 zone = "温区：全部=all，主驾/左前=driver，副驾/右前=front_passenger，后排=rear"
 delta = "摄氏温度变化量"
 
 [functions.set_fan_speed]
-description = "设置空调风量，0关闭风机，7最大（模拟车控）"
+description = "请求设备设置空调风量，0关闭风机，7最大"
 
 [functions.set_fan_speed.parameters]
 level = "风量档位"
 
 [functions.adjust_fan_speed]
-description = "相对调整空调风量（模拟车控）"
+description = "请求设备相对调整空调风量"
 
 [functions.adjust_fan_speed.parameters]
 delta = "变化档数"
 
 [functions.set_airflow_mode]
-description = "设置吹面、吹脚、挡风除雾或混合送风（模拟车控）"
+description = "请求设备设置吹面、吹脚、挡风除雾或混合送风"
 
 [functions.set_airflow_mode.parameters]
 mode = "送风模式"
 
 [functions.set_recirculation]
-description = "设置内循环、外循环或自动循环（模拟车控）"
+description = "请求设备设置内循环、外循环或自动循环"
 
 [functions.set_recirculation.parameters]
 mode = "循环模式"
 
 [functions.set_auto_climate]
-description = "开关自动空调模式（模拟车控）"
+description = "请求设备开关自动空调模式"
 
 [functions.set_auto_climate.parameters]
 enabled = "是否开启"
 
 [functions.set_front_defrost]
-description = "开关前挡风玻璃除雾（模拟车控）"
+description = "请求设备开关前挡风玻璃除雾"
 
 [functions.set_front_defrost.parameters]
 enabled = "是否开启"
 
 [functions.set_rear_defrost]
-description = "开关后挡风玻璃加热除雾（模拟车控）"
+description = "请求设备开关后挡风玻璃加热除雾"
 
 [functions.set_rear_defrost.parameters]
 enabled = "是否开启"
 
 [functions.set_air_purifier]
-description = "开关车内空气净化器（模拟车控）"
+description = "请求设备开关车内空气净化器"
 
 [functions.set_air_purifier.parameters]
 enabled = "是否开启"
 
 [functions.set_fragrance]
-description = "设置香氛浓度，0关闭，3最高（模拟车控）"
+description = "请求设备设置香氛浓度，0关闭，3最高"
 
 [functions.set_fragrance.parameters]
 level = "浓度档位"
 
 [functions.set_humidity]
-description = "设置模拟车内目标相对湿度（模拟车控）"
+description = "请求设备设置车内目标相对湿度。"
 
 [functions.set_humidity.parameters]
 target = "目标湿度百分比"
 
 [functions.set_temperature_unit]
-description = "设置温度显示单位，控制温度仍使用摄氏度（模拟车控）"
+description = "请求设备设置温度显示单位，控制温度仍使用摄氏度"
 
 [functions.set_temperature_unit.parameters]
 unit = "显示单位"
 
 [functions.sync_climate_zones]
-description = "开关温区同步，打开时所有温区跟随主驾温度（模拟车控）"
+description = "请求设备开关温区同步，打开时所有温区跟随主驾温度"
 
 [functions.sync_climate_zones.parameters]
 enabled = "是否同步"
 
 [functions.set_rear_climate_power]
-description = "开关后排独立空调（模拟车控）"
+description = "请求设备开关后排独立空调"
 
 [functions.set_rear_climate_power.parameters]
 enabled = "是否开启"
 
 [functions.get_air_quality]
-description = "读取模拟PM2.5与CO2空气质量数值（模拟车控）"
+description = "请求设备读取PM2.5与CO2空气质量数值；未返回的传感器读数不能推测。"
 
 [skills.seats]
 name = "座椅与舒适"
 description = "四个座位的加热、通风、按摩、位置、记忆与方向盘舒适设置。"
 
 [functions.get_seat_state]
-description = "读取指定座位状态（模拟车控）"
+description = "请求设备读取指定座位状态"
 
 [functions.get_seat_state.parameters]
-seat = "本模拟为左舵车；主驾/左前/left_front=driver，副驾/右前/right_front=front_passenger，左后=rear_left，右后=rear_right"
+seat = "主驾=driver，副驾=front_passenger，左后=rear_left，右后=rear_right；前排物理左右与主副驾的对应以车辆布局事实为准，不猜测左/右舵"
 
 [functions.set_seat_heating]
-description = "设置指定座椅加热，0关闭，3最高（模拟车控）"
+description = "请求设备设置指定座椅加热，0关闭，3最高"
 
 [functions.set_seat_heating.parameters]
-seat = "本模拟为左舵车；主驾/左前/left_front=driver，副驾/右前/right_front=front_passenger，左后=rear_left，右后=rear_right"
+seat = "主驾=driver，副驾=front_passenger，左后=rear_left，右后=rear_right；前排物理左右与主副驾的对应以车辆布局事实为准，不猜测左/右舵"
 level = "档位"
 
 [functions.set_seat_ventilation]
-description = "设置指定座椅通风，0关闭，3最高（模拟车控）"
+description = "请求设备设置指定座椅通风，0关闭，3最高"
 
 [functions.set_seat_ventilation.parameters]
-seat = "本模拟为左舵车；主驾/左前/left_front=driver，副驾/右前/right_front=front_passenger，左后=rear_left，右后=rear_right"
+seat = "主驾=driver，副驾=front_passenger，左后=rear_left，右后=rear_right；前排物理左右与主副驾的对应以车辆布局事实为准，不猜测左/右舵"
 level = "档位"
 
 [functions.set_seat_massage]
-description = "开关指定座椅按摩；开启未指定模式默认舒缓relax，关闭off。与加热、通风独立（模拟车控）"
+description = "请求设备开关指定座椅按摩；开启未指定模式默认舒缓relax，关闭off。与加热、通风独立"
 
 [functions.set_seat_massage.parameters]
-seat = "本模拟为左舵车；主驾/左前/left_front=driver，副驾/右前/right_front=front_passenger，左后=rear_left，右后=rear_right"
+seat = "主驾=driver，副驾=front_passenger，左后=rear_left，右后=rear_right；前排物理左右与主副驾的对应以车辆布局事实为准，不猜测左/右舵"
 mode = "off关闭，relax舒缓/放松，lumbar腰部，wave波浪"
 
 [functions.set_seat_position]
-description = "调节座椅滑轨前后位置、整椅高度、靠背角度或腰托位置；仅fore_aft/height/backrest/lumbar四种轴。主驾停车才可调；靠背80至140度，其余0至100（模拟车控）"
+description = "请求设备调节座椅滑轨前后位置、整椅高度、靠背角度或腰托位置；仅fore_aft/height/backrest/lumbar四种轴。主驾停车才可调；靠背80至140度，其余0至100"
 
 [functions.set_seat_position.parameters]
-seat = "本模拟为左舵车；主驾/左前/left_front=driver，副驾/右前/right_front=front_passenger，左后=rear_left，右后=rear_right"
+seat = "主驾=driver，副驾=front_passenger，左后=rear_left，右后=rear_right；前排物理左右与主副驾的对应以车辆布局事实为准，不猜测左/右舵"
 axis = "座椅轴向，backrest靠背角度80至140度，其余0至100"
 position = "目标位置，需满足轴向范围"
 
 [functions.adjust_seat_position]
-description = "相对调整座椅位置，主驾停车才可调（模拟车控）"
+description = "请求设备相对调整座椅位置，主驾停车才可调"
 
 [functions.adjust_seat_position.parameters]
-seat = "本模拟为左舵车；主驾/左前/left_front=driver，副驾/右前/right_front=front_passenger，左后=rear_left，右后=rear_right"
+seat = "主驾=driver，副驾=front_passenger，左后=rear_left，右后=rear_right；前排物理左右与主副驾的对应以车辆布局事实为准，不猜测左/右舵"
 axis = "座椅轴向，backrest靠背角度80至140度，其余0至100"
 delta = "位置变化量"
 
 [functions.save_seat_memory]
-description = "保存座椅设置到指定记忆槽位（模拟车控）"
+description = "请求设备保存座椅设置到指定记忆槽位"
 
 [functions.save_seat_memory.parameters]
-seat = "本模拟为左舵车；主驾/左前/left_front=driver，副驾/右前/right_front=front_passenger，左后=rear_left，右后=rear_right"
+seat = "主驾=driver，副驾=front_passenger，左后=rear_left，右后=rear_right；前排物理左右与主副驾的对应以车辆布局事实为准，不猜测左/右舵"
 slot = "记忆槽位，1至3"
 
 [functions.recall_seat_memory]
-description = "停车后恢复指定座椅记忆槽位（模拟车控）"
+description = "请求设备停车后恢复指定座椅记忆槽位"
 
 [functions.recall_seat_memory.parameters]
-seat = "本模拟为左舵车；主驾/左前/left_front=driver，副驾/右前/right_front=front_passenger，左后=rear_left，右后=rear_right"
+seat = "主驾=driver，副驾=front_passenger，左后=rear_left，右后=rear_right；前排物理左右与主副驾的对应以车辆布局事实为准，不猜测左/右舵"
 slot = "记忆槽位，1至3"
 
 [functions.set_steering_heating]
-description = "开关方向盘加热（模拟车控）"
+description = "请求设备开关方向盘加热"
 
 [functions.set_steering_heating.parameters]
 enabled = "是否开启"
 
 [functions.set_steering_position]
-description = "停车后调节方向盘伸缩或高度（模拟车控）"
+description = "请求设备停车后调节方向盘伸缩或高度"
 
 [functions.set_steering_position.parameters]
 axis = "伸缩或高度"
 position = "位置百分比"
 
 [functions.set_easy_entry]
-description = "开关座椅迎宾模式（模拟车控）"
+description = "请求设备开关座椅迎宾模式"
 
 [functions.set_easy_entry.parameters]
 enabled = "是否开启"
 
 [functions.set_seat_occupancy]
-description = "模拟指定座椅乘员占用状态，供车控状态验收（模拟车控）"
+description = "仅供模拟或测试环境设置乘员占用状态；不是传感器检测结果，不能证明真实乘员存在。"
 
 [functions.set_seat_occupancy.parameters]
-seat = "本模拟为左舵车；主驾/左前/left_front=driver，副驾/右前/right_front=front_passenger，左后=rear_left，右后=rear_right"
+seat = "主驾=driver，副驾=front_passenger，左后=rear_left，右后=rear_right；前排物理左右与主副驾的对应以车辆布局事实为准，不猜测左/右舵"
 occupied = "是否有人"
 
 [functions.get_seat_memory]
-description = "读取指定座椅记忆槽位（模拟车控）"
+description = "请求设备读取指定座椅记忆槽位"
 
 [functions.get_seat_memory.parameters]
-seat = "本模拟为左舵车；主驾/左前/left_front=driver，副驾/右前/right_front=front_passenger，左后=rear_left，右后=rear_right"
+seat = "主驾=driver，副驾=front_passenger，左后=rear_left，右后=rear_right；前排物理左右与主副驾的对应以车辆布局事实为准，不猜测左/右舵"
 slot = "记忆槽位，1至3"
 
 [functions.set_seat_cushion_length]
-description = "设置座垫长度（模拟车控）"
+description = "请求设备设置座垫长度"
 
 [functions.set_seat_cushion_length.parameters]
-seat = "本模拟为左舵车；主驾/左前/left_front=driver，副驾/右前/right_front=front_passenger，左后=rear_left，右后=rear_right"
+seat = "主驾=driver，副驾=front_passenger，左后=rear_left，右后=rear_right；前排物理左右与主副驾的对应以车辆布局事实为准，不猜测左/右舵"
 position = "目标位置或档位"
 
 [functions.set_seat_side_support]
-description = "设置座椅侧翼支撑档位（模拟车控）"
+description = "请求设备设置座椅侧翼支撑档位"
 
 [functions.set_seat_side_support.parameters]
-seat = "本模拟为左舵车；主驾/左前/left_front=driver，副驾/右前/right_front=front_passenger，左后=rear_left，右后=rear_right"
+seat = "主驾=driver，副驾=front_passenger，左后=rear_left，右后=rear_right；前排物理左右与主副驾的对应以车辆布局事实为准，不猜测左/右舵"
 level = "目标位置或档位"
 
 [functions.set_seat_headrest]
-description = "设置头枕高度（模拟车控）"
+description = "请求设备设置头枕高度"
 
 [functions.set_seat_headrest.parameters]
-seat = "本模拟为左舵车；主驾/左前/left_front=driver，副驾/右前/right_front=front_passenger，左后=rear_left，右后=rear_right"
+seat = "主驾=driver，副驾=front_passenger，左后=rear_left，右后=rear_right；前排物理左右与主副驾的对应以车辆布局事实为准，不猜测左/右舵"
 position = "目标位置或档位"
 
 [skills.windows]
@@ -229,58 +229,58 @@ name = "车窗"
 description = "四门车窗开合百分比、童锁、防夹、天窗、遮阳帘与雨天自动关窗。"
 
 [functions.get_window_state]
-description = "读取指定车窗开度，0全关，100全开（模拟车控）"
+description = "请求设备读取指定车窗开度，0全关，100全开"
 
 [functions.get_window_state.parameters]
-window = "本模拟为左舵车；主驾/左前/left_front车窗=driver，副驾/右前/right_front车窗=front_passenger，左后车窗=rear_left，右后车窗=rear_right"
+window = "主驾车窗=driver，副驾车窗=front_passenger，左后车窗=rear_left，右后车窗=rear_right；前排物理左右以车辆布局事实为准，不猜测左/右舵"
 
 [functions.set_window_position]
-description = "设置单扇车窗开度百分比，0全关，100全开；童锁/高速状态可能拒绝（模拟车控）"
+description = "请求设备设置单扇车窗开度百分比，0全关，100全开；童锁/高速状态可能拒绝"
 
 [functions.set_window_position.parameters]
-window = "本模拟为左舵车；主驾/左前/left_front车窗=driver，副驾/右前/right_front车窗=front_passenger，左后车窗=rear_left，右后车窗=rear_right"
+window = "主驾车窗=driver，副驾车窗=front_passenger，左后车窗=rear_left，右后车窗=rear_right；前排物理左右以车辆布局事实为准，不猜测左/右舵"
 position = "开度百分比"
 
 [functions.adjust_window_position]
-description = "相对调整单扇车窗开度百分比（模拟车控）"
+description = "请求设备相对调整单扇车窗开度百分比"
 
 [functions.adjust_window_position.parameters]
-window = "本模拟为左舵车；主驾/左前/left_front车窗=driver，副驾/右前/right_front车窗=front_passenger，左后车窗=rear_left，右后车窗=rear_right"
+window = "主驾车窗=driver，副驾车窗=front_passenger，左后车窗=rear_left，右后车窗=rear_right；前排物理左右以车辆布局事实为准，不猜测左/右舵"
 delta = "开度变化百分比"
 
 [functions.close_all_windows]
-description = "关闭全部四门车窗（模拟车控）"
+description = "请求设备关闭全部四门车窗"
 
 [functions.open_all_windows]
-description = "打开全部四门车窗，任一车窗不安全则整条拒绝（模拟车控）"
+description = "请求设备打开全部四门车窗，任一车窗不安全则整条拒绝"
 
 [functions.set_window_child_lock]
-description = "开关后排车窗童锁，开启后不能打开后排车窗（模拟车控）"
+description = "请求设备开关后排车窗童锁，开启后不能打开后排车窗"
 
 [functions.set_window_child_lock.parameters]
 enabled = "是否开启"
 
 [functions.set_window_anti_pinch]
-description = "停车后开关指定车窗防夹模拟设置（模拟车控）"
+description = "仅供模拟或测试环境设置车窗防夹状态；不表示具有关闭真实车辆防夹保护的权限。"
 
 [functions.set_window_anti_pinch.parameters]
-window = "本模拟为左舵车；主驾/左前/left_front车窗=driver，副驾/右前/right_front车窗=front_passenger，左后车窗=rear_left，右后车窗=rear_right"
+window = "主驾车窗=driver，副驾车窗=front_passenger，左后车窗=rear_left，右后车窗=rear_right；前排物理左右以车辆布局事实为准，不猜测左/右舵"
 enabled = "是否开启"
 
 [functions.set_sunroof_position]
-description = "设置天窗开度，0关闭，100全开（模拟车控）"
+description = "请求设备设置天窗开度，0关闭，100全开"
 
 [functions.set_sunroof_position.parameters]
 position = "开度百分比"
 
 [functions.set_sunshade_position]
-description = "设置天窗遮阳帘开度，0遮住，100打开（模拟车控）"
+description = "请求设备设置天窗遮阳帘开度，0遮住，100打开"
 
 [functions.set_sunshade_position.parameters]
 position = "开度百分比"
 
 [functions.set_rain_close_windows]
-description = "开关雨天自动关闭车窗的模拟偏好（模拟车控）"
+description = "请求设备设置雨天自动关闭车窗的偏好。"
 
 [functions.set_rain_close_windows.parameters]
 enabled = "是否开启"
@@ -290,19 +290,19 @@ name = "后视镜"
 description = "左右后视镜角度、折叠、加热、倒车下翻与记忆。"
 
 [functions.get_mirror_state]
-description = "读取指定后视镜位置及公共设置（模拟车控）"
+description = "请求设备读取指定后视镜位置及公共设置"
 
 [functions.get_mirror_state.parameters]
 mirror = "后视镜：left左/right右"
 
 [functions.set_mirror_fold]
-description = "折叠或展开左右后视镜，车速超过5时拒绝折叠（模拟车控）"
+description = "请求设备折叠或展开左右后视镜，车速超过5时拒绝折叠"
 
 [functions.set_mirror_fold.parameters]
 folded = "是否折叠"
 
 [functions.set_mirror_angle]
-description = "设置指定后视镜水平和垂直角度，范围-20至20度（模拟车控）"
+description = "请求设备设置指定后视镜水平和垂直角度，范围-20至20度"
 
 [functions.set_mirror_angle.parameters]
 mirror = "后视镜：left左/right右"
@@ -310,7 +310,7 @@ horizontal = "水平角度"
 vertical = "垂直角度"
 
 [functions.adjust_mirror_angle]
-description = "相对调整指定后视镜单轴角度（模拟车控）"
+description = "请求设备相对调整指定后视镜单轴角度"
 
 [functions.adjust_mirror_angle.parameters]
 mirror = "后视镜：left左/right右"
@@ -318,25 +318,25 @@ axis = "调整轴"
 delta = "变化度数"
 
 [functions.set_mirror_heating]
-description = "开关两侧后视镜加热除雾（模拟车控）"
+description = "请求设备开关两侧后视镜加热除雾"
 
 [functions.set_mirror_heating.parameters]
 enabled = "是否开启"
 
 [functions.set_reverse_mirror_tilt]
-description = "开关倒车时后视镜自动下翻偏好（模拟车控）"
+description = "请求设备开关倒车时后视镜自动下翻偏好"
 
 [functions.set_reverse_mirror_tilt.parameters]
 enabled = "是否开启"
 
 [functions.save_mirror_memory]
-description = "保存左右后视镜角度记忆（模拟车控）"
+description = "请求设备保存左右后视镜角度记忆"
 
 [functions.save_mirror_memory.parameters]
 slot = "记忆槽位，1至3"
 
 [functions.recall_mirror_memory]
-description = "恢复左右后视镜角度记忆（模拟车控）"
+description = "请求设备恢复左右后视镜角度记忆"
 
 [functions.recall_mirror_memory.parameters]
 slot = "记忆槽位，1至3"
@@ -346,72 +346,72 @@ name = "灯光"
 description = "车内灯、阅读灯、氛围灯及颜色亮度、大灯、雾灯、双闪与伴我回家。"
 
 [functions.get_light_state]
-description = "读取车内外灯光全部状态（模拟车控）"
+description = "请求设备读取车内外灯光全部状态"
 
 [functions.set_interior_light]
-description = "开关共用车厢顶灯，按前排、后排或全部区域控制（模拟车控）"
+description = "请求设备开关共用车厢顶灯，按前排、后排或全部区域控制"
 
 [functions.set_interior_light.parameters]
 zone = "照明区域"
 enabled = "是否开启"
 
 [functions.set_ambient_light]
-description = "开启或关闭氛围灯电源；设置颜色/亮度不需要本工具；不要打开/保持原状不构成关闭指令（模拟车控）"
+description = "请求设备开启或关闭氛围灯电源；设置颜色/亮度不需要本工具；不要打开/保持原状不构成关闭指令"
 
 [functions.set_ambient_light.parameters]
 enabled = "true=开启氛围灯；false=明确关闭氛围灯"
 
 [functions.set_ambient_color]
-description = "设置氛围灯颜色（模拟车控）"
+description = "请求设备设置氛围灯颜色"
 
 [functions.set_ambient_color.parameters]
 color = "颜色"
 
 [functions.set_ambient_brightness]
-description = "设置氛围灯亮度（模拟车控）"
+description = "请求设备设置氛围灯亮度"
 
 [functions.set_ambient_brightness.parameters]
 brightness = "亮度百分比"
 
 [functions.set_headlight_mode]
-description = "设置大灯关闭、自动或近光模式（模拟车控）"
+description = "请求设备设置大灯关闭、自动或近光模式"
 
 [functions.set_headlight_mode.parameters]
 mode = "大灯模式"
 
 [functions.set_high_beam]
-description = "开关远光灯（模拟车控）"
+description = "请求设备开关远光灯"
 
 [functions.set_high_beam.parameters]
 enabled = "是否开启"
 
 [functions.set_front_fog_lights]
-description = "开关前雾灯（模拟车控）"
+description = "请求设备开关前雾灯"
 
 [functions.set_front_fog_lights.parameters]
 enabled = "是否开启"
 
 [functions.set_rear_fog_light]
-description = "开关后雾灯（模拟车控）"
+description = "请求设备开关后雾灯"
 
 [functions.set_rear_fog_light.parameters]
 enabled = "是否开启"
 
 [functions.set_reading_light]
-description = "开关指定座位阅读灯（模拟车控）"
+description = "请求设备开关指定座位阅读灯"
 
 [functions.set_reading_light.parameters]
-seat = "本模拟为左舵车；主驾/左前/left_front=driver，副驾/右前/right_front=front_passenger，左后=rear_left，右后=rear_right"
+seat = "主驾=driver，副驾=front_passenger，左后=rear_left，右后=rear_right；前排物理左右与主副驾的对应以车辆布局事实为准，不猜测左/右舵"
 enabled = "是否开启"
 
 [functions.set_follow_me_home]
-description = "设置伴我回家大灯延时，0关闭（模拟车控）"
+description = "请求设备设置伴我回家大灯延时，0关闭"
 
 [functions.set_follow_me_home.parameters]
 seconds = "延时秒数"
 
 [functions.set_hazard_lights]
-description = "开关双闪危险警告灯（模拟车控）"
+description = "请求设备开关双闪危险警告灯"
 
 [functions.set_hazard_lights.parameters]
 enabled = "是否开启"
@@ -421,42 +421,42 @@ name = "门锁"
 description = "四门门锁、儿童安全锁、自动落锁、离车上锁与充电口锁。"
 
 [functions.get_lock_state]
-description = "读取全部门锁和安全锁状态（模拟车控）"
+description = "请求设备读取全部门锁和安全锁状态"
 
 [functions.set_door_lock]
-description = "锁定或解锁指定车门或全部车门，行驶中拒绝解锁（模拟车控）"
+description = "请求设备锁定或解锁指定车门或全部车门，行驶中拒绝解锁"
 
 [functions.set_door_lock.parameters]
 door = "车门"
 locked = "是否锁定"
 
 [functions.lock_all_doors]
-description = "锁定全部四门（模拟车控）"
+description = "请求设备锁定全部四门"
 
 [functions.unlock_all_doors]
-description = "停车后解锁全部四门（模拟车控）"
+description = "请求设备停车后解锁全部四门"
 
 [functions.set_child_lock]
-description = "停车后启用或关闭指定侧后车门儿童安全锁，与普通车门门锁独立。打开儿童锁=启用安全功能enabled:true；关闭儿童锁=解除安全功能enabled:false。（模拟车控）"
+description = "请求设备停车后启用或关闭指定侧后车门儿童安全锁，与普通车门门锁独立。打开儿童锁=启用安全功能enabled:true；关闭儿童锁=解除安全功能enabled:false。"
 
 [functions.set_child_lock.parameters]
 side = "后排左右侧"
 enabled = "true=开启儿童安全锁；false=关闭儿童安全锁；不是车门开合"
 
 [functions.set_auto_lock]
-description = "开关行车自动落锁偏好（模拟车控）"
+description = "请求设备开关行车自动落锁偏好"
 
 [functions.set_auto_lock.parameters]
 enabled = "是否开启"
 
 [functions.set_walk_away_lock]
-description = "开关离车自动上锁偏好（模拟车控）"
+description = "请求设备开关离车自动上锁偏好"
 
 [functions.set_walk_away_lock.parameters]
 enabled = "是否开启"
 
 [functions.set_charge_port_lock]
-description = "锁定或解锁充电口，充电中拒绝解锁（模拟车控）"
+description = "请求设备锁定或解锁充电口，充电中拒绝解锁"
 
 [functions.set_charge_port_lock.parameters]
 locked = "是否锁定"
@@ -466,149 +466,149 @@ name = "尾门"
 description = "电动尾门开关、开启高度与停止，行驶中不能打开。"
 
 [functions.get_tailgate_state]
-description = "读取尾门开合与高度状态（模拟车控）"
+description = "请求设备读取尾门开合与高度状态"
 
 [functions.set_tailgate_open]
-description = "开启或关闭尾门，模拟执行立即完成，行驶中拒绝开启（模拟车控）"
+description = "请求设备开启或关闭尾门；行驶中拒绝开启，执行完成以设备实际回执为准。"
 
 [functions.set_tailgate_open.parameters]
 open = "是否打开"
 
 [functions.set_tailgate_height]
-description = "设置尾门下次开启高度百分比（模拟车控）"
+description = "请求设备设置尾门下次开启高度百分比"
 
 [functions.set_tailgate_height.parameters]
 height = "开启高度百分比"
 
 [functions.stop_tailgate]
-description = "停止模拟尾门运动并保留当前位置（模拟车控）"
+description = "请求设备停止尾门运动并保留实际当前位置。"
 
 [skills.wipers]
 name = "雨刷清洗"
-description = "前后雨刷模式、间隔、雨量灵敏度与玻璃清洗液模拟消耗。"
+description = "前后雨刷模式、间隔、雨量灵敏度与挡风玻璃清洗。"
 
 [functions.get_wiper_state]
-description = "读取雨刷与玻璃水状态（模拟车控）"
+description = "请求设备读取雨刷与玻璃水状态"
 
 [functions.set_wiper_mode]
-description = "设置前雨刷关闭、自动、间歇、低速或高速（模拟车控）"
+description = "请求设备设置前雨刷关闭、自动、间歇、低速或高速"
 
 [functions.set_wiper_mode.parameters]
 mode = "雨刷模式"
 
 [functions.set_wiper_interval]
-description = "设置间歇雨刷间隔秒数（模拟车控）"
+description = "请求设备设置间歇雨刷间隔秒数"
 
 [functions.set_wiper_interval.parameters]
 seconds = "间隔秒数"
 
 [functions.wash_windshield]
-description = "清洗前或后挡风玻璃，每次模拟消耗1%玻璃水，耗尽则拒绝（模拟车控）"
+description = "请求设备清洗前或后挡风玻璃；是否执行和玻璃水消耗以设备回执为准。"
 
 [functions.wash_windshield.parameters]
 target = "清洗玻璃"
 
 [functions.set_rear_wiper]
-description = "开关后雨刷（模拟车控）"
+description = "请求设备开关后雨刷"
 
 [functions.set_rear_wiper.parameters]
 enabled = "是否开启"
 
 [functions.set_rain_sensitivity]
-description = "设置自动雨刷雨量灵敏度（模拟车控）"
+description = "请求设备设置自动雨刷雨量灵敏度"
 
 [functions.set_rain_sensitivity.parameters]
 level = "灵敏度档位"
 
 [skills.media]
 name = "媒体"
-description = "模拟音量、静音、播放状态、曲目、音源、FM频率、声场与均衡器。"
+description = "设备音量、静音、播放状态、音源、FM频率、声场与均衡器；座舱内容搜索与播放另走search_media/control_media。"
 
 [functions.get_media_state]
-description = "读取模拟媒体状态（模拟车控）"
+description = "请求设备读取媒体状态；座舱播放器状态用control_media的get_status读取。"
 
 [functions.set_volume]
-description = "设置媒体音量百分比（模拟车控）"
+description = "请求设置媒体音量百分比；已有座舱媒体状态时按control_media的volume协议处理，执行以实际回执为准。"
 
 [functions.set_volume.parameters]
 volume = "音量百分比"
 
 [functions.adjust_volume]
-description = "相对调高或调低媒体音量（模拟车控）"
+description = "请求设备相对调高或调低媒体音量"
 
 [functions.adjust_volume.parameters]
 delta = "音量变化百分比"
 
 [functions.set_mute]
-description = "开关媒体静音（模拟车控）"
+description = "请求设备开关媒体静音"
 
 [functions.set_mute.parameters]
 enabled = "是否静音"
 
 [functions.control_playback]
-description = "播放、暂停、停止、下一首或上一首，仅更新模拟媒体状态（模拟车控）"
+description = "请求控制已选媒体的播放、暂停、停止或上下首；已有座舱媒体状态时按control_media协议处理，play表示恢复已有内容resume。播放新内容须search_media后用control_media的play；无座舱媒体状态时只使用明确声明的设备能力，完成以实际回执为准。"
 
 [functions.control_playback.parameters]
 action = "播放操作"
 
 [functions.set_media_source]
-description = "切换蓝牙、广播、USB或在线模拟音源（模拟车控）"
+description = "请求设备切换蓝牙、广播、USB或在线音源；不搜索内容，也不证明音源已连接或开始播放。"
 
 [functions.set_media_source.parameters]
 source = "音源"
 
 [functions.play_media]
-description = "按名称播放模拟曲目；不进行真实版权内容搜索或音频播放（模拟车控）"
+description = "按名称请求设备播放其支持的内容；本工具不进行内容搜索，不提供已核实内容ID或播放地址。座舱内容播放使用search_media后调用control_media，不能用本工具绕过内容来源校验。"
 
 [functions.play_media.parameters]
 title = "曲目或内容名称"
 
 [functions.set_radio_frequency]
-description = "设置模拟FM广播频率，单位MHz（模拟车控）"
+description = "请求设备设置FM广播频率，单位MHz；不用于搜索或播放网络电台。"
 
 [functions.set_radio_frequency.parameters]
 frequency = "FM频率MHz"
 
 [functions.set_audio_balance]
-description = "设置音响左右平衡和前后声场，负数偏左或前，正数偏右或后（模拟车控）"
+description = "请求设备设置音响左右平衡和前后声场，负数偏左或前，正数偏右或后"
 
 [functions.set_audio_balance.parameters]
 balance = "左右平衡"
 fader = "前后声场"
 
 [functions.set_equalizer]
-description = "设置模拟音效均衡器预设（模拟车控）"
+description = "请求设备设置音效均衡器预设。"
 
 [functions.set_equalizer.parameters]
 preset = "均衡器预设"
 
 [skills.navigation]
 name = "导航"
-description = "只保存模拟目的地、最多10个途经点、通行偏好及家和公司地址；不计算真实路线。"
+description = "设备目的地、途经点、通行偏好及家和公司地址；有来源POI用manage_navigation，真实路线查询须有配置的路线提供商。"
 
 [functions.get_navigation_state]
-description = "读取模拟导航目的地、途经点与偏好，不含真实路线（模拟车控）"
+description = "请求设备读取导航目的地、途经点与偏好；仅依据实际返回内容回答，不推断路线或到达时间。"
 
 [functions.set_navigation_destination]
-description = "设置并开始模拟导航目的地；不计算真实路线、不订座支付（模拟车控）"
+description = "将用户原文中的明确地点名或地址交给设备，请求设为导航目的地；不自行解析成POI或计算真实路线，不订座支付，是否开始导航以设备回执为准。"
 
 [functions.set_navigation_destination.parameters]
 destination = "完整保留用户给出的目的地名称或地址原文，禁止缩写、概括、翻译或替换城市名"
 
 [functions.add_navigation_waypoint]
-description = "追加一个模拟途经点，最多10个，不计算真实路线（模拟车控）"
+description = "请求设备追加原文地点作为途经点，最多10个；不计算路线。已有来源POI应使用manage_navigation的add_waypoint。"
 
 [functions.add_navigation_waypoint.parameters]
 destination = "途经点名称或地址"
 
 [functions.remove_navigation_waypoint]
-description = "删除指定索引的模拟途经点，索引从0开始（模拟车控）"
+description = "请求设备删除指定索引的途经点，索引从0开始；已有来源POI应按manage_navigation的waypoint_ref处理。"
 
 [functions.remove_navigation_waypoint.parameters]
 index = "从0开始的途经点索引"
 
 [functions.set_navigation_preferences]
-description = "保存模拟避收费、避高速与优先最快偏好；不计算真实路线（模拟车控）"
+description = "请求设备保存避收费、避高速与优先最快偏好；不表示已经计算或重新规划路线。"
 
 [functions.set_navigation_preferences.parameters]
 avoid_tolls = "避开收费路段"
@@ -616,16 +616,16 @@ avoid_highways = "避开高速"
 prefer_fastest = "优先最快"
 
 [functions.cancel_navigation]
-description = "结束模拟导航并清空当前目的地和途经点（模拟车控）"
+description = "请求设备结束导航并清空当前目的地和途经点；执行结果以设备回执为准。"
 
 [functions.set_home_destination]
-description = "保存家的模拟导航地址（模拟车控）"
+description = "请求设备保存家的导航地址，不表示开始导航。"
 
 [functions.set_home_destination.parameters]
 destination = "家的地址"
 
 [functions.set_work_destination]
-description = "保存公司的模拟导航地址（模拟车控）"
+description = "请求设备保存公司的导航地址，不表示开始导航。"
 
 [functions.set_work_destination.parameters]
 destination = "公司的地址"

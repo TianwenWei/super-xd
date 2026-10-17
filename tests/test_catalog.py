@@ -4,7 +4,8 @@ import math
 import pytest
 from jsonschema import Draft202012Validator
 
-from backend.catalog import EXPECTED_COUNTS, HOT_TOOL_NAMES, COLD_TOOL_NAMES, SKILLS, TOOLS, execute_tool, initial_vehicle_state, load_skill
+from backend.catalog import EXPECTED_COUNTS, HOT_TOOL_NAMES, COLD_TOOL_NAMES, SKILLS, TOOLS, load_skill
+from backend.demo.vehicle_simulator import execute_tool, initial_vehicle_state
 
 
 def test_exact_catalog_and_manifests():
@@ -19,7 +20,7 @@ def test_exact_catalog_and_manifests():
     assert set(HOT_TOOL_NAMES) <= set(TOOLS)
     for name, tool in TOOLS.items():
         assert tool.name == name and tool.description and tool.skill_id in SKILLS
-        assert tool.state_mapping["paths"] and tool.state_mapping["simulated"] is True
+        assert tool.state_mapping["paths"] and "simulated" not in tool.state_mapping
         Draft202012Validator.check_schema(tool.parameters)
         Draft202012Validator(tool.parameters).validate(tool.example)
         assert tool.openai_tool()["function"]["parameters"] == tool.parameters

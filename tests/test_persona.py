@@ -6,7 +6,7 @@ import pytest
 from backend.persona import PERSONAS, render, style_prompt
 from backend.prompt_templates import render_prompt
 from backend.types import PersonaConfig
-from backend.session import receipt_detail
+from backend.speech_config import receipt_detail
 
 
 @pytest.mark.parametrize('detail, facts', [

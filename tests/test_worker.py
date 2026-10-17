@@ -12,6 +12,8 @@ from backend.worker import ThinkerWorker
 from backend.harness.task_runner import (THINKER_TOOLS, QUICK_TOOLS, SYSTEM_PROMPT,
                                          TOOL_SCHEMAS, _weather_finish_guard)
 from backend.services.reads import verify_forecast_record
+from backend.demo.resources import local_model_policy_id, local_task_budget
+from backend.harness.release import get_release_id
 
 
 def message(name, arguments, call_id="call_1"):
@@ -20,6 +22,9 @@ def message(name, arguments, call_id="call_1"):
 
 
 class FakeArk:
+    def info(self):
+        return {'fixture_policy': 'offline-worker-v1'}
+
     def __init__(self, *responses):
         self.responses = list(responses)
         self.calls = []
@@ -57,14 +62,67 @@ class FakeTavily:
 
 @pytest.fixture
 def db(tmp_path):
-    return Database(tmp_path / "worker.sqlite3")
+    return RegisteredDatabase(tmp_path / "worker.sqlite3")
 
 
-def task(db, goal="查找当前公开信息", context=None):
-    created = db.create_task("test-session", goal, context=context)
+def registration_context(context=None, *, model=None, worker_options=None):
+    return {'release_id': get_release_id(),
+            'model_policy_id': local_model_policy_id(model or FakeArk(), local_task_budget(**(worker_options or {}))),
+            **(context or {})}
+
+
+class RegisteredDatabase(Database):
+    """Fixture registrations pass the same identity gate as the local service."""
+    def create_task(self, session_id, goal, context=None, **options):
+        return super().create_task(session_id, goal, registration_context(context), **options)
+
+
+def task(db, goal="查找当前公开信息", context=None, *, model=None, worker_options=None):
+    created = db.create_task("test-session", goal, context=registration_context(
+        context, model=model, worker_options=worker_options))
     claimed = db.claim_next()
     assert claimed["id"] == created["id"]
     return claimed
+
+
+@pytest.mark.parametrize('change', ['missing', 'old_release', 'old_model', 'budget'])
+@pytest.mark.parametrize('checkpoint', [{}, {'checkpoint_version': 1, 'release_id': 'old-release', 'messages': []}])
+async def test_worker_rejects_unregistered_or_changed_deployment_before_model(db, change, checkpoint):
+    context = registration_context()
+    if change == 'missing': context = {}
+    elif change == 'old_release': context['release_id'] = 'old-release'
+    elif change == 'old_model': context['model_policy_id'] = 'old-model'
+    # Explicitly construct the historical registration, without fixture stamping.
+    created = Database.create_task(db, 'test-session', '旧注册不能续跑', context=context)
+    db.save_task(created['id'], 1, checkpoint=checkpoint)
+    current = db.claim_next()
+    model = FakeArk()
+    worker = ThinkerWorker(db, model, FakeTavily(), **({'max_steps': 1} if change == 'budget' else {}))
+    await worker.run_task(current)
+    saved = db.get_task(created['id'])
+    assert model.calls == [] and saved['status'] == 'failed'
+    assert saved['error_code'] == 'task_deployment_mismatch'
+    assert saved['context'] == context and saved['checkpoint'] == checkpoint
+    row = next(item for item in db.traces_after('test-session') if item['kind'] == 'task.deployment.rejected')
+    assert row['data']['model_called'] is False and row['data']['code'] == saved['error_code']
+
+
+async def test_scheduler_rejects_old_registration_then_executes_current_task(db):
+    old = Database.create_task(db, 'test-session', '旧排队任务', context={
+        'release_id': 'old-release', 'model_policy_id': 'old-policy'})
+    current = db.create_task('test-session', '当前登记任务')
+    model = FakeArk(message('finish_task', {'summary': '当前任务完成。'}))
+    worker = ThinkerWorker(db, model, FakeTavily(), concurrency=1)
+    loop = asyncio.create_task(worker.run_forever(poll_interval=.001))
+    try:
+        await wait_until(lambda: db.get_task(current['id'])['status'] == 'completed')
+    finally:
+        worker.stop()
+        await loop
+    assert len(model.calls) == 1
+    rejected = db.get_task(old['id'])
+    assert rejected['status'] == 'failed' and rejected['error_code'] == 'task_deployment_mismatch'
+    assert rejected['context'] == {'release_id': 'old-release', 'model_policy_id': 'old-policy'}
 
 
 def test_vehicle_skill_guide_and_schema_are_generated_from_catalog():
@@ -488,7 +546,7 @@ async def test_model_timeout_is_bounded_and_task_failed(db):
         await asyncio.sleep(1)
         return message("finish_task", {"summary": "不应到达"})
 
-    current = task(db)
+    current = task(db, worker_options={'timeout_seconds': 0.04})
     await ThinkerWorker(db, FakeArk(slow, slow), FakeTavily(), timeout_seconds=0.04).run_task(current)
     saved = db.get_task(current["id"])
     assert saved["status"] == "failed"
@@ -508,7 +566,7 @@ async def test_tool_timeout_is_returned_to_model_without_fake_results(db):
 
     ark = FakeArk(message("search_web", {"query": "慢查询"}),
                   message("finish_task", {"summary": "工具超时，无法确认信息。"}))
-    current = task(db)
+    current = task(db, worker_options={'tool_timeout_seconds': 0.02})
     await ThinkerWorker(db, ark, SlowTavily(), tool_timeout_seconds=0.02).run_task(current)
     saved = db.get_task(current["id"])
     assert saved["status"] == "completed"
@@ -519,7 +577,7 @@ async def test_tool_timeout_is_returned_to_model_without_fake_results(db):
 
 @pytest.mark.asyncio
 async def test_step_budget_and_plain_text_do_not_fake_success(db):
-    current = task(db)
+    current = task(db, worker_options={'max_steps': 2})
     ark = FakeArk({"role": "assistant", "content": "一个未经提交的结论"},
                   {"role": "assistant", "content": "另一个结论"})
     await ThinkerWorker(db, ark, FakeTavily(), max_steps=2).run_task(current)
@@ -845,7 +903,7 @@ async def test_quick_failed_verification_keeps_actual_limitations_without_fabric
 
     ark = FakeArk(message('lookup_web', {'query': '核实当前字段'}),
                   message('finish_task', {'summary': '未取得足够材料，无法确认。', 'spoken_summary': '目前无法确认。'}))
-    current = task(db, context={'query_mode': 'quick'})
+    current = task(db, context={'query_mode': 'quick'}, worker_options={'tool_timeout_seconds': 0.02})
     tavily = FailingTavily([] if failure == 'empty' else None)
     await ThinkerWorker(db, ark, tavily, tool_timeout_seconds=.02).run_task(current)
     saved = db.get_task(current['id'])
@@ -924,7 +982,7 @@ async def test_quick_clarification_wait_does_not_spend_execution_budget_but_repl
         await asyncio.sleep(2)
         return message('lookup_web', {'query': '巴黎'})
 
-    current = task(db, context={'query_mode': 'quick'})
+    current = task(db, context={'query_mode': 'quick'}, worker_options={'quick_timeout_seconds': 0.5})
     worker = ThinkerWorker(db, FakeArk(clarify, slow_lookup, slow_lookup), FakeTavily(), quick_timeout_seconds=.5)
     await worker.run_task(current)
     assert db.get_task(current['id'])['status'] == 'waiting_clarification'
@@ -974,7 +1032,7 @@ async def test_waiting_quick_lookup_does_not_block_another_research_task(db):
             await release.wait()
             return await super().search(query, max_results)
 
-    class RoutingArk:
+    class RoutingArk(FakeArk):
         async def complete(self, messages, tools=None, thinker=False, **options):
             if thinker:
                 return message('finish_task', {'summary': '独立研究任务完成。'})

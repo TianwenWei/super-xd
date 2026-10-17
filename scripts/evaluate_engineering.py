@@ -1,4 +1,8 @@
 """Configured LLM/Volcengine speech acceptance with delayed simulated receipts."""
+if __name__ == "__main__":
+    from backend.local_environment import load_local_environment
+    load_local_environment()
+
 import asyncio
 from contextlib import AsyncExitStack
 import json
@@ -70,9 +74,10 @@ async def evaluate_case(root, name, text, ark, tts, config, *, driving_race=Fals
                               and bool(event.get('text')) and not event.get('metrics', {}).get('error')
                               and not any(message.get('tool_calls') for message in actor.current.messages))
         else:
-            spoken=[r for r in traces if r['kind']=='vehicle.dispatch_feedback']
             received=[r for r in traces if r['kind']=='vehicle.receipt']
-            result['passed']=bool(spoken and received and first_pcm is not None and spoken[0]['trace_id']<received[0]['trace_id'])
+            confirmed=[r for r in traces if r['kind']=='audio.text' and r['data'].get('source')=='verified_receipts']
+            result['passed']=bool(received and first_pcm is not None and speeches and event.get('text'))
+            result['passed'] &= all(r['trace_id'] > received[0]['trace_id'] for r in confirmed)
             result['passed'] &= all(e['result']['ok'] is (not driving_race) for e in receipts)
         return result
     finally:

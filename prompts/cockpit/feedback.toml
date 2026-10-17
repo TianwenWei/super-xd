@@ -10,7 +10,7 @@ device_timeout = "还没有收到设备的实际回执，暂时无法确认操�
 stale_receipt = "这次操作已过期，结果没有应用。"
 video_driving = "行驶中暂时不能在主驾屏幕播放视频。"
 media_done = "播放器已确认这次操作。"
-navigation_done = "模拟导航面板已更新。"
+navigation_done = "导航设备已确认这次操作。"
 route_not_configured = "真实路线服务还没有配置，暂时不能给出路线、距离或到达时间。"
 
 origin_required = "还没有导航起点，请先搜索并设定你的出发地点。"

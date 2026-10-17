@@ -8,7 +8,7 @@ import pytest
 
 from backend.nlp_app import create_app
 from test_gateway_contract import ScriptedModel, call, service, start_request
-from backend.catalog import execute_tool
+from backend.demo.vehicle_simulator import execute_tool
 
 
 async def post(app, path, payload):

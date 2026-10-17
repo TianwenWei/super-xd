@@ -1,6 +1,10 @@
 """Real Ark/Thinker/Tavily session benchmark. No mocked model or information tool.
 The WS harness drives the delayed simulated device and returns its bound receipt.
 """
+if __name__ == "__main__":
+    from backend.local_environment import load_local_environment
+    load_local_environment()
+
 import argparse
 import asyncio
 import json

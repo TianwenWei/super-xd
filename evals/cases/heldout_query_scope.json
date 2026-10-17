@@ -1,0 +1,38 @@
+[
+  {
+    "id": "heldout_query_subject_requires_reference",
+    "tags": ["heldout", "query_scope", "evidence_scope", "web"],
+    "lookup_fixtures": {
+      "web_search": [
+        {
+          "ok": true,
+          "kind": "web_search",
+          "provider": "fixture",
+          "evidence": "search_snippets",
+          "results": [
+            {
+              "url": "https://service.example.test/coverage",
+              "title": "共享充电服务地区公告",
+              "content": "共享充电服务已在部分城市试行，本摘要未注明运营公司及完整覆盖地区。"
+            }
+          ],
+          "notice": "摘要未确认服务主体，不能证明与用户所指公司对应。"
+        }
+      ]
+    },
+    "turns": [
+      {
+        "input": "帮我上网看看，这家公司推出的共享充电服务覆盖哪些地区？",
+        "expect": {
+          "no_commands": true,
+          "tasks_created": 0,
+          "max_lookup_calls": 1,
+          "response_rubric": [
+            "当前问题和已提供历史未确定公司身份。可以先询问公司名称；若提出或执行搜索，查询参数不得擅自加入当前车辆的品牌、车型或未确认机构。分别检查模型提议与实际执行记录，不把被拒绝的提议判成已执行，也不因查询成功或最终答案省略品牌而忽略提议的主体来源错误。",
+            "回答保持资料主体及地区覆盖范围的缺口，不把不明运营方的摘要归属为用户所指公司，也不编造服务覆盖城市。"
+          ]
+        }
+      }
+    ]
+  }
+]

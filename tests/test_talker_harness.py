@@ -1,6 +1,7 @@
-"""The standalone Talker compiler and the demo send identical model inputs."""
+"""The standalone Talker compiler is the production model request boundary."""
 import asyncio
 from copy import deepcopy
+import json
 from pathlib import Path
 import sqlite3
 import subprocess
@@ -13,6 +14,7 @@ from backend.harness.context import ContextSelectionPolicy, ContextTurn
 from backend.harness.contracts import PreparedRun, RunBudget, RunIdentity
 from backend.harness import talker
 from backend.persona import PERSONAS
+from backend.catalog import TOOLS
 
 
 NOW = '2026-10-17T12:00:00+00:00'
@@ -31,20 +33,16 @@ class CapturingModel:
     def __init__(self):
         self.requests = []
 
-    async def stream(self, messages, tools):
+    async def stream(self, messages, tools, **options):
         self.requests.append({'messages': deepcopy(messages), 'tools': deepcopy(tools)})
         yield {'type': 'message', 'message': {'role': 'assistant', 'content': '离线捕获'}}
 
 
 @pytest.mark.parametrize('persona_id', list(PERSONAS))
 @pytest.mark.parametrize('history_kind', ['ordinary', 'interrupted', 'pending_tools'])
-async def test_prepared_run_equals_the_actual_actor_model_request(monkeypatch, persona_id, history_kind):
-    from backend import session
-    from backend.catalog import initial_vehicle_state
-    from backend.cockpit import initial_cockpit_state
-    from backend.environment_context import environment_context
-    from backend.persona import PERSONAS, style_prompt
-    from backend.speaker import speaker_context
+async def test_compiled_run_equals_the_actual_production_model_request(monkeypatch, persona_id, history_kind):
+    from scripts.validate_structured_prompts import import_runtime, capture_start_request
+    runtime = import_runtime()
 
     def forbidden_client(*args, **kwargs):
         raise AssertionError('Input compilation must not start clients or open a database')
@@ -52,72 +50,33 @@ async def test_prepared_run_equals_the_actual_actor_model_request(monkeypatch, p
     monkeypatch.setattr(httpx, 'AsyncClient', forbidden_client)
     monkeypatch.setattr(httpx, 'Client', forbidden_client)
     monkeypatch.setattr(sqlite3, 'connect', forbidden_client)
-    monkeypatch.setattr(session, 'utcnow', lambda: NOW)
-
-    actor = object.__new__(session.SessionActor)
-    actor.id = 'input-equivalence'
-    actor.persona = PERSONAS[persona_id].model_copy(deep=True)
-    actor.speaker_seat = 'driver'
-    actor.vehicle = initial_vehicle_state()
-    actor.vehicle['_meta'].update(location='上海', location_country='CN', timezone='Asia/Shanghai')
-    actor.recent_places = [{'name': '已查询地点', 'place_id': 'place-1'}]
-    actor.cockpit = None
-    actor.cockpit_state = initial_cockpit_state()
-    actor.media_choices = {'known': {'content_id': 'known', 'title': '已查询媒体'}}
-    actor.tasks = {str(index): {'id': str(index), 'goal': f'目标{index}', 'status': 'completed',
-        'created_at': f'2026-10-17T00:00:{index:02d}+00:00', 'revision': index + 1,
-        'result': {'summary': '完整资料', 'spoken_summary': f'结论{index}'}} for index in range(10)}
-    actor.turns = []
-    for index in range(6):
-        turn = session.Turn(f'prior-{index}', f'用户历史{index}', actor.persona, 1)
-        turn.speaker_seat = 'rear_left'
-        turn.messages = [{'role': 'user', 'content': turn.text}, {'role': 'assistant', 'content': f'回答{index}'}]
-        if index == 5:
-            turn.proactive = True
-            turn.messages = [{'role': 'system', 'content': '任务归因数据'}, {'role': 'assistant', 'content': '后台已完成的结论'}]
-        if index == 4 and history_kind == 'interrupted':
-            turn.playback_id = 'playback'
-            turn.audio_cancelled.set()
-            turn.played_text = '实际听到部分'
-        if index == 4 and history_kind == 'pending_tools':
-            call = {'id': 'pending', 'type': 'function', 'function': {'name': 'manage_task', 'arguments': '{"action":"get"}'}}
-            turn.messages.append({'role': 'assistant', 'content': None, 'tool_calls': [call]})
-            turn.group = [call]
-        actor.turns.append(turn)
-    current = session.Turn('current', '把主驾车窗关上', actor.persona, 1)
-    current.speaker_seat = 'driver'
-    current.messages = [{'role': 'user', 'content': current.text}]
-    current.loaded = ['lights', 'seats', 'mirrors']
-    actor.turns.append(current)
-    actor.current = current
-    actor.ark = CapturingModel()
-    actor.trace = lambda *args, **kwargs: None
-    actor.spawn = asyncio.create_task
-
-    async def ignore_post(event):
-        pass
-
-    actor.post = ignore_post
-    state = {
-        'vehicle': actor.vehicle, 'background_tasks_reference_only': actor.task_list(),
-        'speaker': speaker_context(current.speaker_seat), 'recent_places': actor.recent_places,
-        'cockpit': actor.cockpit_state, 'media_choices': list(actor.media_choices.values()),
-        'cockpit_capabilities': {'configured': False}, 'tool_capabilities': actor.tool_capabilities(),
-        **environment_context(actor.vehicle, NOW),
-        'capabilities': {'gps': False, 'browser_geolocation': False, 'task_priority_change': False},
-    }
-    records = [ContextTurn(turn.id, turn.messages, proactive=turn.proactive, speaker_seat=turn.speaker_seat,
-                           pending_tool_group=bool(turn.group and len(turn.group_results) < len(turn.group)),
-                           interrupted_playback=bool(turn.playback_id and turn.audio_cancelled.is_set()),
-                           heard_text=turn.played_text) for turn in actor.turns]
-    prepared = talker.prepare_talker_run(identity(), current_turn=records[-1], turns=records,
-        snapshot=state, persona_prompt=style_prompt(actor.persona), release_id='test-release')
-    actor.launch_model(current)
-    await current.model_task
-    assert actor.ark.requests == [{'messages': prepared.messages, 'tools': prepared.tools}]
+    history = [{'user': f'用户历史{index}', 'assistant': f'回答{index}'} for index in range(6)]
+    if history_kind == 'interrupted':
+        history[-1].update(interrupted_playback=True, heard_text='实际听到部分', playback_status='partial')
+    if history_kind == 'pending_tools':
+        history[-1]['messages'] = [
+            {'role': 'user', 'content': '继续查询'},
+            {'role': 'assistant', 'content': None, 'tool_calls': [{'id': 'pending', 'type': 'function',
+                'function': {'name': 'manage_task', 'arguments': '{"action":"get"}'}}]},
+        ]
+    request, bindings = capture_start_request(runtime, {
+        'id': 'current', 'text': '把主驾车窗关上', 'role': 'talker', 'persona': persona_id,
+        'history': history, 'vehicle_overrides': {'_meta.location': '上海', '_meta.timezone': 'Asia/Shanghai'}}, NOW)
+    model = CapturingModel()
+    service = runtime.gateway.NLPService(model, model_policy_id='offline-model', release_id='test-release',
+        semantic_policy=runtime.policy.ProductTalkerPolicy(bindings,
+            enabled_nlp_targets=['vehicle_planner', 'thinker_task', 'task_management']))
+    prepared = service.compile_start(request)
+    events = [event async for event in service.start(request).events()]
+    assert events[-1].type == 'run.completed'
+    assert model.requests == [{'messages': prepared.messages, 'tools': prepared.tools}]
     assert len(prepared.tools) == 26
     assert prepared.messages[2:2 + len(talker.TALKER_EXAMPLES)] == talker.TALKER_EXAMPLES
     assert prepared.model_options == {'role': 'talker'}
+    if history_kind == 'interrupted':
+        assert {'role': 'assistant', 'content': '回答5'} in prepared.messages
+    if history_kind == 'pending_tools':
+        assert not any(call['id'] == 'pending' for message in prepared.messages for call in message.get('tool_calls', []))
 
 
 def test_tools_are_fixed_and_each_compilation_owns_its_input():
@@ -139,6 +98,38 @@ def test_tools_are_fixed_and_each_compilation_owns_its_input():
     assert second.messages[2] == original['messages'][2]
     assert original_identity.context_revision == 7 and budget.max_model_calls == 3
     assert PreparedRun.model_validate_json(second.model_dump_json()) == second
+
+
+def test_all_cold_semantics_are_cached_without_expanding_or_granting_tools(monkeypatch):
+    names = {tool['function']['name'] for tool in talker.talker_tools()}
+    catalog = {name: description for group in talker.COLD_CAPABILITY_CATALOG.values()
+               for name, description in group.items()}
+    assert len(catalog) == 85
+    assert catalog == {name: spec.description for name, spec in TOOLS.items() if name not in names}
+    encoded = json.dumps(talker.COLD_CAPABILITY_CATALOG, ensure_ascii=False, separators=(',', ':'))
+    assert encoded in talker.CORE_PROMPT
+
+    def forbidden_read(*args, **kwargs):
+        pytest.fail('Compiled role semantics must not read files on a request')
+
+    monkeypatch.setattr(Path, 'read_text', forbidden_read)
+    original = minimal_snapshot()
+    original['capabilities'] = {name: False for name in catalog}
+    original['tool_capabilities'] = []
+    before = deepcopy(original)
+    for text in ('车况查询', '不同的控制请求'):
+        current = ContextTurn('current', [{'role': 'user', 'content': text}])
+        result = talker.prepare_talker_run(identity(), current_turn=current, turns=[], snapshot=original,
+            persona_prompt='人设', release_id='test-release')
+        assert result.messages[0]['content'] == talker.CORE_PROMPT
+        assert {tool['function']['name'] for tool in result.tools} == names
+        dynamic = next(message['content'] for message in result.messages
+                       if message['content'].startswith('当前会话快照'))
+        state = json.loads(dynamic[dynamic.index('{'):])
+        assert all(group['available_count'] == 0 for group in state['vehicle_skill_capabilities'].values())
+        assert {name for group in state['vehicle_skill_capabilities'].values()
+                for name in group['unavailable']} == catalog.keys()
+    assert original == before
 
 
 def test_policy_is_opt_in_and_run_identity_must_match():

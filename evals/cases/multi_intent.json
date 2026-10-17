@@ -191,14 +191,19 @@
               "name": "start_poi_navigation"
             }
           ],
-          "commands": [
+          "allow_error": true,
+          "cockpit_commands": [
             {
-              "name": "set_navigation_destination"
+              "domain": "navigation",
+              "action": "start"
             }
           ],
-          "allow_error": true
+          "cockpit_commands_exact": true
         }
       }
-    ]
+    ],
+    "cockpit": {
+      "items": []
+    }
   }
 ]

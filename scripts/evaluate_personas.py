@@ -7,6 +7,10 @@ retrieval, or vehicle outcome is replaced by an evaluation stub.
 """
 from __future__ import annotations
 
+if __name__ == "__main__":
+    from backend.local_environment import load_local_environment
+    load_local_environment()
+
 import argparse
 import asyncio
 from datetime import datetime, timezone

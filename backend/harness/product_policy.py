@@ -20,10 +20,9 @@ from backend.cockpit.controller import (finite, observed_media_state, prepare_me
 from backend.cockpit.media import CockpitError, media_item
 from backend.speech_config import feedback_text
 from .talker import talker_tools
+from .gateway_contracts import NLP_TARGETS
 
 
-NLP_TARGETS = {'delegate_vehicle_control': 'vehicle_planner',
-               'delegate_task': 'thinker_task', 'manage_task': 'task_management'}
 TERMINAL_TASKS = {'completed', 'failed', 'cancelled'}
 MEDIA_ACTIONS = {'play', 'pause', 'resume', 'stop', 'exit', 'next', 'previous', 'seek', 'volume', 'get_status'}
 NAVIGATION_ACTIONS = {'start', 'add_waypoint', 'remove_waypoint', 'cancel', 'get_status', 'route', 'set_origin'}
@@ -34,7 +33,14 @@ class ProductPolicyError(ValueError):
     def __init__(self, code: str, message: str, **details):
         super().__init__(message)
         self.code = code
-        self.result = {'ok': False, 'executed': False, 'code': code, 'reason': message, **details}
+        recoverable = code in {
+            'area_not_grounded', 'invalid_task_selection', 'task_selection', 'task_text_required',
+            'invalid_place', 'unknown_place', 'place_not_confirmed', 'invalid_action',
+            'weather_quick_required', 'destination_not_in_request', 'origin_required',
+            'planned_vehicle_group_conflict', 'navigation_group_conflict', 'unknown_content',
+        } or details.get('needs_clarification') is True
+        self.result = {'ok': False, 'executed': False, 'code': code, 'reason': message,
+                       'retry_model': recoverable, **details}
 
 
 def _mapping(value):
@@ -223,7 +229,8 @@ def _prepare(start, context, request):
         output['execution_arguments'] = normalize_task_arguments(arguments, context.get('tasks', []))
     elif name == 'delegate_task':
         if arguments.get('query_domain') == 'weather' and arguments.get('query_mode') != 'quick':
-            raise ProductPolicyError('weather_quick_required', 'Weather tasks require explicit quick mode', retry_model=True)
+            raise ProductPolicyError('weather_quick_required', 'Weather tasks require explicit quick mode',
+                                     required_query_mode='quick')
     elif name == 'set_navigation_destination':
         if not grounded(arguments['destination'], _sources(start, context)):
             raise ProductPolicyError('destination_not_in_request', 'Destination has no supplied source', retry_model=True)
@@ -444,7 +451,10 @@ class ProductTalkerPolicy:
     def prepare_product_action(self, input_mapping, request_mapping, observations_mapping=None):
         value, request = _mapping(input_mapping), _mapping(request_mapping)
         route = self._binding(value, request)
-        prepared = prepare_product_action(value, request, observations_mapping)
+        try:
+            prepared = prepare_product_action(value, request, observations_mapping)
+        except CockpitError as error:
+            raise ProductPolicyError(error.code, str(error)) from error
         if route['kind'] == 'nlp_orchestration':
             return {**route, 'execution_arguments': prepared['execution_arguments']}
         if prepared['domain'] is None:

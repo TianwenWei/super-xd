@@ -11,6 +11,9 @@ import time
 from typing import Any, Callable
 from .task_store import TaskStore, TaskTraceSink, running_elapsed
 from .release import get_release_id
+from .model_execution import complete_model
+from .evidence import (RETRIEVAL_TOOLS, RetrievalLimits, RetrievalProgress, allow_retrieval,
+                       annotate_evidence, record_retrieval, retrieval_feedback)
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -473,14 +476,15 @@ class TaskRunner:
                    summary=PHASES['finish_task'])
         await self._trace(task, 'model.started', {'request': request, 'phase': 'finalize'}, call_id=call_id, model_call_id=call_id, status='running')
         try:
-            response = await self.ark.complete(**request)
+            completed = await complete_model(self.ark, **request)
         except BaseException as exc:
-            await self._trace(task, 'model.error', {'error': _safe_error(exc, None), 'phase': 'finalize'},
+            await self._trace(task, 'model.error', {'error': _safe_error(exc, None), 'phase': 'finalize',
+                        'partial': deepcopy(getattr(exc, 'trace_partial', None))},
                         call_id=call_id, model_call_id=call_id, status='cancelled' if isinstance(exc, asyncio.CancelledError) else 'error')
             raise
-        response = deepcopy(response)
-        meta = response.pop('_meta', {})
-        await self._trace(task, 'model.completed', {'message': response, 'meta': meta, 'phase': 'finalize'},
+        response, meta = completed.message, completed.metadata
+        await self._trace(task, 'model.completed', {'message': response, 'meta': meta, 'phase': 'finalize',
+                                                 'raw_return': completed.raw_return},
                     call_id=call_id, model_call_id=call_id, status=await self._response_status(task_id, revision, 'received'))
         await self._boundary(task_id, revision)
         calls = response.get('tool_calls') or []
@@ -519,6 +523,7 @@ class TaskRunner:
         sources: dict[str, dict[str, Any]] = {}
         suggestions: list[dict[str, Any]] = []
         observations: list[dict[str, Any]] = []
+        retrieval = RetrievalProgress()
         tool_count = 0
         _, lookup_count = await self._quick_usage(current) if self._query_mode(current) == "quick" else (0, 0)
         for step in range(int(current.get("steps", 0)) + 1, self.max_steps + 1):
@@ -547,6 +552,7 @@ class TaskRunner:
                     checkpoint = current.get('checkpoint') or {}
                     if checkpoint:
                         self._validate_checkpoint(checkpoint)
+                        retrieval = RetrievalProgress.model_validate(checkpoint.get('retrieval', {}))
                     restored = (checkpoint.get('goal') == current['goal'] and bool(checkpoint.get('messages'))
                                 and (checkpoint.get('revision') == revision or any(
                                     item.get('role') == 'tool' for item in checkpoint['messages'])))
@@ -614,7 +620,7 @@ class TaskRunner:
                            summary=PHASES['finish_task' if finalizing else 'model'], question=None,
                            progress={'phase': 'finish_task' if finalizing else 'model',
                                      'read_sources': sum(bool(s.get('extracted')) for s in sources.values())},
-                           checkpoint=self._checkpoint(current, revision, messages, sources, suggestions, observations, tool_count))
+                           checkpoint=self._checkpoint(current, revision, messages, sources, suggestions, observations, tool_count, retrieval))
                 await self._trace(current, "step.started", {}, revision=revision, step=step, status="running")
                 phase = "model"
                 model_call_id = uuid4().hex
@@ -623,7 +629,7 @@ class TaskRunner:
                     revision=revision, step=step, call_id=model_call_id,
                     model_call_id=model_call_id, status="running")
                 try:
-                    response = await self.ark.complete(deepcopy(messages), tools=tools, thinker=thinker, **options)
+                    completed = await complete_model(self.ark, messages, tools=tools, thinker=thinker, **options)
                 except asyncio.CancelledError as exc:
                     await self._trace(current, "model.error", {"error": _safe_error(exc, None),
                                 "partial": getattr(exc, 'trace_partial', None)}, revision=revision,
@@ -637,14 +643,12 @@ class TaskRunner:
                     raise
                 # Preserve the full response before checking whether it became
                 # stale. Provider metadata is diagnostic data, never a message.
-                response = deepcopy(response)
-                meta = response.pop("_meta", {}) if isinstance(response, dict) else {}
-                await self._trace(current, "model.completed", {"message": response, "meta": meta},
+                response, meta = completed.message, completed.metadata
+                await self._trace(current, "model.completed", {"message": response, "meta": meta,
+                                                              "raw_return": completed.raw_return},
                             revision=revision, step=step, call_id=model_call_id,
                             model_call_id=model_call_id, status=await self._response_status(task_id, revision, 'received'))
                 await self._boundary(task_id, revision)
-                if not isinstance(response, dict):
-                    raise RuntimeError("Thinker returned a malformed message")
                 message = {"role": "assistant", "content": response.get("content")}
                 calls = response.get("tool_calls") or []
                 if calls:
@@ -687,26 +691,32 @@ class TaskRunner:
                                 tool_count += 1
                             await self._save(task_id, revision, summary=self._progress(name, arguments),
                                        progress={'phase': name, 'read_sources': sum(bool(s.get('extracted')) for s in sources.values())})
-                            if name == "lookup_web":
-                                lookup_count += 1
-                                if lookup_count > 2:
-                                    raise ValueError("快速查询最多两次lookup，请根据实际材料finish_task，不能确认就如实说明。")
-                                operation = self._quick_lookup(arguments, sources, suggestions, observations,
-                                    current, revision, step, model_call_id, call_id)
+                            limits = RetrievalLimits(max_calls_per_tool=step_limit, max_total_calls=step_limit)
+                            if name in RETRIEVAL_TOOLS and not allow_retrieval(retrieval, name, limits):
+                                result = retrieval_feedback(retrieval, name)
+                                observations.append({'tool': name, 'ok': False, 'attempted': False,
+                                                     'code': result['code']})
                             else:
-                                if (mode == "quick" and name == "finish_task" and not self._has_current_attempt(observations)
-                                        and not (arguments.get("reuse_prior_evidence") is True and sources
-                                                 and any(source.get("extracted") or source.get("verified") for source in sources.values()))):
-                                    raise ValueError("当前版本须先lookup_web或get_weather_forecast真实核实；旧版本查询不能完成新条件。必要条件不足请ask_clarification。")
-                                adopted = (_weather_finish_guard(arguments, current, sources, observations, verifier=self.forecast_verifier)
-                                           if name == "finish_task" else [])
-                                operation = self._execute_tool(name, arguments, sources, suggestions, observations,
-                                                               source_domains=_required_source_domains(current),
-                                                               adopted_forecasts=adopted)
-                            actual_attempt = True
-                            result = await asyncio.wait_for(
-                                operation,
-                                timeout=self.tool_timeout_seconds)
+                                if name == "lookup_web":
+                                    lookup_count += 1
+                                    if lookup_count > 2:
+                                        raise ValueError("快速查询最多两次lookup，请根据实际材料finish_task，不能确认就如实说明。")
+                                    operation = self._quick_lookup(arguments, sources, suggestions, observations,
+                                        current, revision, step, model_call_id, call_id)
+                                else:
+                                    if (mode == "quick" and name == "finish_task" and not self._has_current_attempt(observations)
+                                            and not (arguments.get("reuse_prior_evidence") is True and sources
+                                                     and any(source.get("extracted") or source.get("verified") for source in sources.values()))):
+                                        raise ValueError("当前版本须先lookup_web或get_weather_forecast真实核实；旧版本查询不能完成新条件。必要条件不足请ask_clarification。")
+                                    adopted = (_weather_finish_guard(arguments, current, sources, observations, verifier=self.forecast_verifier)
+                                               if name == "finish_task" else [])
+                                    operation = self._execute_tool(name, arguments, sources, suggestions, observations,
+                                                                   source_domains=_required_source_domains(current),
+                                                                   adopted_forecasts=adopted)
+                                actual_attempt = True
+                                result = await asyncio.wait_for(
+                                    operation,
+                                    timeout=self.tool_timeout_seconds)
                             if name == "finish_task" and result.get("ok"):
                                 result["result"]["query_mode"] = mode
                                 if finalizing:
@@ -744,14 +754,21 @@ class TaskRunner:
                                     status=await self._response_status(task_id, revision, 'error'))
                         observations.append({"tool": name, "ok": False, "attempted": actual_attempt,
                                              "error": result["error"]})
+                    model_result = deepcopy(result)
+                    if name in RETRIEVAL_TOOLS and actual_attempt:
+                        retrieval, report = record_retrieval(retrieval,
+                            invocation_id=f'{task_id}:{revision}:{model_call_id}:{call_id}',
+                            tool_name=name, result=result)
+                        model_result = annotate_evidence(result, name)
+                        model_result['retrieval_progress'] = report.model_dump()
                     messages.append({"role": "tool", "tool_call_id": call_id,
-                                     "content": json.dumps(result, ensure_ascii=False)})
+                                     "content": json.dumps(model_result, ensure_ascii=False)})
                     # Persist each completed tool before the next await, so timed
                     # delivery can reuse real evidence even in a cancelled batch.
                     await self._save(task_id, revision, sources=list(sources.values()),
-                               checkpoint=self._checkpoint(current, revision, messages, sources, suggestions, observations, tool_count))
+                               checkpoint=self._checkpoint(current, revision, messages, sources, suggestions, observations, tool_count, retrieval))
                 await self._save(task_id, revision, transcript=messages, sources=list(sources.values()),
-                    checkpoint=self._checkpoint(current, revision, messages, sources, suggestions, observations, tool_count))
+                    checkpoint=self._checkpoint(current, revision, messages, sources, suggestions, observations, tool_count, retrieval))
                 if terminal:
                     status, fields = terminal
                     await self._boundary(task_id, revision)
@@ -795,11 +812,12 @@ class TaskRunner:
             raise ValueError('Task checkpoint release/version mismatch; explicit migration or a new task is required')
 
     @staticmethod
-    def _checkpoint(task, revision, messages, sources, suggestions, observations, tool_count):
+    def _checkpoint(task, revision, messages, sources, suggestions, observations, tool_count, retrieval=None):
         return {'checkpoint_version': 1, 'release_id': get_release_id(),
                 'goal': task['goal'], 'revision': revision, 'messages': messages,
                 'sources': list(sources.values()), 'suggestions': suggestions,
                 'observations': observations, 'tool_count': tool_count,
+                'retrieval': retrieval.model_dump() if retrieval is not None else (task.get('checkpoint') or {}).get('retrieval', {}),
                 'constraint_count': len(task.get('constraints', []))}
 
     async def _quick_lookup(self, args, sources, suggestions, observations, task, revision,

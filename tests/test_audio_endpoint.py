@@ -13,7 +13,7 @@ class Ark:
     def __init__(self):
         self.gate = asyncio.Event()
 
-    async def stream(self, messages, tools):
+    async def stream(self, messages, tools, **options):
         await self.gate.wait()
         yield {'type': 'delta', 'text': '路由测试回答。'}
         yield {'type': 'message', 'message': {'role': 'assistant', 'content': '路由测试回答。'}}

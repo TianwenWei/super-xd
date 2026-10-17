@@ -2,6 +2,10 @@
 
 Uses the existing synthetic Xiaohe fixture, never the physical microphone.
 """
+if __name__ == "__main__":
+    from backend.local_environment import load_local_environment
+    load_local_environment()
+
 import argparse
 import asyncio
 from datetime import datetime, timezone

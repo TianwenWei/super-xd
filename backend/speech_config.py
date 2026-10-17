@@ -3,6 +3,34 @@ from backend.prompt_config import config_text, validate_config
 from backend.textutil import halfwidth_alnum
 from jsonschema import ValidationError
 
+
+_VEHICLE_SPEECH_EXPECTED = {
+    key: set() for key in (
+        "rejections.vehicle_moving", "rejections.temperature_range", "rejections.fan_range",
+        "rejections.steering_moving", "rejections.window_range", "rejections.rear_window_locked",
+        "rejections.window_speed", "rejections.anti_pinch_moving", "rejections.mirror_folded",
+        "rejections.child_lock_moving", "rejections.washer_empty", "rejections.volume_range",
+        "rejections.waypoint_limit", "rejections.waypoint_missing", "rejections.driver_seat_moving",
+        "rejections.seat_memory_moving", "rejections.sunroof_speed", "rejections.mirror_speed",
+        "rejections.mirror_range", "rejections.unlock_moving", "rejections.charge_port_busy",
+        "rejections.tailgate_moving", "rejections.default", "state.preferences_notice",
+        "state.initial_track", "state.navigation_notice",
+        "speaker.driver", "speaker.front_passenger", "speaker.rear_left", "speaker.rear_right",
+    )
+}
+
+_VEHICLE_SPEECH_EXPECTED.update({
+    "rejections.seat_axis_range": {"axis", "lower", "upper"},
+    "state.track": {"index"},
+})
+
+validate_config("speech/vehicle.toml", _VEHICLE_SPEECH_EXPECTED)
+
+
+def vehicle_text(key, **variables):
+    return config_text('speech/vehicle.toml', key, **variables)
+
+
 RECEIPTS_FIELDS = {'labels.seat.driver': set(),
  'labels.seat.front_passenger': set(),
  'labels.seat.rear_left': set(),
@@ -218,21 +246,7 @@ def persona_text(key, **variables):
     return config_text('speech/persona.toml', key, **{name: str(value) for name, value in variables.items()})
 
 
-FEEDBACK_FIELDS = {'dispatch.grouped': set(),
- 'dispatch.text': {'action'},
- 'dispatch.seat.driver': set(),
- 'dispatch.seat.front_passenger': set(),
- 'dispatch.seat.rear_left': set(),
- 'dispatch.seat.rear_right': set(),
- 'dispatch.seat.all': set(),
- 'dispatch.set_window_position.closed': {'seat'},
- 'dispatch.set_window_position.open': {'seat'},
- 'dispatch.set_window_position.partial': {'position', 'seat'},
- 'dispatch.close_all_windows': set(),
- 'dispatch.set_navigation_destination': {'destination'},
- 'dispatch.set_temperature': {'temperature'},
- 'dispatch.fallback': set(),
- 'task.phases.search_web': set(),
+FEEDBACK_FIELDS = {'task.phases.search_web': set(),
  'task.phases.lookup_web': set(),
  'task.phases.extract_web': set(),
  'task.phases.get_weather_forecast': set(),
@@ -274,6 +288,8 @@ FEEDBACK_FIELDS = {'dispatch.grouped': set(),
  'errors.instruction_format': set(),
  'errors.model_connection_pending': set(),
  'errors.model_connection': set(),
+ 'errors.operation_incomplete': set(),
+ 'errors.outcome_unknown': set(),
  'errors.no_function': set(),
  'errors.planner_unverified': set(),
  'errors.planner_incomplete': set(),
@@ -288,6 +304,7 @@ FEEDBACK_FIELDS = {'dispatch.grouped': set(),
  'errors.plan_not_executed': set(),
  'errors.executor_rejected': set(),
  'vehicle.kept_settings': set(),
+ 'vehicle.confirmed': set(),
  'errors.audio_receiver_slow': set(),
  'errors.lookup_timeout': set(),
  'errors.lookup_failed': set(),

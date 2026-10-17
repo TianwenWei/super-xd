@@ -18,7 +18,7 @@ class FakeArk:
         self.responses = list(responses)
         self.requests = []
 
-    async def stream(self, messages, tools):
+    async def stream(self, messages, tools, **options):
         self.requests.append({'messages': copy.deepcopy(messages), 'tools': copy.deepcopy(tools)})
         response = self.responses.pop(0)
         if isinstance(response, Exception):
@@ -31,6 +31,30 @@ class FakeArk:
         yield {'type': 'message', 'message': {'role': 'assistant', **response}}
 
 
+def configure_task_fixtures(actor):
+    """Seed tasks as registrations under the same frozen NLP deployment."""
+    create = actor.db.create_task
+    def registered(session_id, goal, context=None, **options):
+        context = {'release_id': actor.nlp.release_id, 'model_policy_id': actor.nlp.model_policy_id,
+                   **(context or {})}
+        return create(session_id, goal, context, **options)
+    actor.db.create_task = registered
+
+
+async def manage_task(actor, arguments):
+    from uuid import uuid4
+    from backend.harness.contracts import ToolRequest
+    from backend.harness.product_policy import normalize_task_arguments, ProductPolicyError
+    try:
+        normalized = normalize_task_arguments(arguments, actor.task_list())
+    except ProductPolicyError as error:
+        return error.result
+    turn = Turn('task-read', '查询任务进度', actor.persona, actor.persona_version)
+    request = ToolRequest(invocation_id=uuid4().hex, tool_call_id='task-read', name='manage_task',
+                          arguments=arguments, idempotency_key=uuid4().hex)
+    return await actor.nlp.task_service.handle(actor.nlp_start_request(turn), request, normalized)
+
+
 @pytest.fixture
 async def make_actor(tmp_path):
     actors = []
@@ -39,6 +63,8 @@ async def make_actor(tmp_path):
         db = Database(tmp_path / f'{len(actors)}.sqlite3')
         actor = SessionActor(f'session{len(actors)}', db, ark,
                              vehicle_planner=vehicle_planner or FakeVehiclePlanner())
+        configure_task_fixtures(actor)
+        actor.simulator.execution_ms = actor.simulator.network_rtt_ms = 0
         actors.append(actor)
         outgoing = await actor.attach()
         await outgoing.get()  # initial snapshot
@@ -60,7 +86,9 @@ async def wait_for(q, type_, ack_actor=None, timeout=2):
             event = await q.get()
             events.append(event)
             if event['type'] == 'vehicle.command' and ack_actor:
-                await ack_actor.post({'type': 'vehicle.execute', 'command_id': event['command_id']})
+                receipt = await ack_actor.simulator.execute(event['command_id'])
+                await ack_actor.post({'type': 'vehicle.receipt', 'command_id': event['command_id'],
+                                      'receipt_id': receipt['receipt_id']})
             if event['type'] == type_:
                 return event, events
 
@@ -135,7 +163,8 @@ async def test_interruption_late_receipt_and_duplicate_execution(make_actor):
 
 
 async def test_two_tasks_require_cancel_disambiguation(make_actor):
-    actor, q, ark = await make_actor([{'tool_calls': [call('manage_task', {'action':'cancel'})]}])
+    actor, q, ark = await make_actor([{'tool_calls': [call('manage_task', {'action':'cancel'})]},
+                                     {'content': '你要取消哪项任务？'}])
     a = actor.db.create_task(actor.id, '调研甲')
     b = actor.db.create_task(actor.id, '调研乙')
     sync_tasks(actor)
@@ -226,14 +255,16 @@ async def test_cold_vehicle_delegation_does_not_add_schema_or_second_talker_call
     ], planner)
     await actor.post({'type': 'input', 'text': '打开后视镜加热'})
     done, events = await wait_for(q, 'stream.done', actor)
-    assert done['metrics']['model_calls'] == 1 and len(planner.requests) == 1
+    assert done['metrics']['model_calls'] == 2 and done['metrics']['model_calls_by_role'] == {'talker': 1, 'planner': 1}
+    assert len(planner.requests) == 1
     assert actor.vehicle['mirrors']['heating']
     assert len(ark.requests[-1]['tools']) == 26
     assert all(t['function']['name'] != 'set_mirror_heating' for t in ark.requests[-1]['tools'])
 
 
 async def test_invalid_arguments_do_not_change_state(make_actor):
-    actor, q, ark = await make_actor([{'tool_calls': [call('set_volume', {'volume':999})]}])
+    actor, q, ark = await make_actor([{'tool_calls': [call('set_volume', {'volume':999})]},
+        {'content': '音量需要在零到一百之间，这次没能执行，请重新指定。'}])
     old = copy.deepcopy(actor.vehicle)
     await actor.post({'type':'input','text':'音量999'})
     done, events = await wait_for(q,'stream.done')
@@ -286,7 +317,9 @@ async def test_network_error_is_explicit_failure(make_actor):
     actor, q, ark = await make_actor([RuntimeError('Ark HTTP 401')])
     await actor.post({'type':'input','text':'你好'})
     done, _ = await wait_for(q,'stream.done')
-    assert '401' in done['metrics']['error'] and '连接出了问题' in done['text']
+    assert done['metrics']['error'] == 'model_or_protocol_error' and '连接出了问题' in done['text']
+    await actor.trace_queue.join()
+    assert any('401' in json.dumps(row['data']) for row in actor.db.traces_after(actor.id))
     assert '401' not in done['text']
 
 
@@ -334,6 +367,7 @@ async def test_compound_hot_receipts_cover_every_intent_without_unrelated_settin
                         call('set_seat_massage', {'seat': 'driver', 'mode': 'relax'}, 'massage')]},
     ])
     actor.vehicle['windows']['positions']['driver'] = 50
+    actor.simulator.state = copy.deepcopy(actor.vehicle)
     before = copy.deepcopy(actor.vehicle)
     await actor.post({'type': 'input', 'text': '打开空调、关上全部车窗、打开主驾放松按摩'})
     done, events = await wait_for(q, 'stream.done', actor)
@@ -357,13 +391,14 @@ async def test_read_result_is_given_to_model_instead_of_generic_completed_reply(
         {'content': '主驾车窗开到一半，其他三扇都关着。'},
     ], planner)
     actor.vehicle['windows']['positions']['driver'] = 50
+    actor.simulator.state = copy.deepcopy(actor.vehicle)
     before = copy.deepcopy(actor.vehicle)
     await actor.post({'type': 'input', 'text': '读一下各个车窗的状态'})
     done, _ = await wait_for(q, 'stream.done', actor)
     assert actor.vehicle == before
     assert done['text'] == '主驾车窗开到一半，其他三扇都关着。'
     outer = next(json.loads(m['content']) for m in ark.requests[-1]['messages'] if m.get('tool_call_id') == 'delegate-read')
-    assert outer['read_results'][0]['result']['value']['position'] == 50
+    assert [row for row in outer['receipts'] if row['name'] == 'get_window_state'][0]['result']['value']['position'] == 50
     assert not any(c['function']['name'] == 'get_window_state' for m in actor.history() for c in m.get('tool_calls', []))
 
 
@@ -407,13 +442,14 @@ async def test_mixed_read_write_continuation_requires_actual_state_answer(make_a
         {'content': '主驾车窗开到百分之五十。'},
     ], planner)
     actor.vehicle['windows']['positions']['driver'] = 50
+    actor.simulator.state = copy.deepcopy(actor.vehicle)
     await actor.post({'type': 'input', 'text': '告诉我主驾车窗开度，再把音量调到35'})
     done, _ = await wait_for(q, 'stream.done', actor)
     assert len(ark.requests) == 2 and len(planner.requests) == 1
     assert '主驾车窗开到百分之五十' in done['text']  # Success is not repeated after the dispatch sentence.
     assert actor.vehicle['media']['volume'] == 35
     result = actor.current.tool_results['mixed']
-    assert result['read_results'][0]['result']['value']['position'] == 50
+    assert [row for row in result['receipts'] if row['name'] == 'get_window_state'][0]['result']['value']['position'] == 50
 
 
 async def test_batch_task_progress_returns_each_selected_task_and_rejects_foreign_ids(make_actor):
@@ -421,18 +457,18 @@ async def test_batch_task_progress_returns_each_selected_task_and_rejects_foreig
     a = actor.db.create_task(actor.id, '科学工业城研究', context={'spoken_goal': '科学工业城研究'})
     b = actor.db.create_task(actor.id, '自然历史博物馆研究', context={'spoken_goal': '自然历史博物馆研究'})
     sync_tasks(actor)
-    result = actor.task_tool('manage_task', {'action': 'get', 'task_ids': [a['id'], b['id']]})
+    result = await manage_task(actor, {'action': 'get', 'task_ids': [a['id'], b['id']]})
     assert result['ok'] and [task['id'] for task in result['tasks']] == [a['id'], b['id']]
-    assert all(task['goal'] in result['detail'] for task in (a, b))
+    assert [task['goal'] for task in result['tasks']] == [a['goal'], b['goal']]
     foreign = actor.db.create_task('other-session', '其他会话任务')
-    refused = actor.task_tool('manage_task', {'action': 'get', 'task_ids': [a['id'], foreign['id']]})
+    refused = await manage_task(actor, {'action': 'get', 'task_ids': [a['id'], foreign['id']]})
     assert refused['ok'] is False and 'tasks' not in refused
     for args in ({'action':'cancel','task_ids':[a['id']]},
                  {'action':'get','task_ids':[a['id']], 'task_id':b['id']},
                  {'action':'get','task_ids':[a['id'],a['id']]},
                  {'action':'get','task_ids':['',a['id']]},
                  {'action':'get','task_ids':[' \t',a['id']]}):
-        assert actor.task_tool('manage_task', args)['ok'] is False
+        assert (await manage_task(actor, args))['ok'] is False
     assert actor.db.get_task(a['id'])['revision'] == 1
     assert actor.db.get_task(b['id'])['revision'] == 1
 
@@ -441,7 +477,7 @@ async def test_batch_progress_empty_id_cannot_resolve_unique_active_task(make_ac
     actor, _, _ = await make_actor([])
     only = actor.db.create_task(actor.id, '唯一活跃任务')
     for identity in ('', ' ', '\n'):
-        result = actor.task_tool('manage_task', {'action': 'get', 'task_ids': [identity, only['id']]})
+        result = await manage_task(actor, {'action': 'get', 'task_ids': [identity, only['id']]})
         assert result['ok'] is False and 'tasks' not in result
 
 
@@ -482,6 +518,7 @@ async def test_explicit_ambient_power_preservation_is_passed_to_plan_and_preserv
         {'tool_calls': [call('delegate_vehicle_control', {'skill_ids': ['lights']}, 'colors')]},
     ], planner)
     actor.vehicle['lights']['ambient'] = initial_power
+    actor.simulator.state = copy.deepcopy(actor.vehicle)
     original = '氛围灯颜色改蓝色、亮度60%，氛围灯开关别动。'
     await actor.post({'type': 'input', 'text': original})
     done, events = await wait_for(q, 'stream.done', actor)
@@ -490,7 +527,7 @@ async def test_explicit_ambient_power_preservation_is_passed_to_plan_and_preserv
     assert actor.vehicle['lights']['ambient_color'] == 'blue'
     assert actor.vehicle['lights']['ambient_brightness'] == 60
     assert planner.requests[0]['request_text'] == original
-    assert actor.current.tool_results['colors']['keep_paths'] == ['lights.ambient']
+    assert actor.current.vehicle_plans['colors']['plan']['keep_paths'] == ['lights.ambient']
     assert len(ark.requests) == 1
 
 
@@ -546,7 +583,7 @@ class HeldDeltaArk(FakeArk):
         super().__init__(responses)
         self.delta_sent = asyncio.Event()
 
-    async def stream(self, messages, tools):
+    async def stream(self, messages, tools, **options):
         self.requests.append({'messages': copy.deepcopy(messages), 'tools': copy.deepcopy(tools)})
         response = copy.copy(self.responses.pop(0))
         gate = response.pop('gate', None)
@@ -582,16 +619,19 @@ async def test_proactive_history_keeps_exact_text_and_immutable_task_attribution
     done, _ = await wait_for(q, 'stream.done')
     announced = actor.current
     text = done['text']
-    attribution = json.loads(announced.messages[0]['content'].splitlines()[-1])
+    attribution = copy.deepcopy(announced.source_task)
     assert attribution == {key: ordinary[key] for key in ('id', 'goal', 'revision', 'status')}
-    assert announced.messages[1] == {'role': 'assistant', 'content': text}
+    assert announced.messages == [{'role': 'assistant', 'content': text}]
     actor.db.mutate_task(ordinary['id'], 'update', '改查后天')
     sync_tasks(actor)
     await actor.post({'type': 'input', 'text': '你好'})
     await wait_for(q, 'stream.done')
     context = actor.messages_for(actor.current)
-    assert announced.messages[0] in context and announced.messages[1] in context
-    assert json.loads(announced.messages[0]['content'].splitlines()[-1])['revision'] == 1
+    source = next(turn for turn in actor.current.start_request.history if turn.turn_id == announced.id)
+    assert source.source_task.model_dump(include=set(attribution)) == attribution
+    assert source.records[0].content == text
+    assert announced.messages[0] in context
+    assert announced.source_task['revision'] == 1
     current = next(json.loads(m['content'].splitlines()[-1])['background_tasks_reference_only']
                    for m in context if m['role'] == 'system' and m['content'].startswith('当前会话快照'))
     assert next(t for t in current if t['id'] == ordinary['id'])['revision'] == 2
@@ -609,7 +649,8 @@ async def test_current_task_references_include_recent_completed_results_without_
     before = copy.deepcopy(actor.db.list_tasks(actor.id))
     sync_tasks(actor)
     turn = Turn('current', '你好', actor.persona, 1)
-    context = json.loads(actor.messages_for(turn)[2]['content'].splitlines()[-1])
+    context = next(json.loads(message['content'].splitlines()[-1]) for message in actor.messages_for(turn)
+                   if message['role'] == 'system' and message['content'].startswith('当前会话快照'))
     refs = context['background_tasks_reference_only']
     assert [t['id'] for t in refs] == ids[-8:]
     assert all(t['status'] == 'completed' for t in refs)
@@ -684,6 +725,7 @@ async def test_typed_weather_profile_rejects_before_registration_then_same_talke
         {'tool_calls': [call('delegate_task', wrong_args, 'wrong-profile')]},
         {'tool_calls': [call('delegate_task', corrected_args, 'quick-profile')], 'gate': gate},
     ])
+    actor.configure_nlp()
     await actor.post({'type': 'input', 'text': '查询法国气象局官网，核对法国巴黎明天的温度。'})
     async with asyncio.timeout(1):
         while len(ark.requests) < 2:
@@ -693,7 +735,7 @@ async def test_typed_weather_profile_rejects_before_registration_then_same_talke
     refused = actor.current.tool_results['wrong-profile']
     assert refused['ok'] is False and refused['executed'] is False and refused['retry_model'] is True
     assert refused['code'] == 'weather_quick_required'
-    assert refused['delegation_policy_guard']['requested_query_mode'] == mode
+    assert refused['required_query_mode'] == 'quick'
     original_call = next(c for m in actor.current.messages for c in m.get('tool_calls', []) if c['id'] == 'wrong-profile')
     assert json.loads(original_call['function']['arguments']) == wrong_args
     assert not any(e['type'] == 'ui.card' for e in q._queue)
@@ -706,10 +748,13 @@ async def test_typed_weather_profile_rejects_before_registration_then_same_talke
     assert tasks[0]['context']['query_mode'] == 'quick' and done['metrics']['error'] is None
     assert len([e for e in events if e['type'] == 'ui.card']) == 1
     traces = actor.db.traces_after(actor.id)
-    error = next(e for e in traces if e['kind'] == 'tool.error' and e['call_id'] == 'wrong-profile')
-    assert json.loads(error['data']['arguments']) == wrong_args
+    error = next(e for e in traces if e['kind'] == 'policy.rejected' and 'wrong-profile' in e['data']['tool_call_ids'])
+    assert error['data']['result'] == refused
     assert error['data']['result']['code'] == 'weather_quick_required'
-    assert any(e['kind'] == 'model.completed' and e['data']['message'].get('tool_calls') == [original_call] for e in traces)
+    proposed = next(e['data']['message']['tool_calls'][0] for e in traces if e['kind'] == 'model.completed'
+                    and e['data']['message'].get('tool_calls', [{}])[0].get('id') == 'wrong-profile')
+    assert proposed['function']['name'] == original_call['function']['name']
+    assert json.loads(proposed['function']['arguments']) == wrong_args
     schema = next(t['function']['parameters']['properties'] for t in ark.requests[0]['tools'] if t['function']['name'] == 'delegate_task')
     assert 'weather' in schema['query_domain']['description'] and 'quick' in schema['query_domain']['description']
 
@@ -732,7 +777,7 @@ async def test_repeated_weather_research_parameters_stop_at_existing_five_call_l
     actor, q, ark = await make_actor([{'tool_calls': [wrong]}] * 5)
     await actor.post({'type': 'input', 'text': '查法国巴黎明天天气。'})
     done, events = await wait_for(q, 'stream.done')
-    assert len(ark.requests) == 5 and done['metrics']['error'] == 'model_step_limit'
+    assert len(ark.requests) == 5 and done['metrics']['error'] == 'model_call_budget_exhausted'
     assert actor.db.list_tasks(actor.id) == []
     assert not any(e['type'] in {'ui.card', 'vehicle.command'} for e in events)
 
@@ -742,6 +787,7 @@ async def test_relative_all_zone_feedback_reports_actual_nonuniform_targets_not_
         {'tool_calls': [call('adjust_temperature', {'zone': 'all', 'delta': 1}, 'relative')]},
     ])
     actor.vehicle['climate']['temperatures'].update(driver=20, front_passenger=22, rear=24)
+    actor.simulator.state = copy.deepcopy(actor.vehicle)
     await actor.post({'type': 'input', 'text': '所有温区都调高一度。'})
     done, events = await wait_for(q, 'stream.done', actor)
     receipt = next(e for e in events if e['type'] == 'vehicle.result')['result']
@@ -842,7 +888,7 @@ async def test_text_is_spoken_while_the_model_is_still_generating(tmp_path):
     gate = asyncio.Event()
 
     class GatedArk:
-        async def stream(self, messages, tools):
+        async def stream(self, messages, tools, **options):
             yield {'type': 'delta', 'text': '这就把主驾调到二十三度。'}
             await gate.wait()
             yield {'type': 'message', 'message': {'role': 'assistant', 'content': '这就把主驾调到二十三度。',

@@ -15,6 +15,7 @@ from backend.speech_config import feedback_text
 from backend.speech_text import brief_result, speech_text
 from backend.task_feedback import task_user_detail
 from .contracts import Contract
+from .gateway_contracts import PersonaId, TaskStatus
 from .release import get_release_id
 from .run import RunProtocolError
 
@@ -52,9 +53,8 @@ class TaskPresentationRequest(Contract):
     conversation_id: str = Field(min_length=1, max_length=128)
     task_id: str = Field(min_length=1, max_length=128)
     revision: int = Field(ge=1)
-    expected_status: Literal['queued', 'running', 'waiting_clarification', 'awaiting_confirm',
-                             'cancelling', 'completed', 'failed', 'cancelled']
-    persona_id: Literal['professional', 'warm', 'playful'] = 'professional'
+    expected_status: TaskStatus
+    persona_id: PersonaId = 'professional'
 
 
 class TaskPresentationResult(Contract):
@@ -87,7 +87,7 @@ class TaskService:
         if context.get('release_id') != self.release_id or context.get('model_policy_id') != self.model_policy_id:
             raise RunProtocolError('Task deployment release/model policy does not match its registration')
 
-    async def handle(self, start, request, arguments=None):
+    async def handle(self, start, request, arguments=None, *, manual_registration=False):
         if not start.conversation_id:
             raise RunProtocolError('Background operations require a Gateway conversation identity')
         store = self.store.for_scope(start.conversation_id)
@@ -97,8 +97,10 @@ class TaskService:
             history = [{'role': row.role, 'content': row.content}
                        for turn in start.history[-4:] for row in turn.records
                        if row.role in {'user', 'assistant'} and row.content and not getattr(row, 'tool_calls', [])]
+            history.append({'role': 'user', 'content': start.user_text})
             context = {'release_id': self.release_id, 'model_policy_id': self.model_policy_id,
-                       'origin_identity': start.identity.model_dump(), 'origin_turn_id': start.identity.turn_id,
+                       'origin_identity': None if manual_registration else start.identity.model_dump(),
+                       'origin_turn_id': None if manual_registration else start.identity.turn_id,
                        'speaker': speaker_context(start.speaker_seat), 'vehicle': deepcopy(start.context.vehicle.state),
                        'recent_history': history, 'captured_at': start.received_at,
                        'timezone': start.context.environment.timezone,

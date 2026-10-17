@@ -12,8 +12,6 @@ from scripts import validate_structured_prompts as capture_script
 @pytest.fixture
 def runtime(monkeypatch):
     runtime = capture_script.import_runtime()
-    # capture_case freezes the demo actor clock; restore it after each test.
-    monkeypatch.setattr(runtime.session, 'utcnow', runtime.session.utcnow)
 
     async def unexpected_provider_call(*args, **kwargs):
         pytest.fail('offline capture invoked a real model client')
@@ -45,21 +43,12 @@ async def test_task_fixtures_use_suite_time_without_mutating_cases(runtime, monk
     explicit_time = '2026-10-13T10:00:00+00:00'
     case['tasks'][0]['created_at'] = explicit_time
     original = deepcopy(case)
-    observed = []
-    original_task_list = runtime.session.SessionActor.task_list
-
-    def task_list(actor):
-        tasks = original_task_list(actor)
-        observed.append({task['id']: task['created_at'] for task in tasks})
-        assert actor.db.list_tasks(actor.id) == list(actor.tasks.values())
-        return tasks
-
-    monkeypatch.setattr(runtime.session.SessionActor, 'task_list', task_list)
+    request, _ = capture_script.capture_start_request(runtime, case, suite['fixed_current_utc'])
+    assert request.received_at == suite['fixed_current_utc']
+    assert request.context.observed_at == suite['fixed_current_utc']
+    assert [task.id for task in request.context.tasks] == ['task_hotel', 'task_museum']
     first = await capture_script.capture_case(runtime, case, suite['fixed_current_utc'])
     second = await capture_script.capture_case(runtime, case, suite['fixed_current_utc'])
-    assert observed
-    assert all(times == {'task_hotel': explicit_time, 'task_museum': suite['fixed_current_utc']}
-               for times in observed)
     assert case == original
     assert first == second
 

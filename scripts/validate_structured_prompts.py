@@ -8,6 +8,10 @@ from the current service configuration. It never substitutes a role's model.
 """
 from __future__ import annotations
 
+if __name__ == "__main__":
+    from backend.local_environment import load_local_environment
+    load_local_environment()
+
 import argparse
 import asyncio
 from collections import Counter
@@ -42,14 +46,20 @@ def model_role(case_role):
 
 def import_runtime():
     return SimpleNamespace(task_runner=importlib.import_module('backend.harness.task_runner'),
+                           gateway=importlib.import_module('backend.harness.gateway'),
+                           wire=importlib.import_module('backend.harness.gateway_contracts'),
+                           policy=importlib.import_module('backend.harness.product_policy'),
+                           fixtures=importlib.import_module('backend.demo.vehicle_simulator'),
+                           resources=importlib.import_module('backend.demo.resources'),
+                           local_gateway=importlib.import_module('backend.demo.local_gateway'),
                            **{name: importlib.import_module(f'backend.{name}') for name in
-                              ('session', 'catalog', 'persona', 'models', 'settings')})
+                              ('catalog', 'persona', 'models', 'settings')})
 
 
-class CaptureArk:
-    async def stream(self, messages, tools):
-        self.request = {'messages': deepcopy(messages), 'tools': deepcopy(tools)}
-        yield {'type': 'message', 'message': {'role': 'assistant', 'content': 'capture-only'}}
+class CaptureOnlyModel:
+    async def stream(self, *args, **kwargs):
+        raise AssertionError('Offline capture must compile without invoking a model')
+        yield
 
 
 def set_path(state, path, value):
@@ -60,11 +70,58 @@ def set_path(state, path, value):
     node[parts[-1]] = deepcopy(value)
 
 
+def capture_start_request(runtime, case, fixed_time):
+    """Build a factual Gateway input from explicit, entirely offline fixtures."""
+    vehicle = runtime.fixtures.initial_vehicle_state()
+    for path, value in case.get('vehicle_overrides', {}).items():
+        set_path(vehicle, path, value)
+    meta = vehicle['_meta']
+    tasks = deepcopy(case.get('tasks', []))
+    for task in tasks:
+        task.setdefault('created_at', fixed_time)
+    tasks.sort(key=lambda task: task['created_at'])
+    tasks = [{key: value for key, value in task.items() if key in runtime.wire.TaskReference.model_fields}
+             | {'context': {**task.get('context', {}), 'constraints': task.get('constraints', [])}} for task in tasks]
+    history = []
+    for index, previous in enumerate(case.get('history', [])):
+        messages = deepcopy(previous.get('messages') or [
+            {'role': 'user', 'content': previous['user']},
+            {'role': 'assistant', 'content': previous['assistant']}])
+        records = runtime.local_gateway.history_records(messages)
+        pending = {call['id'] for record in records if record['role'] == 'assistant' for call in record.get('tool_calls', [])}
+        pending.difference_update(record['tool_call_id'] for record in records if record['role'] == 'tool')
+        history.append({'turn_id': f'history-{index}', 'records': records,
+                        'speaker_seat': previous.get('speaker_seat', 'driver'), 'pending_tool_group': bool(pending),
+                        'interrupted_playback': previous.get('interrupted_playback', False),
+                        'heard_text': previous.get('heard_text', ''),
+                        'playback_status': previous.get('playback_status',
+                            ('partial' if previous.get('heard_text') else 'unknown')
+                            if previous.get('interrupted_playback') else 'completed')})
+    fixture_provider = SimpleNamespace(info=lambda: {'configured': True, 'execution_location': 'cloud'})
+    capabilities, bindings = runtime.resources.LocalResources(
+        maps=fixture_provider, web=fixture_provider, manual=fixture_provider).declarations()
+    capabilities.sort(key=lambda item: (item.name, item.action or '', item.content_kind or ''))
+    places = [{'place_ref': place.get('place_ref') or 'fixture:' + place['place_id'],
+               'name': place['name'], 'provider': place.get('provider', 'fixture'),
+               'source_turn_id': 'history-0', 'presented_to_user': True, 'details': deepcopy(place)}
+              for place in case.get('recent_places', [])]
+    request = runtime.wire.StartRequest.model_validate({
+        'identity': {'run_id': 'capture-' + case['id'], 'request_id': case['id'], 'turn_id': case['id'], 'context_revision': 1},
+        'received_at': fixed_time, 'user_text': case['text'], 'speaker_seat': case.get('speaker_seat', runtime.settings.DEFAULT_SPEAKER_SEAT),
+        'persona_id': case.get('persona', 'warm'), 'history': history,
+        'context': {'revision': 1, 'observed_at': fixed_time,
+            'vehicle': {'revision': 1, 'observed_at': fixed_time, 'state': vehicle},
+            'capabilities': {'revision': 1, 'observed_at': fixed_time, 'tools': [item.model_dump() for item in capabilities],
+                'features': {name: True for name in runtime.catalog.TOOLS}, 'cockpit': {'configured': False}},
+            'environment': {'timezone': meta['timezone'], 'location':
+                {'name': meta['location'], 'country': meta.get('location_country', ''), 'source': 'user_setting'} if meta.get('location') else None},
+            'tasks': tasks, 'places': places}})
+    return request, bindings
+
+
 async def capture_case(runtime, case, fixed_time):
     if case['role'] not in ('talker', 'thinker_quick', 'thinker_research'):
         raise ValueError('Offline capture supports Talker and Thinker first decisions only')
-    session = runtime.session
-    session.utcnow = lambda: fixed_time
     if case['role'].startswith('thinker'):
         task_runner = runtime.task_runner
         mode = 'quick' if case['role'] == 'thinker_quick' else 'research'
@@ -77,47 +134,13 @@ async def capture_case(runtime, case, fixed_time):
             tools = [item for item in tools if item['function']['name'] in {'get_weather_forecast', 'ask_clarification'}]
         return {'messages': messages, 'tools': tools, 'thinker': mode == 'research',
                 'stream': False, 'max_tokens': 900 if mode == 'quick' else 6000}
-    actor = object.__new__(session.SessionActor)
-    actor.id = 'synthetic-prompt-evaluation'
-    actor.speaker_seat = case.get('speaker_seat', session.DEFAULT_SPEAKER_SEAT)
-    tasks = deepcopy(case.get('tasks', []))
-    for task in tasks:
-        # Synthetic tasks need the same ordering field supplied by the real ledger.
-        task.setdefault('created_at', fixed_time)
-    actor.db = SimpleNamespace(list_tasks=lambda session_id: deepcopy(tasks))
-    actor.tasks = {task['id']: deepcopy(task) for task in tasks}
-    actor.vehicle = runtime.catalog.initial_vehicle_state()
-    for path, value in case.get('vehicle_overrides', {}).items():
-        set_path(actor.vehicle, path, value)
-    actor.recent_places = deepcopy(case.get('recent_places', []))
-    from backend.cockpit import initial_cockpit_state
-    actor.cockpit = None
-    actor.cockpit_state = initial_cockpit_state()
-    actor.media_choices = {}
-    actor.persona = runtime.persona.PERSONAS[case.get('persona', 'warm')].model_copy(deep=True)
-    actor.ark = CaptureArk()
-    actor.turns = []
-    for index, previous in enumerate(case.get('history', [])):
-        turn = session.Turn(f'history-{index}', previous['user'], actor.persona.model_copy(deep=True), 1)
-        turn.messages = deepcopy(previous.get('messages') or [
-            {'role': 'user', 'content': previous['user']},
-            {'role': 'assistant', 'content': previous['assistant']}])
-        turn.finished = True
-        actor.turns.append(turn)
-    turn = session.Turn(case['id'], case['text'], actor.persona.model_copy(deep=True), 1)
-    turn.messages = [{'role': 'user', 'content': case['text']}]
-    if case.get('speech_mode'):
-        turn.audio_queue = asyncio.Queue()  # Voice and text now share one request shape.
-    actor.turns.append(turn)
-    actor.current = turn
-    actor.trace = lambda *args, **kwargs: None
-    actor.spawn = asyncio.create_task
-    async def ignore_post(event):
-        pass
-    actor.post = ignore_post
-    actor.launch_model(turn)
-    await turn.model_task
-    return {**actor.ark.request, 'thinker': False, 'stream': True, 'max_tokens': 900}
+    request, bindings = capture_start_request(runtime, case, fixed_time)
+    service = runtime.gateway.NLPService(CaptureOnlyModel(), model_policy_id='offline-capture',
+        semantic_policy=runtime.policy.ProductTalkerPolicy(bindings,
+            enabled_nlp_targets=['vehicle_planner', 'thinker_task', 'task_management']))
+    prepared = service.compile_start(request)
+    return {'messages': prepared.messages, 'tools': prepared.tools,
+            'thinker': False, 'stream': True, 'max_tokens': 900}
 
 
 async def capture(args):

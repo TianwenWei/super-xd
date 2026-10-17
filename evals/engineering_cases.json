@@ -52,9 +52,9 @@
     "expected": "任务上下文使用设置的IANA时区，拒绝无效时区"
   },
   {
-    "id": "dispatch_feedback",
+    "id": "verified_receipt_presentation",
     "input": "打开主驾车窗",
-    "expected": "下发即播正在打开，约700ms后成功静默；失败后补报；回执超时报状态未知"
+    "expected": "模型预告可随生成流式播报；没有预告则等真实成功回执后由NLP统一播报，Demo不得另加预告；回执超时报状态未知"
   },
   {
     "id": "delayed_tts_text",

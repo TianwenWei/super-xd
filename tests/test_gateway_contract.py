@@ -7,11 +7,12 @@ import pytest
 from pydantic import ValidationError
 
 from backend.harness.contracts import RunIdentity, ToolObservation
-from backend.harness.gateway import (DispatchRequest, GatewayCheckpoint, GatewayOutput,
-    HistoryTurn, NLPDispatch, NLPService, ResumeRequest, StartRequest, ToolDispatch)
+from backend.harness.gateway import NLPService
+from backend.harness.gateway_contracts import (DispatchRequest, GatewayCheckpoint, GatewayOutput,
+    HistoryTurn, NLPDispatch, ResumeRequest, StartRequest, ToolDispatch)
 from backend.harness.product_policy import ProductTalkerPolicy
 from backend.cockpit import initial_cockpit_state
-from backend.catalog import execute_tool
+from backend.demo.vehicle_simulator import execute_tool
 from backend.harness.release import get_release_id
 from backend.harness.run import RunProtocolError
 
@@ -240,7 +241,7 @@ async def test_release_policy_model_and_prepared_checkpoint_tampering_rejected()
     with pytest.raises(RunProtocolError):
         service(model, release_id='release-a', semantic_policy=ProductTalkerPolicy({})).resume(resume_request(saved))
     edited = saved.model_copy(deep=True)
-    edited.run.prepared.messages[0]['content'] = 'caller supplied system'
+    edited.run.prepared_digest = '0' * 64
     with pytest.raises(RunProtocolError):
         kernel.resume(resume_request(edited))
     edited = saved.model_copy(deep=True)
@@ -316,6 +317,10 @@ async def test_media_choice_provenance_and_driver_video_policy(kind, speed, know
 async def test_policy_cannot_mutate_canonical_request_while_returning_a_route():
     class MutatingPolicy:
         policy_id = 'offline-mutation-test'
+        def prepare_product_action(self, *args):
+            return binding()
+        def validate_observations(self, *args):
+            pass
         def validate_group(self, input_):
             input_.requests[0].arguments['volume'] = 99
             return [binding()]

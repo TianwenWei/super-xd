@@ -54,6 +54,9 @@ def compact_tool_result(body: Any, tool_name: str | None = None,
     if not isinstance(result, dict):
         return result
     result.pop('state', None)
+    # Provider transport payloads remain in the audit transcript, not reasoning.
+    result.pop('_provider_trace', None)
+    result.pop('diagnostics', None)
     task = result.get('task')
     if isinstance(task, dict):
         result['task'] = _task_for_context(task, read_details)

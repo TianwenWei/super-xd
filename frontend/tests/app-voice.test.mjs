@@ -30,12 +30,18 @@ const dependencyModules = {
       configure() {}
       async unlock() {
         this.unlocks = (this.unlocks || 0) + 1;
+        await runtime().audioUnlockGate?.promise;
         if (runtime().audioActivationBlocked) {
           const error = new Error('浏览器尚未解锁声音，请点击进入语音对话。');
           error.name = 'AudioActivationRequired'; throw error;
         }
       }
-      async setEnabled(enabled) { this.enables.push(enabled); this.enabled = enabled; return enabled; }
+      async setEnabled(enabled) {
+        this.enables.push(enabled);
+        if (enabled) await this.unlock();
+        await runtime().speechEnableGate?.promise;
+        this.enabled = enabled; return enabled;
+      }
       connect(session) { this.connections.push(session); }
       disconnect() { this.disconnections = (this.disconnections || 0) + 1; }
       cancel(reason) { this.cancellations.push(reason); this.callbacks.phase('idle'); return Promise.resolve(); }
@@ -158,6 +164,7 @@ function textContent(node) {
   return textContent(node.props?.children);
 }
 const hasClass = (node, name) => typeof node.props?.className === 'string' && node.props.className.split(' ').includes(name);
+function deferred() { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; }
 function eventTarget() {
   const listeners = new Map();
   return {
@@ -244,12 +251,12 @@ async function mount(t, { preferences = {}, audioActivationBlocked = false } = {
     h.handsFree.ready(); await h.flush();
     assert.equal(h.handsFree.active, true);
   };
-  h.reconnect = async () => {
-    h.socket.close(); await h.flush();
+  h.finishReconnect = async () => {
     const pending = [...h.timers].find(([, value]) => value.delay === 2000);
     assert.ok(pending, 'Control disconnect must schedule a reconnect.');
     h.timers.delete(pending[0]); pending[1].callback(); await h.flush(); await h.connect();
   };
+  h.reconnect = async () => { h.socket.close(); await h.flush(); await h.finishReconnect(); };
   t.after(() => {
     for (const slot of h.slots) slot?.cleanup?.();
     for (const [key, descriptor] of previous) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; }
@@ -265,13 +272,54 @@ test('default speech intent is checked without claiming an unlocked listening mi
   assert.equal(textContent(h.badge()).includes('持续监听中'), false);
 });
 
-test('configured fresh control connection starts continuous intent and waits for actual listening phase', async t => {
+test('a fresh connection stays microphone-off until the microphone button is clicked', async t => {
   const h = await mount(t); await h.connect();
-  assert.equal(h.handsFree.starts.length, 1, 'Fresh online connection should honor the default continuous intent.');
+  assert.equal(h.handsFree.starts.length, 0, 'Connecting must not open the microphone.');
+  assert.equal(h.handsFree.active, false);
+  assert.equal(h.voiceButton().props['aria-label'], '开始连续语音对话');
+  h.voiceButton().props.onClick(); await h.flush();
+  assert.equal(h.handsFree.starts.length, 1);
   assert.equal(h.voiceButton().props['aria-pressed'], false, 'Startup must not report ready before the engine phase.');
+  assert.equal(h.voiceButton().props['aria-busy'], true);
+  assert.equal(h.voiceButton().props['aria-label'], '停止连续语音对话');
   h.handsFree.ready(); await h.flush();
   assert.equal(h.voiceButton().props['aria-pressed'], true);
+  assert.equal(h.voiceButton().props['aria-busy'], false);
+  h.voiceButton().props.onClick(); await h.flush();
+  assert.equal(h.handsFree.active, false, 'The same microphone button must stop continuous capture.');
+  assert.equal(h.voiceButton().props['aria-pressed'], false);
+  assert.equal(h.voiceButton().props['aria-label'], '开始连续语音对话');
+  assert.equal(h.handsFree.starts.length, 1);
 });
+
+test('a saved voice opt-in never starts capture on a new page or its reconnect', async t => {
+  const h = await mount(t, { preferences: { 'super-xd-voice-mode': true, 'super-xd-speech-replies': false } });
+  await h.connect();
+  assert.equal(h.handsFree.starts.length, 0);
+  assert.equal(h.speechToggle().props.checked, false, 'Speech reply preference is independent of microphone intent.');
+  await h.reconnect();
+  assert.equal(h.handsFree.starts.length, 0, 'Reconnect cannot restore a previous page\'s microphone choice.');
+});
+
+for (const phase of ['requesting', 'connecting']) {
+  test(`a second microphone click during ${phase} cancels startup and prevents reconnect restart`, async t => {
+    const h = await mount(t); await h.connect();
+    h.audioUnlockGate = deferred();
+    h.voiceButton().props.onClick(); await h.flush();
+    if (phase === 'connecting') { h.audioUnlockGate.resolve(); await h.flush(); h.handsFree.callbacks.phase('connecting'); await h.flush(); }
+    assert.equal(h.handsFree.active, true);
+    assert.equal(h.voiceButton().props.disabled, false, 'Starting capture must remain cancellable.');
+    assert.equal(h.voiceButton().props['aria-busy'], true);
+    h.voiceButton().props.onClick(); await h.flush();
+    h.audioUnlockGate.resolve(); await h.flush();
+    assert.equal(h.handsFree.active, false);
+    assert.equal(h.handsFree.cancellations.at(-1), 'user_cancel');
+    assert.equal(h.voiceButton().props['aria-busy'], false);
+    assert.equal(h.handsFree.starts.length, 1);
+    await h.reconnect();
+    assert.equal(h.handsFree.starts.length, 1);
+  });
+}
 
 test('typing a draft preserves the continuous microphone', async t => {
   const h = await mount(t); await h.connect(); await h.activate();
@@ -339,7 +387,8 @@ test('continuous ASR final submits once with enabled TTS and leaves the micropho
 
 test('provider authentication failure does not retry continuously on error or unrelated rerenders', async t => {
   const h = await mount(t); await h.connect();
-  assert.equal(h.handsFree.starts.length, 1, 'Default continuous intent should attempt once at a fresh connection.');
+  h.voiceButton().props.onClick(); await h.flush();
+  assert.equal(h.handsFree.starts.length, 1, 'An explicit microphone click should attempt once.');
   h.handsFree.providerError('显式离线语音提供商鉴权失败'); await h.flush();
   assert.equal(h.handsFree.active, false);
   assert.ok(textContent(h.find(node => node.props?.role === 'alert')).includes('显式离线语音提供商鉴权失败'));
@@ -359,7 +408,49 @@ test('explicitly stopping continuous mode survives a later control reconnect', a
   assert.equal(h.voiceButton().props['aria-pressed'], false);
 });
 
-test('stored opt-out prevents automatic voice and a new session preserves both explicit preferences', async t => {
+test('the microphone button can exit pending continuous intent while disconnected', async t => {
+  const h = await mount(t); await h.connect(); await h.activate();
+  h.socket.close(); await h.flush();
+  assert.equal(h.handsFree.active, false, 'Disconnect releases the previous microphone.');
+  assert.equal(h.voiceButton().props.disabled, false, 'The user must still be able to cancel reconnect intent.');
+  assert.equal(h.voiceButton().props['aria-label'], '停止连续语音对话');
+  h.voiceButton().props.onClick(); await h.flush();
+  assert.equal(h.voiceButton().props['aria-label'], '开始连续语音对话');
+  await h.finishReconnect();
+  assert.equal(h.handsFree.starts.length, 1);
+  assert.equal(h.handsFree.active, false);
+  assert.equal(h.voiceButton().props['aria-pressed'], false);
+});
+
+test('stopped capture rejects a late final without sending text or restarting the listener', async t => {
+  const h = await mount(t); await h.connect(); await h.activate();
+  h.handsFree.capture('stopped-segment', true); await h.flush();
+  h.voiceButton().props.onClick(); await h.flush();
+  await h.handsFree.final('停止后迟到的识别', 'stopped-segment'); await h.flush();
+  assert.equal(h.socket.sent.filter(message => message.type === 'input').length, 0);
+  assert.equal(h.speech.submissions.length, 0);
+  assert.equal(h.handsFree.submissions.length, 0);
+  assert.equal(h.handsFree.active, false);
+  assert.equal(h.handsFree.starts.length, 1);
+  await h.reconnect();
+  assert.equal(h.handsFree.starts.length, 1);
+});
+
+test('stopping while a final awaits speech readiness cancels that submission', async t => {
+  const h = await mount(t); await h.connect(); await h.activate();
+  h.handsFree.capture('pending-final', true); await h.flush();
+  h.speechEnableGate = deferred();
+  const pending = h.handsFree.final('尚未提交的最终识别', 'pending-final'); await h.flush();
+  assert.equal(h.socket.sent.filter(message => message.type === 'input').length, 0);
+  h.voiceButton().props.onClick(); await h.flush();
+  h.speechEnableGate.resolve(); await pending; await h.flush();
+  assert.equal(h.socket.sent.filter(message => message.type === 'input').length, 0);
+  assert.equal(h.speech.submissions.length, 0);
+  assert.equal(h.handsFree.submissions.length, 0);
+  assert.equal(h.handsFree.active, false);
+});
+
+test('a new session preserves the independent speech reply preference', async t => {
   const preferences = { 'super-xd-voice-mode': false, 'super-xd-speech-replies': false };
   const h = await mount(t, { preferences }); await h.connect();
   assert.equal(h.handsFree.starts.length, 0);
@@ -373,8 +464,10 @@ test('stored opt-out prevents automatic voice and a new session preserves both e
   assert.equal(sessionStorage.getItem('super-xd-speech-replies'), 'false');
 });
 
-test('blocked automatic audio activation keeps voice intent pending until an explicit retry becomes ready', async t => {
+test('blocked audio activation after a microphone click keeps intent pending until an explicit retry becomes ready', async t => {
   const h = await mount(t, { audioActivationBlocked: true }); await h.connect();
+  assert.equal(h.handsFree.starts.length, 0);
+  h.voiceButton().props.onClick(); await h.flush();
   assert.equal(h.handsFree.starts.length, 1);
   assert.equal(h.handsFree.active, false);
   assert.equal(h.speech.enabled, false);

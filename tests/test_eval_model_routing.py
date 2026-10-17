@@ -114,7 +114,6 @@ async def test_unrepresentable_capture_options_fail_without_provider_calls(confi
 
 async def test_offline_capture_reads_configured_model_names_without_constructing_clients(configured_provider, tmp_path, monkeypatch):
     runtime = script.import_runtime()
-    monkeypatch.setattr(runtime.session, 'utcnow', runtime.session.utcnow)
     source, destination = tmp_path / 'suite.json', tmp_path / 'capture.json'
     source.write_text(json.dumps({'version': 'test', 'scope': 'offline test',
         'fixed_current_utc': '2026-10-14T12:00:00+00:00', 'cases': [

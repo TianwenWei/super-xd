@@ -6,10 +6,9 @@ from copy import deepcopy
 from dataclasses import asdict, dataclass
 import hashlib
 import json
-import math
-import os
 
 from backend.catalog import HOT_TOOL_NAMES
+from backend.nlp_settings import NLPSettings
 from backend.prompt_config import validate_all
 from backend.services.config import api_key, load_services_config, resolved
 from backend.services.factory import create_llm, create_maps, create_search
@@ -17,7 +16,9 @@ from backend.services.reads import verify_forecast_record
 from backend.settings import TALKER_MODEL, THINKER_MODEL, VEHICLE_CONTROL_MODEL
 from .background import TaskService
 from .diagnostics import GatewayDiagnostics
-from .gateway import NLPService, ToolDispatch
+from .gateway import NLPService
+from .gateway_contracts import ToolDispatch
+from .observability import MeasuredLLM, Readiness, UsageMetrics
 from .product_policy import MEDIA_ACTIONS, NAVIGATION_ACTIONS, ProductTalkerPolicy
 from .task_runner import TaskRunner
 from .task_transport import GatewayTaskStore
@@ -87,14 +88,14 @@ class TaskBudget:
     quick_timeout_seconds: float = 60.0
 
     @classmethod
+    def from_settings(cls, settings: NLPSettings):
+        steps = min(20, settings.thinker_max_steps)
+        return cls(steps, max(0.01, min(60.0, settings.thinker_timeout_seconds)),
+                   max(0.01, settings.tool_timeout_seconds), min(4, steps))
+
+    @classmethod
     def from_environment(cls):
-        steps = int(os.getenv('THINKER_MAX_STEPS', '20'))
-        timeout = float(os.getenv('THINKER_TIMEOUT_SECONDS', '60'))
-        tool_timeout = float(os.getenv('TOOL_TIMEOUT_SECONDS', '12'))
-        if steps < 1 or any(not math.isfinite(value) or value <= 0 for value in (timeout, tool_timeout)):
-            raise ValueError('Task budgets must be positive and finite')
-        steps = min(20, steps)
-        return cls(steps, max(0.01, min(60.0, timeout)), max(0.01, tool_timeout), min(4, steps))
+        return cls.from_settings(NLPSettings.from_environment())
 
 
 def model_policy_id(llm, config, task_budget=None):
@@ -123,26 +124,41 @@ def model_policy_id(llm, config, task_budget=None):
 class NLPBundle:
     service: NLPService
     resources: AsyncExitStack
+    metrics: UsageMetrics
+    readiness: Readiness
+    closed: bool = False
+
+    @property
+    def local_ready(self):
+        if self.closed or self.service.task_service.store.client.is_closed:
+            return False
+        model = self.service.model
+        return all(not model.providers[model.config.role(role)['profile']].transport.client.is_closed
+                   for role in ('talker', 'planner', 'thinker', 'finalizer'))
 
     async def aclose(self):
+        self.closed = True
         await self.resources.aclose()
 
 
-async def create_nlp_services(config=None):
+async def create_nlp_services(config=None, *, settings: NLPSettings | None = None):
+    settings = settings or NLPSettings.from_environment()
     validate_all()
     config = FrozenNLPConfig(config or load_services_config())
-    task_budget = TaskBudget.from_environment()
+    task_budget = TaskBudget.from_settings(settings)
     async with AsyncExitStack() as resources:
-        llm = create_llm(config)
-        resources.push_async_callback(llm.aclose)
+        raw_llm = create_llm(config)
+        resources.push_async_callback(raw_llm.aclose)
+        metrics = UsageMetrics()
+        llm = MeasuredLLM(raw_llm, metrics)
         for name in ('talker', 'planner', 'thinker', 'finalizer'):
             if not llm.providers[config.role(name)['profile']].info()['configured']:
                 raise ValueError('Selected NLP model endpoint or credential is missing: ' + name)
         secrets = [api_key(profile) for profile in config.document['llm']['profiles'].values()]
         for domain in ('web_search', 'web_content', 'weather', 'places'):
             secrets.append(api_key(config.profile(domain)))
-        ledger = GatewayTaskStore(os.getenv('NLP_GATEWAY_URL', ''), token=os.getenv('NLP_GATEWAY_TOKEN', ''),
-                                  timeout_seconds=float(os.getenv('NLP_GATEWAY_TIMEOUT_SECONDS', '10')), secrets=secrets)
+        ledger = GatewayTaskStore(settings.gateway_url, token=settings.gateway_token.get_secret_value(),
+                                  timeout_seconds=settings.gateway_timeout_seconds, secrets=secrets)
         resources.push_async_callback(ledger.aclose)
         search = create_search(config)
         resources.push_async_callback(search.aclose)
@@ -161,4 +177,4 @@ async def create_nlp_services(config=None):
                                  enabled_nlp_targets=['vehicle_planner', 'thinker_task', 'task_management']),
                              diagnostics=GatewayDiagnostics(ledger), planner=VehicleControlPlanner(llm),
                              task_service=task_service)
-        return NLPBundle(service, resources.pop_all())
+        return NLPBundle(service, resources.pop_all(), metrics, Readiness(settings, ledger.client))

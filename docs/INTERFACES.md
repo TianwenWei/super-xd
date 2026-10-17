@@ -1,28 +1,12 @@
 # 原型接口
 
-最新范围：车控目录按 skill 加载；车书另有本地向量检索。Thinker 的真实 Tavily 网页搜索保留。Talker 固定15个热车控、3个调度、3个地点/天气工具、`web_search` 和 `search_manual`，共23个。其余85个车控函数只经Pro车控规划层渐进加载，始终不追加到Talker的可调用工具集合。
+本文描述本地Demo HTTP/WebSocket与前端事件；生产内部NLP接口见[Gateway契约](GATEWAY_CONTRACT.md)。Demo经SessionActor→NLPBridge→NLPService运行同一推理核心，SQLite、音频和模拟设备属于本地适配层。
 
-## 渐进式车控协议（2026-10-14）
+Talker固定26工具（15热车控、3调度、3地点/天气、网页、车书及3媒体/导航），其余85个车控由前台Reasoner规划，不追加到Talker工具集合。Planner使用原话、车况、音区与真实已完成动作，只开放load_skill/submit_vehicle_plan；意图span、参数、依赖和保持约束由代码校验，语义仍由模型理解。具体账本和执行规则见[NLP核心](NLP_HARNESS.md)。
 
-Talker调度函数`delegate_vehicle_control({skill_ids:[...]})`只接受子系统ID；actor提供未经改写的本轮原句、完整车况、近期历史与本轮真实已完成operations。涉及冷热混合的请求整体委托；同组含委托和直接车控、重复委托或直接冷函数时，整组在任何动作下发前拒绝，由同一Mini在原步骤上限内重选。
+完整工具组校验后才交接；模拟器独立执行并返回receipt_id、实际状态和版本，浏览器ACK不代表成功。前瞻预告可流式播放，成功已有预告时不重复播报，失败/unknown明确反馈。前端分别显示原生vehicle_calls、Planner动作及实际回执；没有对应回执不得把plan.ok或预检当执行。刷新/重连从session.snapshot恢复当前会话状态，不伪造服务重启后的历史会话恢复。
 
-独立`VehicleControlPlanner`调用`VEHICLE_CONTROL_MODEL`（默认Pro，thinking disabled），只开放`load_skill`和`submit_vehicle_plan`。`submit_vehicle_plan`参数包含`status/intents/actions/keep_paths/question/reason`：intent绑定原文准确span、action IDs或真实completed operation IDs；action包含`id/intent_id/name/arguments/depends_on`，参数使用实际函数schema；keep_paths为真实状态点路径。能力仅在该委托的Pro上下文扩张，计划不执行车辆。
-
-模型仅提交逐字`source_text`；程序仅在原句中有唯一精确匹配时补内部`source_start/end`，无匹配或重复片段均拒绝，不猜位置或修改原文。模型侧省去两份完整保持路径枚举，服务端仍按实际快照路径严格验证。`planned`意图的保持路径为空，显式保持条件使用独立`keep`意图；顶层路径必须等于这些意图的并集，不自动修删模型错误字段。
-
-actor以最新车况对整组计划预检，通过后按依赖和读写冲突排序，独立动作并行下发；实际commit回执后才把intent核销为completed。失败动作、阻塞依赖、保持项与打断分别记录。外层委托tool_result包含`source:vehicle_plan`、`status`、`intents`、`action_receipts`、`keep_paths`、`read_results`，只把真实结果回填Talker；Pro的内部调用不伪造为Mini自己的tool_calls。原文未覆盖字符只记录warning，不触发重试；结构及来源绑定验证不证明任意自然语言语义正确。
-
-模拟车端持有独立状态，实际执行前重新核对接受计划时的保持基线、最新写集合和执行副本的最终差异，通过才提交。依赖动作必须收到前置成功回执才下发。迟到旧回执仅记trace；结束时保持项按实际值核销。
-
-下发动作时立刻播报进行中反馈，`vehicle.dispatch_feedback`关联command_id，`completion_claimed:false`。成功回执不再次朗读，失败用真实reason补报；超时报告状态未确认。界面最终完成文字仍来自回执。
-
-新增轨迹：`vehicle.plan.started/received/accepted/rejected/completed`区分规划、预检和真实执行；`vehicle.plan.action_started/action_completed`关联各项。计划生命周期`source:vehicle_planner`，实际动作`source:vehicle_plan`。`vehicle.command`与`vehicle.dispatched/receipt`附加`parent_call_id/plan_call_id/action_id/intent_id`；`session.snapshot.turns[].vehicle_plans`保留`parent_call_id/plan/ledger/action_receipts`。完整原始模型观察和加载证据保存在轨迹中，规划接受与simulation均`executed:false`，ACK不计成功。
-
-前端将`vehicle_plans[].plan.actions`投影为独立的“Pro规划”视图，与原生`vehicle_calls`及实时事件按`parent_call_id:action_id`去重合并，重连可恢复。没有匹配的真实action receipt时显示待回执，不把simulation或整组plan.ok当作执行；该视图不会插入Mini模型历史。
-
-`GET /api/config`的`model.vehicle_planner`报告配置的规划模型，`vehicle_control`报告`mode:progressive_pro`、`hot_count:15`与`delegated_count:85`。研究任务`delegate_task`和研究建议确认流程独立，不用于直接车控委托。
-
-公共 Pydantic 类型在 `backend/types.py`：`ToolSpec`、`SkillManifest`、`PersonaConfig`、`SessionSnapshot`、`TaskEvent`。前端对应 TypeScript 类型在 `frontend/src/types.ts`。
+公共Demo类型在`backend/types.py`，前端类型在`frontend/src/types.ts`。
 
 ## HTTP
 
@@ -69,7 +53,7 @@ actor以最新车况对整组计划预检，通过后按依赖和读写冲突排
 - `model.completed`：完整 message 与 meta。message 保留 content、tool_calls、实际返回的 reasoning_content 及扩展字段；meta 保留供应商 ID、model、created、finish_reason、usage、接收时间与耗时。Talker meta.raw_chunks 保存收到的 SSE JSON 帧，Thinker meta.raw_response 保存完整非流式 JSON 响应。
 - `model.cancelled` / `model.error`：取消或错误及实际收到的 partial message/meta；未收到的数据不补造。旧轮次的已返回响应和错误仍保留，并标 stale/cancelled，不能触发旧工具或覆盖新回答。
 - `tool.started` / `tool.completed` / `tool.error`：工具名称、原始或解析后的参数、完整结果/拒绝。data.model_call_id 关联产生该工具调用的模型调用，call_id 关联 tool_call；两个 ID 用于区分同一轮的多次调用。
-- 字面校验拒绝时，`tool.error.data.result` 包含 `authorization_guard`（kind、原句 evidence span、适用的属性/当前值）、`executed:false`；没有对应 `vehicle.dispatched`。`literal_keep_state`覆盖氛围灯电源保持；`literal_target_mismatch`覆盖五类舒适功能和两类灯光的明确目标混用；`literal_window_hold`覆盖保留车窗与位置写集合冲突；`missing_required_origin`覆盖缺出发地的字面最近机场导航。后三类带`retry_model:true`，同一Talker可继续；未覆盖的文本仍须模型理解，None不表示完整授权证明。空会话误用 `manage_task` 返回 `code:no_task,retry_model:true,executed:false`。原始错误尝试不当作成功动作回执。
+- `policy.rejected`及工具错误：记录结构、来源或能力拒绝的完整结果，`executed:false`不能当成功回执。空会话误用manage_task可返回no_task/retry_model，由同一Talker在预算内重新选择；不使用针对原句的关键词补丁。
 - `vehicle.dispatched` / `vehicle.receipt`：命令 ID、参数、实际模拟结果、耗时或超时；旧轮次的迟到回执标 stale，仍保存真实执行结果。ACK 不是成功回执，重复 ACK 不产生第二次执行或回执记录。
 - `turn.started` / `turn.interrupted` / `turn.completed`：输入、打断或最终输出与 metrics。turn.completed 的 output_source 区分 model_content 与 persona_template；工具成功提示、拒绝和后台回流模板不会冒充模型原文。
 - `task.*`、`revision.*`、`step.*`：任务生命周期、条件版本变化及 Thinker 执行步骤；记录旧版本的观察结果不表示该版本结果已被采纳。
@@ -84,7 +68,7 @@ Talker 用独立队列和线程异步写入，SQLite 日志操作不阻塞前台
 
 前端顶部、助手消息及任务卡提供“模型输出 / Agent 轨迹”入口；抽屉支持全会话/轮次/任务范围、模型原文/完整轨迹、关联调用筛选、完整事件 JSON 和复制。展开时按游标拉取全部分页并轮询新增记录，关闭保留缓存，切换会话清空缓存；轨迹读取失败不清除已读记录。
 
-本轮真实轨迹与修复前证据见[轨迹验收](TRACE_VALIDATION.md)。旧模型回调是否 stale 由 actor 消费顺序决定，网络接收时间单独保留；已完成的旧模型输出仍可回看，不会因新输入先进入队列而误标为当前已采纳结果。
+核验方法见[轨迹核验](TRACE_VALIDATION.md)。旧模型回调是否 stale 由 actor 消费顺序决定，网络接收时间单独保留；已完成的旧模型输出仍可回看，不会因新输入先进入队列而误标为当前已采纳结果。
 
 ## WebSocket `/ws/{session_id}`
 
@@ -188,13 +172,13 @@ Talker跨轮保持固定23个工具；Pro加载仅在该委托上下文保留。
 
 每次播放有独立 playback_id，二进制帧通过它关联 audio.started，再关联原 query。控制与音频连接之间没有交叉消息排序保证；前端用 client_request_id / turn_id / playback_id 关联，不能假设 turn.started 总早于 audio.started。后台主动回流没有 query 的 client_request_id，单独记录，不混入 query 延迟分母。
 
-开启朗读后，actor在轮次开始时预热Speech连接，与模型路由重叠；首段可播文本到达才启动合成session，避免规划期间空会话超时。首阶段返回工具调用或短JSON聊天路由，不朗读任意模型前缀。确认聊天后以tools=[]生成正文，按句号/问号/感叹号/换行送TTS；额外模型调用计入延迟；若模型未按路由JSON返回，保守等完整无工具消息后整段朗读，不提前播混合流。工具阶段下发反馈、失败回执和任务登记模板均由真实结构事件触发。已部分播放后出错仍记失败。
+开启朗读后，Speech建连与Talker生成重叠，模型文字按句增量送TTS；一次Talker调用同时决定工具与表达，不做短JSON路由后再调用tools=[]的两段生成。完整工具组验证前不执行动作；预告只表示正在做，完成以真实回执/任务登记确认为准。成功已有预告时不重复朗读，失败或unknown补充真实反馈；已部分播放后出错仍记失败。
 
 取消时Worklet报告rendered_output_samples和played_ms；客户端在发送新input前等这一报告（最多150ms，超时不伪造进度）。服务端用Speech的sentence.started/finished对应PCM位置，只把已完整播放的句子放入后续模型历史；完整显示原文仍在审计记录中，没有字级时间证据时不推测半句。
 
 新输入、停止、关闭朗读或最后一个控制/音频客户端断线会取消上游并清空浏览器播放；旧帧、旧播放 false/true 与错误 ID 不覆盖新轮。audio.ended 不释放有音频的朗读占位，匹配的 Worklet drained→playback(false) 才释放，后台结果等待当前播放结束。音频断线不取消模型回答或后台任务。
 
-核心计时在同一页面的 performance.now 时间域：表单 submit→首个合法非零 PCM 到达；静音/空帧/元数据不计。另报首 PCM 入队、Worklet 首次真实样本/非零样本渲染的主线程通知观测。postMessage 入队不等于播放，Worklet 观测包含线程通知延迟且不是扬声器声学起点。最新每次query目标为≤1500ms；历史2000ms原始报告与统计保留，离线重评另列。全部提交分母、三条路径预算与采样边界见[音频验收](AUDIO_VALIDATION.md)。
+核心计时在同一页面的 performance.now 时间域：表单 submit→首个合法非零 PCM 到达；静音/空帧/元数据不计。另报首 PCM 入队、Worklet 首次真实样本/非零样本渲染的主线程通知观测。postMessage 入队不等于播放，Worklet 观测包含线程通知延迟且不是扬声器声学起点。最新每次query目标为≤1500ms；旧口径的历史数据不能充当当前验收结果。全部提交分母、三条路径预算与采样边界见[音频验收](AUDIO_VALIDATION.md)。
 
 ## 独立识别 WebSocket `/ws/{session_id}/asr`
 

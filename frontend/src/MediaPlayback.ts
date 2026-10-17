@@ -15,7 +15,7 @@ export class MediaPlayback {
   private audio: HTMLMediaElement | null = null;
   private video: HTMLMediaElement | null = null;
   private element: HTMLMediaElement | null = null;
-  private state: MediaState = { status: 'closed', position_seconds: 0, volume: 30, desired_status: 'closed' };
+  private state: MediaState = { queue: [], provider: null, status: 'closed', position_seconds: 0, volume: 30, desired_status: 'closed' };
   private version = 0;
   private epoch = 0;
   private pending: AbortController | null = null;
@@ -49,7 +49,7 @@ export class MediaPlayback {
       element.addEventListener(name, listener); this.listeners.push(() => element.removeEventListener(name, listener));
     }
   }
-  snapshot() { return { ...this.state }; }
+  snapshot() { return { ...this.state, queue: this.state.queue?.map(item => ({ ...item })) }; }
   get stateVersion() { return this.version; }
   private publish(event?: 'ended') {
     const element = this.element;
@@ -121,12 +121,13 @@ export class MediaPlayback {
         const source = this.device?.isDeviceBlob(rawSource) ? String(rawSource) : playableMediaUrl(rawSource);
         if (!source) throw new Error('未取得可播放的真实媒体地址。FM 硬件调谐不能作为网络音频播放。');
         if (!['music', 'video', 'radio'].includes(args.kind)) throw new Error('不支持此媒体类型。');
+        if (args.queue !== undefined && (!Array.isArray(args.queue) || args.queue.length > 100 || args.queue.some((item: any) => !item || typeof item.content_id !== 'string' || !item.content_id || !['music', 'video', 'radio'].includes(item.kind)) || new Set(args.queue.map((item: any) => item.content_id)).size !== args.queue.length)) throw new Error('播放队列格式无效。');
         const element = args.kind === 'video' ? this.video : this.audio;
         if (!element) throw new Error('播放器尚未就绪。');
         this.pauseElement(this.element);
         // load() cancels the prior resource and pending play promise before replacing it.
         this.pauseElement(element); element.src = source; element.load(); this.element = element;
-        this.state = { content_id: args.content_id, kind: args.kind, title: args.title || args.content_id, status: 'paused', desired_status: 'playing', position_seconds: 0, volume: this.state.volume };
+        this.state = { queue: (args.queue || []).map((item: any) => ({ ...item })), provider: args.provider || null, content_id: args.content_id, kind: args.kind, title: args.title || args.content_id, status: 'paused', desired_status: 'playing', position_seconds: 0, volume: this.state.volume };
         element.volume = this.mustPause() ? 0 : this.effectiveVolume();
         await this.start(element, pending);
         if (!current()) throw new DOMException('操作已过期。', 'AbortError');
@@ -138,7 +139,7 @@ export class MediaPlayback {
         if (command.action === 'pause') { this.state.desired_status = 'paused'; await this.pause(element!, pending.signal); this.state.status = 'paused'; }
         else if (command.action === 'resume') { this.state.desired_status = 'playing'; if (!this.mustPause()) await this.start(element!, pending); this.state.status = element!.paused ? 'paused' : 'playing'; }
         else if (command.action === 'stop') { this.state.desired_status = 'stopped'; await this.pause(element!, pending.signal); if (Number.isFinite(element!.duration)) await this.seek(element!, 0, pending.signal); this.state.status = 'stopped'; }
-        else if (command.action === 'exit') { this.state.desired_status = 'closed'; this.pauseElement(this.element); if (this.element) { this.element.removeAttribute('src'); this.element.load(); } this.element = null; this.state = { content_id: null, kind: null, title: '', status: 'closed', desired_status: 'closed', position_seconds: 0, volume: this.state.volume }; }
+        else if (command.action === 'exit') { this.state.desired_status = 'closed'; this.pauseElement(this.element); if (this.element) { this.element.removeAttribute('src'); this.element.load(); } this.element = null; this.state = { queue: this.state.queue?.map(item => ({ ...item })), provider: null, content_id: null, kind: null, title: '', status: 'closed', desired_status: 'closed', position_seconds: 0, volume: this.state.volume }; }
         else if (command.action === 'seek') await this.seek(element!, Number(args.position_seconds), pending.signal);
         else if (command.action === 'volume') { const volume = Number(args.volume); if (!Number.isFinite(volume) || volume < 0 || volume > 100) throw new Error('播放器音量应为零到一百。'); this.state.volume = volume; if (element) element.volume = this.effectiveVolume(); }
         else throw new Error('播放器不支持此操作。');

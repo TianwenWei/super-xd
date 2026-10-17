@@ -1,413 +1,33 @@
-"""Gateway V1: factual inputs, explicit policy, and resumable NLP handoffs.
-
-This module supplies no Gateway, transport, storage, device executor or default
-semantic authorization policy. The application supplies its model and policy.
-"""
+"""NLP service composition and receipt-driven run advancement."""
 from __future__ import annotations
-
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator
 from contextlib import aclosing
 import asyncio
+from copy import deepcopy
 from datetime import datetime
 import json
 import time
-from typing import Annotated, Any, Literal, Protocol
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-
+from zoneinfo import ZoneInfo
 import anyio
-from pydantic import Field, field_validator, model_validator
-
+from pydantic import ValidationError
 from backend.persona import PERSONAS, style_prompt
+from backend.catalog import TOOLS
 from backend.model_context import compact_message
-from backend.prompt_templates import render_prompt
 from backend.speaker import speaker_context
-
 from .context import ContextTurn
-from .contracts import (Contract, PreparedRun, RunBudget, RunCheckpoint, RunIdentity,
-                        RunEvent, ToolObservation, ToolRequest)
+from .contracts import PreparedRun, RunCheckpoint, ToolRequest, ToolGroupRejected
+from .gateway_contracts import (StartRequest, ResumeRequest, GatewayCheckpoint, GatewayOutput,
+    CompactRunCheckpoint, DispatchRequest, ToolDispatch, NLPDispatch, GroupCheckpoint, OrchestrationCheckpoint,
+    MAX_CONTINUATION_BYTES, wire_bytes)
+from .ports import PolicyInput, SemanticPolicy, DiagnosticRecord, DiagnosticSink
 from .run import AgentRun, ModelStream, RunProtocolError
 from .release import get_release_id
+from .diagnostics import safe_diagnostic
 from .talker import prepare_talker_run
-from .foreground import ForegroundGroup, GroupCheckpoint, OrchestrationCheckpoint
-
-
-GATEWAY_VERSION = 'gateway-v1'
-Seat = Literal['driver', 'front_passenger', 'rear_left', 'rear_right']
-PersonaId = Literal['professional', 'warm', 'playful']
-
-
-def _timestamp(value: str) -> str:
-    parsed = datetime.fromisoformat(value)
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise ValueError('Timestamps require an explicit UTC offset')
-    return value
-
-
-class VersionedSnapshot(Contract):
-    revision: int = Field(ge=0)
-    observed_at: str
-
-    _observed_at = field_validator('observed_at')(_timestamp)
-
-
-class VehicleSnapshot(VersionedSnapshot):
-    state: dict[str, dict[str, Any]]
-
-
-class ToolCapability(Contract):
-    name: str = Field(min_length=1, max_length=128)
-    operation: Literal['query', 'control']
-    execution_location: Literal['cloud', 'device']
-    domain: str = Field(min_length=1, max_length=64)
-    action: str | None = None
-    content_kind: str | None = None
-    available: bool = True
-
-
-class CapabilitySnapshot(VersionedSnapshot):
-    tools: list[ToolCapability] = Field(default_factory=list, max_length=128)
-    features: dict[str, bool] = Field(default_factory=dict)
-    cockpit: dict[str, Any] = Field(default_factory=dict)
-
-
-class LocationFact(Contract):
-    name: str = Field(min_length=1, max_length=200)
-    country: str = Field(default='', max_length=200)
-    source: Literal['user_setting', 'user_utterance', 'device', 'gps']
-
-
-class EnvironmentFacts(Contract):
-    timezone: str
-    location: LocationFact | None = None
-
-    @field_validator('timezone')
-    @classmethod
-    def valid_timezone(cls, value):
-        try:
-            ZoneInfo(value)
-        except (ZoneInfoNotFoundError, ValueError) as error:
-            raise ValueError('An IANA timezone is required') from error
-        return value
-
-
-class PlaceReference(Contract):
-    place_ref: str = Field(min_length=1, max_length=300)
-    name: str = Field(min_length=1, max_length=300)
-    provider: str = Field(min_length=1, max_length=128)
-    source_turn_id: str = Field(min_length=1, max_length=128)
-    presented_to_user: bool
-    selected_by_user: bool = False
-    details: dict[str, Any] = Field(default_factory=dict)
-
-    @model_validator(mode='after')
-    def selected_requires_presentation(self):
-        if self.selected_by_user and not self.presented_to_user:
-            raise ValueError('A selected place must have been presented to the user')
-        return self
-
-
-class MediaReference(Contract):
-    content_id: str = Field(min_length=1, max_length=500)
-    kind: Literal['music', 'video', 'radio']
-    title: str = Field(min_length=1, max_length=500)
-    provider: str = Field(min_length=1, max_length=128)
-    source_turn_id: str = Field(min_length=1, max_length=128)
-    presented_to_user: bool
-
-
-TaskStatus = Literal['queued', 'running', 'waiting_clarification', 'cancelling',
-                     'completed', 'failed', 'cancelled', 'awaiting_confirm']
-
-
-class TaskReference(Contract):
-    id: str = Field(min_length=1, max_length=128)
-    revision: int = Field(ge=1)
-    status: TaskStatus
-    goal: str = Field(min_length=1, max_length=4000)
-    summary: str = ''
-    question: str | None = None
-    error_code: str | None = None
-    result: dict[str, Any] | None = None
-    context: dict[str, Any] = Field(default_factory=dict)
-
-
-class ContextSnapshot(VersionedSnapshot):
-    vehicle: VehicleSnapshot
-    capabilities: CapabilitySnapshot
-    environment: EnvironmentFacts
-    cockpit: dict[str, Any] = Field(default_factory=dict)
-    tasks: list[TaskReference] = Field(default_factory=list, max_length=100)
-    places: list[PlaceReference] = Field(default_factory=list, max_length=100)
-    media: list[MediaReference] = Field(default_factory=list, max_length=100)
-
-    @model_validator(mode='after')
-    def unambiguous_references(self):
-        for items, field in ((self.tasks, 'id'), (self.places, 'place_ref'), (self.media, 'content_id')):
-            identities = [getattr(item, field) for item in items]
-            if len(set(identities)) != len(identities):
-                raise ValueError('Context reference identities must be unique')
-        return self
-
-
-class HistoricalCall(Contract):
-    id: str = Field(min_length=1, max_length=128)
-    name: str = Field(min_length=1, max_length=128)
-    arguments: dict[str, Any]
-
-
-class UserRecord(Contract):
-    role: Literal['user']
-    content: str = Field(min_length=1, max_length=16000)
-
-
-class AssistantRecord(Contract):
-    role: Literal['assistant']
-    content: str | None = None
-    tool_calls: list[HistoricalCall] = Field(default_factory=list, max_length=32)
-
-
-class ToolRecord(Contract):
-    role: Literal['tool']
-    tool_call_id: str = Field(min_length=1, max_length=128)
-    result: dict[str, Any]
-
-
-HistoryRecord = Annotated[UserRecord | AssistantRecord | ToolRecord, Field(discriminator='role')]
-
-
-class HistoryTurn(Contract):
-    turn_id: str = Field(min_length=1, max_length=128)
-    speaker_seat: Seat | None = None
-    records: list[HistoryRecord] = Field(min_length=1, max_length=100)
-    proactive: bool = False
-    source_task: TaskReference | None = None
-    pending_tool_group: bool = False
-    interrupted_playback: bool = False
-    heard_text: str = ''
-
-    @model_validator(mode='after')
-    def valid_protocol(self):
-        if self.proactive != (self.source_task is not None):
-            raise ValueError('Proactive history requires structured task attribution')
-        pending = set()
-        for record in self.records:
-            if isinstance(record, ToolRecord):
-                if record.tool_call_id not in pending:
-                    raise ValueError('Historical tool result has no pending call')
-                pending.remove(record.tool_call_id)
-            else:
-                if pending:
-                    raise ValueError('A historical tool group must close before the next message')
-                if isinstance(record, AssistantRecord):
-                    pending = {call.id for call in record.tool_calls}
-                    if len(pending) != len(record.tool_calls):
-                        raise ValueError('Historical tool call IDs must be unique within a group')
-        if bool(pending) != self.pending_tool_group:
-            raise ValueError('pending_tool_group must describe the actual historical group')
-        return self
-
-    def context_turn(self) -> ContextTurn:
-        records = []
-        if self.source_task is not None:
-            attribution = self.source_task.model_dump(include={'id', 'goal', 'revision', 'status'})
-            records.append({'role': 'system', 'content': render_prompt('history_attribution',
-                           attribution_json=json.dumps(attribution, ensure_ascii=False))})
-        for item in self.records:
-            if isinstance(item, ToolRecord):
-                records.append({'role': 'tool', 'tool_call_id': item.tool_call_id,
-                                'content': json.dumps(item.result, ensure_ascii=False)})
-            elif isinstance(item, AssistantRecord):
-                record = {'role': 'assistant', 'content': item.content}
-                if item.tool_calls:
-                    record['tool_calls'] = [{'id': call.id, 'type': 'function', 'function': {
-                        'name': call.name, 'arguments': json.dumps(call.arguments, ensure_ascii=False)}}
-                        for call in item.tool_calls]
-                records.append(record)
-            else:
-                records.append(item.model_dump())
-        return ContextTurn(self.turn_id, records, proactive=self.proactive,
-                           speaker_seat=self.speaker_seat, pending_tool_group=self.pending_tool_group,
-                           interrupted_playback=self.interrupted_playback, heard_text=self.heard_text)
-
-
-class StartRequest(Contract):
-    protocol_version: Literal['gateway-v1'] = GATEWAY_VERSION
-    identity: RunIdentity
-    conversation_id: str | None = Field(default=None, min_length=1, max_length=128)
-    received_at: str
-    user_text: str = Field(min_length=1, max_length=4000)
-    speaker_seat: Seat
-    persona_id: PersonaId
-    history: list[HistoryTurn] = Field(default_factory=list, max_length=100)
-    context: ContextSnapshot
-    budget: RunBudget = Field(default_factory=RunBudget)
-
-    _received_at = field_validator('received_at')(_timestamp)
-
-    @model_validator(mode='after')
-    def consistent_context(self):
-        if not self.user_text.strip():
-            raise ValueError('User input cannot be blank')
-        if self.identity.context_revision != self.context.revision:
-            raise ValueError('Run identity and context snapshot revisions must match')
-        identities = [turn.turn_id for turn in self.history]
-        if len(set(identities)) != len(identities) or self.identity.turn_id in identities:
-            raise ValueError('History must contain distinct prior turns, not the current turn')
-        return self
-
-
-class NLPDispatch(Contract):
-    kind: Literal['nlp_orchestration']
-    target: Literal['vehicle_planner', 'thinker_task', 'task_management']
-    execution_arguments: dict[str, Any] | None = None
-
-
-class ToolDispatch(Contract):
-    kind: Literal['tool_execution']
-    operation: Literal['query', 'control']
-    execution_location: Literal['cloud', 'device']
-    execution_arguments: dict[str, Any] | None = None
-    domain: str | None = None
-    depends_on: list[str] = Field(default_factory=list)
-    prepared_command: dict[str, Any] | None = None
-
-
-DispatchTarget = Annotated[NLPDispatch | ToolDispatch, Field(discriminator='kind')]
-NLP_TARGETS = {'delegate_vehicle_control': 'vehicle_planner',
-               'delegate_task': 'thinker_task', 'manage_task': 'task_management'}
-
-
-class DispatchRequest(Contract):
-    request: ToolRequest
-    dispatch: DispatchTarget
-
-    @model_validator(mode='after')
-    def correct_ownership(self):
-        expected = NLP_TARGETS.get(self.request.name)
-        if expected is not None:
-            if not isinstance(self.dispatch, NLPDispatch) or self.dispatch.target != expected:
-                raise ValueError('NLP delegation cannot be routed as a device or cloud action')
-        elif not isinstance(self.dispatch, ToolDispatch):
-            raise ValueError('A resource/device tool cannot be relabelled as NLP orchestration')
-        return self
-
-
-class GatewayCheckpoint(Contract):
-    protocol_version: Literal['gateway-v1'] = GATEWAY_VERSION
-    start: StartRequest
-    run: RunCheckpoint
-    semantic_policy_id: str = Field(min_length=1, max_length=200)
-    model_policy_id: str = Field(min_length=1, max_length=200)
-    orchestration: OrchestrationCheckpoint = Field(default_factory=OrchestrationCheckpoint)
-
-    @model_validator(mode='after')
-    def same_identity(self):
-        if self.start.identity != self.run.prepared.identity:
-            raise ValueError('Checkpoint belongs to a different run/context revision')
-        return self
-
-
-class ResumeRequest(Contract):
-    protocol_version: Literal['gateway-v1'] = GATEWAY_VERSION
-    identity: RunIdentity
-    checkpoint: GatewayCheckpoint
-    observations: list[ToolObservation] = Field(default_factory=list, max_length=128)
-    cancel: bool = False
-
-    @model_validator(mode='after')
-    def same_run(self):
-        if self.identity != self.checkpoint.start.identity:
-            raise ValueError('A continuation cannot change its run identity')
-        if any(item.identity != self.identity for item in self.observations):
-            raise ValueError('Observations must belong to the same run/context revision')
-        if self.cancel and self.observations:
-            raise ValueError('A cancellation request cannot also submit tool observations')
-        return self
-
-
-class GatewayOutput(Contract):
-    protocol_version: Literal['gateway-v1'] = GATEWAY_VERSION
-    identity: RunIdentity
-    sequence: int = Field(ge=1)
-    type: Literal['text.delta', 'run.suspended', 'run.completed', 'run.failed', 'run.cancelled']
-    text: str | None = None
-    requests: list[DispatchRequest] = Field(default_factory=list)
-    checkpoint: GatewayCheckpoint | None = None
-    error_code: str | None = None
-
-    @model_validator(mode='after')
-    def coherent_handoff(self):
-        if self.type == 'text.delta':
-            if self.text is None or self.requests or self.checkpoint is not None:
-                raise ValueError('A text delta contains text only')
-        elif self.checkpoint is None:
-            raise ValueError('Every suspension or terminal event carries a checkpoint')
-        if self.checkpoint is not None and self.checkpoint.start.identity != self.identity:
-            raise ValueError('Output identity must match its checkpoint')
-        if self.requests and self.type != 'run.suspended':
-            raise ValueError('Only a suspension may hand off new tool requests')
-        if self.checkpoint is not None:
-            state = self.checkpoint.run
-            if self.sequence != state.sequence:
-                raise ValueError('Output and checkpoint sequence must match')
-            statuses = {'run.suspended': {'waiting_tools', 'waiting_reconciliation'},
-                        'run.completed': {'completed'}, 'run.failed': {'failed'}, 'run.cancelled': {'cancelled'}}
-            if state.status not in statuses[self.type]:
-                raise ValueError('Output and checkpoint status must match')
-            groups = self.checkpoint.orchestration.groups
-            expected = ([ToolRequest.model_validate(item['request']) for item in groups[-1].external_pending]
-                        if groups and not groups[-1].done else state.pending)
-            if self.requests and [item.request for item in self.requests] != expected:
-                raise ValueError('A handoff must contain its whole pending group')
-        return self
-
-
-class PolicyInput(Contract):
-    start: StartRequest
-    checkpoint: RunCheckpoint
-    requests: list[ToolRequest]
-
-
-class SemanticPolicy(Protocol):
-    """Application-owned, synchronous, side-effect-free whole-group validation.
-
-    Must enforce grounding, POI selection, task references, layer conflicts and
-    current capabilities. Return one dispatch target per request in order, or
-    raise. A permissive test policy is not a production implementation.
-    """
-    policy_id: str
-
-    def validate_group(self, input_: PolicyInput) -> Sequence[NLPDispatch | ToolDispatch]: ...
-
-
-class DiagnosticRecord(Contract):
-    kind: Literal['run.event', 'observations.received', 'orchestration.event']
-    identity: RunIdentity
-    event: RunEvent | None = None
-    observations: list[ToolObservation] = Field(default_factory=list)
-    data: dict[str, Any] = Field(default_factory=dict)
-
-    @model_validator(mode='after')
-    def coherent_record(self):
-        if self.kind == 'run.event':
-            if self.event is None or self.event.identity != self.identity or self.observations:
-                raise ValueError('Run diagnostics require a matching event')
-        elif self.event is not None or any(item.identity != self.identity for item in self.observations):
-            raise ValueError('Observation diagnostics require matching observations only')
-        return self
-
-
-class DiagnosticSink(Protocol):
-    """NLP composition root supplies redaction and persistence, never the caller.
-
-    Apply the existing services.contracts.redact path with deployment secrets
-    before persisting. Records contain full model context and tool receipts and
-    are never part of the user/display stream. A received observation is not yet
-    accepted: the following run event records validation and resulting state.
-    """
-
-    async def emit(self, record: DiagnosticRecord) -> None: ...
-
+from .foreground import ForegroundGroup
+from .presentation import completion_presentation
+from .product_policy import ProductPolicyError
+from .evidence import RetrievalLimits, RetrievalProgress, RETRIEVAL_TOOLS, allow_retrieval, record_retrieval, retrieval_feedback, annotate_evidence
 
 class _DiagnosticsUnavailable(RuntimeError):
     pass
@@ -419,7 +39,8 @@ class NLPService:
                  planner=None, task_service=None, receipt_fast_path: bool = True):
         release_id = get_release_id() if release_id is None else release_id
         identities = (release_id, model_policy_id, getattr(semantic_policy, 'policy_id', None))
-        if any(not isinstance(value, str) or not value.strip() for value in identities) or not callable(getattr(semantic_policy, 'validate_group', None)):
+        if any(not isinstance(value, str) or not value.strip() for value in identities) or any(not callable(getattr(semantic_policy, method, None)) for method in
+            ('validate_group', 'prepare_product_action', 'validate_observations')):
             raise ValueError('Application/model releases and an explicit semantic policy are required')
         if len(model_policy_id) > 200 or len(semantic_policy.policy_id) > 200:
             raise ValueError('Deployment policy identities must be at most 200 characters')
@@ -478,12 +99,46 @@ class NLPService:
                                   snapshot=snapshot, persona_prompt=style_prompt(PERSONAS[request.persona_id]),
                                   release_id=self.release_id, budget=request.budget)
 
+    def transcript(self, checkpoint: GatewayCheckpoint) -> list[dict]:
+        """Original model transcript, including the compiled prefix, for trusted audit."""
+        if checkpoint.semantic_policy_id != self.semantic_policy.policy_id:
+            raise RunProtocolError('Transcript requires the original semantic policy release')
+        if checkpoint.model_policy_id != self.model_policy_id:
+            raise RunProtocolError('Transcript requires the original deployed model policy')
+        prepared = self.compile_start(checkpoint.start)
+        try:
+            return deepcopy(checkpoint.run.restore(prepared).messages)
+        except ValueError as error:
+            raise RunProtocolError(str(error)) from error
+
+    def turn_records(self, checkpoint: GatewayCheckpoint) -> list[dict]:
+        """Current user input and generated records, without examples/history/snapshot."""
+        self.transcript(checkpoint)  # Reject a mismatched compiled context before adoption.
+        records = [{'role': 'user', 'content': checkpoint.start.user_text}, *deepcopy(checkpoint.run.messages)]
+        pending = set()
+        for record in checkpoint.run.messages:
+            if record.get('role') == 'assistant':
+                pending.update(call['id'] for call in record.get('tool_calls', []))
+            elif record.get('role') == 'tool':
+                pending.discard(record['tool_call_id'])
+        # A failed run may retain unclosed calls for audit. Do not manufacture
+        # their receipts just to append speech; presentation/playback stay separate.
+        if checkpoint.presentation is not None and not pending:
+            records.append({'role': 'assistant', 'content': checkpoint.presentation.speech})
+        return records
+
     def start(self, request: StartRequest) -> GatewayRun:
         return GatewayRun(self, request, self.compile_start(request))
 
     def resume(self, request: ResumeRequest) -> GatewayRun:
         request = ResumeRequest.model_validate(request.model_dump())
         checkpoint = request.checkpoint
+        # Receipts occur in the ledger, child result and transcript. Reserve their
+        # worst-case expansion before accepting any external fact or making a call.
+        added = wire_bytes([item.model_dump() for item in request.observations])
+        if wire_bytes(checkpoint.model_dump(exclude={'start'})) + 6 * added > MAX_CONTINUATION_BYTES:
+            raise RunProtocolError('checkpoint_size_exceeded: receipt batch does not fit remaining continuation budget; no observation accepted',
+                                   code='checkpoint_size_exceeded')
         if checkpoint.run.status in {'completed', 'failed', 'cancelled'}:
             raise RunProtocolError('A terminal run cannot be resumed')
         if checkpoint.semantic_policy_id != self.semantic_policy.policy_id:
@@ -491,7 +146,11 @@ class NLPService:
         if checkpoint.model_policy_id != self.model_policy_id:
             raise RunProtocolError('Continuation requires the original deployed model policy')
         prepared = self.compile_start(checkpoint.start)
-        return GatewayRun(self, checkpoint.start, prepared, checkpoint=checkpoint.run,
+        try:
+            restored = checkpoint.run.restore(prepared)
+        except ValueError as error:
+            raise RunProtocolError(str(error)) from error
+        return GatewayRun(self, checkpoint.start, prepared, checkpoint=restored,
                           observations=request.observations, cancel=request.cancel,
                           orchestration=checkpoint.orchestration)
 
@@ -511,9 +170,14 @@ class GatewayRun:
                 context[call['id']] = (function.get('name'), arguments.get('read_details') is True)
         result = messages[:prefix]
         for record in messages[prefix:]:
-            compact = compact_message(record, *context.get(record.get('tool_call_id'), (None, False)))
+            name, details = context.get(record.get('tool_call_id'), (None, False))
+            compact = compact_message(record, name, details)
             if record.get('role') == 'tool':
                 original = json.loads(record['content'])
+                if isinstance(original, dict) and name in RETRIEVAL_TOOLS:
+                    body = annotate_evidence(json.loads(compact['content']), name)
+                    body['retrieval_progress'] = retrieval_feedback(self.orchestration.retrieval, name)['retrieval_progress']
+                    compact['content'] = json.dumps(body, ensure_ascii=False, separators=(',', ':'))
                 if isinstance(original, dict) and 'state' in original:
                     # Unlike the demo actor, a resumed run does not rebuild its
                     # original snapshot. Its current query facts stay visible.
@@ -533,12 +197,17 @@ class GatewayRun:
         self._diagnostic_pending = []
         self._diagnostic_bytes = 0
         self._diagnostic_failed = False
+        self._presentation = None
         self._dispatches = {}
         self._observations = list(observations)
         self._run = AgentRun(prepared, service.model, checkpoint=checkpoint, validate_group=self._validate_group,
                              prepare_messages=self._model_messages)
         self.orchestration = OrchestrationCheckpoint.model_validate(
             orchestration.model_dump() if orchestration is not None else {})
+        for group in self.orchestration.groups:
+            if group.vehicle_state_delta:
+                group.vehicle_state = {**deepcopy(self.start.context.vehicle.state), **group.vehicle_state}
+                group.vehicle_state_delta = False
         self._child = None
         self._active = False
         self._validate_orchestration()
@@ -552,23 +221,41 @@ class GatewayRun:
         if state.tool_calls + self.orchestration.tool_calls > budget.max_tool_calls:
             raise RunProtocolError('Child tool calls exceed the original budget')
         for group in self.orchestration.groups:
-            ForegroundGroup(self, group)
+            try:
+                ForegroundGroup(self, group)
+            except ValueError as error:
+                raise RunProtocolError(str(error)) from error
             for item in group.requests:
                 DispatchRequest.model_validate(item)
             for item in group.external_pending:
                 DispatchRequest.model_validate(item)
             if any(item.identity != self.start.identity for item in [*group.receipts.values(), *group.results.values()]):
                 raise RunProtocolError('Child receipts belong to another run')
+        expected_progress = RetrievalProgress()
+        for group in self.orchestration.groups:
+            for item in group.requests:
+                receipt = group.receipts.get(item.request.invocation_id)
+                if (item.request.name in RETRIEVAL_TOOLS and item.request.invocation_id in group.results
+                        and receipt is not None and receipt.status != 'unknown'):
+                    expected_progress, _ = record_retrieval(expected_progress, invocation_id=receipt.invocation_id,
+                        tool_name=item.request.name, result=receipt.result)
+        if expected_progress != self.orchestration.retrieval:
+            raise RunProtocolError('Retrieval progress differs from the accepted receipt ledger')
         if self.orchestration.groups and not self.orchestration.groups[-1].done:
             group = self.orchestration.groups[-1]
-            if [ToolRequest.model_validate(item['request']) for item in group.requests] != state.pending:
+            if [item.request for item in group.requests] != state.pending:
                 raise RunProtocolError('Orchestration group differs from the original model calls')
 
     def _validate_group(self, requests):
         input_ = PolicyInput(start=self.start.model_copy(deep=True),
                              checkpoint=self._run.state.model_copy(deep=True),
                              requests=[item.model_copy(deep=True) for item in requests])
-        targets = list(self.policy.validate_group(input_))
+        try:
+            targets = list(self.policy.validate_group(input_))
+        except ProductPolicyError as error:
+            if error.result.get('retry_model') is True:
+                raise ToolGroupRejected(error.result) from error
+            raise
         if len(targets) != len(requests):
             raise RunProtocolError('Semantic policy must decide the entire tool group')
         checked = [DispatchRequest(request=request, dispatch=target) for request, target in zip(requests, targets)]
@@ -580,12 +267,30 @@ class GatewayRun:
             self._child.cancel()
 
     def _checkpoint(self, state):
-        return GatewayCheckpoint(start=self.start.model_copy(deep=True), run=state,
-                                 semantic_policy_id=self.policy.policy_id, model_policy_id=self.model_policy_id,
-                                 orchestration=self.orchestration.model_copy(deep=True))
+        orchestration = self.orchestration.model_copy(deep=True)
+        for group in orchestration.groups:
+            group.vehicle_state = {key: value for key, value in group.vehicle_state.items()
+                                   if self.start.context.vehicle.state.get(key) != value}
+            group.vehicle_state_delta = True
+        try:
+            return GatewayCheckpoint(start=self.start.model_copy(deep=True), run=CompactRunCheckpoint.capture(state),
+                                     semantic_policy_id=self.policy.policy_id, model_policy_id=self.model_policy_id,
+                                     orchestration=orchestration, presentation=self._presentation)
+        except ValidationError as error:
+            if any(item['type'] == 'checkpoint_size_exceeded' for item in error.errors()):
+                raise RunProtocolError('Checkpoint continuation state exceeds its resource budget',
+                                       code='checkpoint_size_exceeded') from error
+            raise
 
     def checkpoint(self) -> GatewayCheckpoint:
         return self._checkpoint(self._run.checkpoint())
+
+    def _decorate_terminal(self, event):
+        self._presentation = completion_presentation(self._checkpoint(self._run.state),
+                                                      event.data.get('policy_result'))
+        if self._presentation is not None:
+            event.data['presentation'] = self._presentation.model_dump()
+        return event
 
     async def _diagnostic(self, record):
         if self.diagnostics is None:
@@ -637,12 +342,10 @@ class GatewayRun:
             raise asyncio.CancelledError
 
     def _diagnostic_failure(self):
-        self._run.state.status = 'failed'
-        self._run.state.error_code = 'diagnostics_unavailable'
-        return self._run._event('run.failed', code='diagnostics_unavailable')
+        return self._run.fail('diagnostics_unavailable')
 
-    def _check_cancelled(self):
-        if self._run._cancel.is_set():
+    def check_cancelled(self):
+        if self._run.cancelled:
             raise asyncio.CancelledError
 
     async def _child_call(self, coroutine):
@@ -652,36 +355,91 @@ class GatewayRun:
         finally:
             self._child = None
 
-    def _history(self):
+    def history(self):
         return [{'role': item.role, 'content': item.content} for turn in self.start.history[-4:]
                 for item in turn.records if item.role in {'user', 'assistant'} and item.content]
 
-    def _reserve_child_tool(self):
+    def reserve_child_tool(self):
         if self._run.state.tool_calls + self.orchestration.tool_calls >= self.start.budget.max_tool_calls:
-            raise RunProtocolError('tool_call_budget_exhausted')
+            raise RunProtocolError('tool_call_budget_exhausted', code='tool_call_budget_exhausted')
         self.orchestration.tool_calls += 1
 
-    async def _plan(self, request, vehicle):
+    @property
+    def run_state(self) -> RunCheckpoint:
+        return self._run.state.model_copy(deep=True)
+
+    def retrieval_rejection(self, request, reserved=()):
+        report = retrieval_feedback(self.orchestration.retrieval, request.name)['retrieval_progress']
+        limits = RetrievalLimits()
+        if (not allow_retrieval(self.orchestration.retrieval, request.name) or request.name in RETRIEVAL_TOOLS and
+            (report['calls'] + sum(item.name == request.name for item in reserved) >= limits.max_calls_per_tool or
+             report['total_calls'] + sum(item.name in RETRIEVAL_TOOLS for item in reserved) >= limits.max_total_calls)):
+            return retrieval_feedback(self.orchestration.retrieval, request.name)
+        return None
+
+    def accept_retrieval(self, request, observation):
+        if request.name in RETRIEVAL_TOOLS and observation.status != 'unknown':
+            self.orchestration.retrieval, _ = record_retrieval(self.orchestration.retrieval,
+                invocation_id=request.invocation_id, tool_name=request.name, result=observation.result)
+
+    async def handle_task(self, request, arguments):
+        if self.service.task_service is None:
+            raise RunProtocolError('The NLP task service is not configured')
+        return await self._child_call(self.service.task_service.handle(self.start, request, arguments))
+
+    def completed_vehicle_operations(self):
+        operations = {}
+        def adopt(identifier, name, arguments, status, result):
+            state = result.get('vehicle_state')
+            if name not in TOOLS or status != 'completed' or result.get('ok') is not True or result.get('executed') is not True or not isinstance(state, dict):
+                return
+            # Bind accepted execution facts to their stable NLP invocation. The
+            # Gateway may use a separate device command ID; it cannot grant new intent.
+            receipt = deepcopy(result)
+            receipt.setdefault('name', name)
+            receipt.setdefault('arguments', deepcopy(arguments))
+            receipt['state'] = deepcopy(state)
+            operations[identifier] = {'operation_id': identifier, 'command_id': identifier,
+                'name': name, 'arguments': deepcopy(arguments), 'result': receipt}
+        for group in self.orchestration.groups:
+            for item in group.requests:
+                result = group.results.get(item.request.invocation_id)
+                if result is not None:
+                    adopt(item.request.invocation_id, item.request.name, item.request.arguments, result.status, result.result)
+            for plan in group.completed_plans:
+                for receipt in plan.receipts:
+                    adopt(receipt.invocation_id, receipt.name, receipt.arguments, receipt.status, receipt.result)
+        return list(operations.values())
+
+    async def plan_vehicle(self, request, vehicle):
+        if self.service.planner is None:
+            raise RunProtocolError('The NLP vehicle planner is not configured')
         records = []
         def trace(kind, data, **fields):
             if kind == 'model.started':
                 if self._run.state.model_calls + self.orchestration.model_calls >= self.start.budget.max_model_calls:
-                    raise RunProtocolError('model_call_budget_exhausted')
+                    raise RunProtocolError('model_call_budget_exhausted', code='model_call_budget_exhausted')
                 self.orchestration.model_calls += 1
             records.append({'kind': kind, 'data': data, **fields})
         remaining = self.start.budget.active_timeout_seconds - self._run.state.active_seconds
         if remaining <= 0:
-            raise RunProtocolError('active_time_budget_exhausted')
+            raise RunProtocolError('active_time_budget_exhausted', code='active_time_budget_exhausted')
         started = time.monotonic()
+        deadline = asyncio.timeout(remaining)
         try:
-            async with asyncio.timeout(remaining):
+            async with deadline:
                 return await self._child_call(self.service.planner.plan(self.start.user_text, vehicle,
-                    request.arguments['skill_ids'], history=self._history(), speaker_seat=self.start.speaker_seat,
-                    capabilities=self.start.context.capabilities.features, trace=trace))
+                    request.arguments['skill_ids'], history=self.history(), speaker_seat=self.start.speaker_seat,
+                    capabilities=self.start.context.capabilities.features,
+                    completed_operations=self.completed_vehicle_operations(), trace=trace))
+        except TimeoutError as error:
+            if deadline.expired():
+                raise RunProtocolError('Planner exhausted the run model time budget', code='active_time_budget_exhausted') from error
+            raise
         finally:
             elapsed = time.monotonic() - started
             self.orchestration.active_seconds += elapsed
-            self._run.state.active_seconds += elapsed
+            self._run.record_model_time(elapsed)
             if self.diagnostics is not None:
                 self._diagnostic_pending.extend(DiagnosticRecord(kind='orchestration.event',
                     identity=self.start.identity, data=record) for record in records)
@@ -689,11 +447,11 @@ class GatewayRun:
 
     async def _suspend_group(self, requests):
         group = self.orchestration.groups[-1]
-        unknown = any(group.receipts.get(item['request']['invocation_id']) is not None and
-                      group.receipts[item['request']['invocation_id']].status == 'unknown'
+        unknown = any(group.receipts.get(item.request.invocation_id) is not None and
+                      group.receipts[item.request.invocation_id].status == 'unknown'
                       for item in group.external_pending)
-        self._run.state.status = 'waiting_reconciliation' if unknown else 'waiting_tools'
-        event = self._run._event('run.suspended', requests=requests, status=self._run.state.status)
+        self._run.wait_for_tools(reconciliation=unknown)
+        event = self._run.emit_event('run.suspended', requests=[item.model_dump() for item in requests], status=self._run.state.status)
         output = GatewayOutput(identity=event.identity, sequence=event.sequence, type='run.suspended',
             requests=[DispatchRequest.model_validate(item) for item in requests], checkpoint=self.checkpoint())
         event.data['checkpoint'] = output.checkpoint.model_dump()
@@ -713,7 +471,7 @@ class GatewayRun:
                 await self._diagnostic(DiagnosticRecord(kind='observations.received', identity=self.start.identity,
                                                         observations=[item.model_copy(deep=True) for item in observations]))
             while terminal is None:
-                self._check_cancelled()
+                self.check_cancelled()
                 finish = False
                 if self.orchestration.groups and not self.orchestration.groups[-1].done:
                     group = ForegroundGroup(self, self.orchestration.groups[-1])
@@ -721,22 +479,24 @@ class GatewayRun:
                     observations = []
                     if outgoing is not None:
                         yield await self._suspend_group(outgoing)
-                        self._check_cancelled()
+                        self.check_cancelled()
                         return
                     observations = group.parent_observations()
                     finish = self.service.receipt_fast_path and group.fast_completion()
                 if not finish and self._run.state.model_calls + self.orchestration.model_calls >= self.start.budget.max_model_calls:
-                    raise RunProtocolError('model_call_budget_exhausted')
+                    raise RunProtocolError('model_call_budget_exhausted', code='model_call_budget_exhausted')
                 async with aclosing(self._run.advance(observations, complete_after_tools=finish)) as stream:
                     async for event in stream:
                         if event.type == 'run.suspended':
                             if not event.data['requests']:
                                 raise RunProtocolError('Waiting parent has no orchestration checkpoint')
-                            requests = [self._dispatches[item['invocation_id']].model_dump() for item in event.data['requests']]
+                            requests = [self._dispatches[item['invocation_id']].model_copy(deep=True) for item in event.data['requests']]
                             vehicle = (self.orchestration.groups[-1].vehicle_state if self.orchestration.groups
                                        else self.start.context.vehicle.state)
                             self.orchestration.groups.append(GroupCheckpoint(requests=requests, vehicle_state=vehicle))
                             continue
+                        if event.type in {'run.completed', 'run.cancelled', 'run.failed'}:
+                            self._decorate_terminal(event)
                         await self._diagnostic(DiagnosticRecord(kind='run.event', identity=event.identity,
                                                                 event=event.model_copy(deep=True)))
                         if event.type == 'text.delta':
@@ -750,11 +510,10 @@ class GatewayRun:
             # waiting for receipts. Pending calls remain audit-only in a terminal
             # checkpoint; the failing sink is not called recursively.
             terminal = self._diagnostic_failure()
-        except asyncio.CancelledError:
-            externally_cancelled = not self._run._cancel.is_set()
+        except asyncio.CancelledError as error:
+            externally_cancelled = not self._run.cancelled
             self.cancel()
-            self._run.state.status = 'cancelled'
-            terminal = self._run._event('run.cancelled')
+            terminal = self._run.mark_cancelled(partial=safe_diagnostic(getattr(error, 'trace_partial', {})))
             try:
                 await self._diagnostic(DiagnosticRecord(kind='run.event', identity=self.start.identity, event=terminal))
             except _DiagnosticsUnavailable:
@@ -766,8 +525,7 @@ class GatewayRun:
             # event. Persist partial output now; a handed-off checkpoint stays valid.
             if self._run.state.status not in {'waiting_tools', 'waiting_reconciliation', 'completed', 'cancelled'}:
                 self.cancel()
-                self._run.state.status = 'cancelled'
-                terminal = self._run._event('run.cancelled', reason='consumer_closed')
+                terminal = self._run.mark_cancelled(reason='consumer_closed')
                 try:
                     await self._diagnostic(DiagnosticRecord(kind='run.event', identity=self.start.identity, event=terminal))
                 except _DiagnosticsUnavailable:
@@ -776,6 +534,10 @@ class GatewayRun:
                 await self._flush_diagnostics()
             raise
         except Exception as error:
+            if getattr(error, 'code', None) == 'checkpoint_size_exceeded':
+                # No handoff is published without a storable checkpoint. The
+                # caller retains its preceding checkpoint and must not retry an action.
+                raise RunProtocolError(str(error), code='checkpoint_size_exceeded') from error
             if self._run.state.status in {'completed', 'cancelled', 'failed'}:
                 raise
             # Wrong/conflicting continuation receipts are retryable, not a new
@@ -785,10 +547,10 @@ class GatewayRun:
             if getattr(error, 'uncertain', False) and self.orchestration.groups:
                 commit = self.orchestration.groups[-1].task_commit
                 if commit is not None:
-                    commit['status'] = 'unknown'
-            self._run.state.status, self._run.state.error_code = 'failed', (
-                'task_commit_unknown' if getattr(error, 'uncertain', False) else getattr(error, 'code', None) or 'orchestration_error')
-            terminal = self._run._event('run.failed', code=self._run.state.error_code, error_type=type(error).__name__)
+                    commit.status = 'unknown'
+            code = 'task_commit_unknown' if getattr(error, 'uncertain', False) else getattr(error, 'code', None) or 'orchestration_error'
+            terminal = self._run.fail(code, error_type=type(error).__name__, policy_result=deepcopy(getattr(error, 'result', {})))
+            self._decorate_terminal(terminal)
             try:
                 await self._diagnostic(DiagnosticRecord(kind='run.event', identity=self.start.identity, event=terminal))
             except _DiagnosticsUnavailable:
@@ -796,6 +558,8 @@ class GatewayRun:
         finally:
             self._active = False
         if terminal is not None:
+            self._decorate_terminal(terminal)
             yield GatewayOutput(identity=terminal.identity, sequence=terminal.sequence,
                                 type=terminal.type, error_code=terminal.data.get('code'),
-                                checkpoint=self.checkpoint())
+                                error_details=terminal.data.get('policy_result', {}),
+                                checkpoint=self.checkpoint(), presentation=self._presentation)

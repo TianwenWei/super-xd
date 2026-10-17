@@ -13,7 +13,9 @@ def fixture_release(root):
         (root / directory).mkdir(parents=True, exist_ok=True)
     paths = {*release.SOURCE_FILES, *release.REQUIRED_PROMPTS, 'config/services.toml',
              'prompts/talker/tools.toml', 'backend/harness/engine.py',
-             'backend/services/contracts.py', 'backend/cockpit/tools.py'}
+             'backend/services/contracts.py', 'backend/cockpit/tools.py',
+    'backend/tool_schemas/manual.py', 'backend/tool_schemas/maps.py', 'backend/tool_schemas/web.py',
+             'backend/tool_schemas/manual.py', 'backend/tool_schemas/maps.py', 'backend/tool_schemas/web.py'}
     for relative in paths:
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -33,6 +35,7 @@ def test_release_identity_is_independent_of_root_and_mtime(tmp_path):
     'prompts/talker/tools.toml', 'prompts/talker/examples.json',
     'config/services.toml', 'backend/catalog.py', 'backend/nlp_app.py', 'backend/harness/engine.py',
     'backend/services/contracts.py', 'backend/cockpit/tools.py',
+    'backend/tool_schemas/manual.py', 'backend/tool_schemas/maps.py', 'backend/tool_schemas/web.py',
 ])
 def test_changed_runtime_input_changes_release_id(tmp_path, relative):
     root = fixture_release(tmp_path)
@@ -137,7 +140,7 @@ async def test_task_trace_uses_cached_release_and_preserves_provider_metadata():
 
 
 async def test_planner_model_trace_includes_same_release_as_manifest():
-    from backend.catalog import initial_vehicle_state
+    from backend.demo.vehicle_simulator import initial_vehicle_state
     from backend.harness.vehicle_planner import VehicleControlPlanner
     from test_vehicle_planner import FakeArk, response, temperature_plan
 
@@ -167,3 +170,16 @@ async def test_talker_model_trace_includes_cached_release(tmp_path):
         assert started['data']['release_id'] == release.get_release_id()
     finally:
         await actor.close()
+
+
+@pytest.mark.parametrize('relative', [
+    'backend/session.py', 'backend/worker.py', 'backend/db.py', 'backend/demo/vehicle_simulator.py',
+    'backend/services/audio.py', 'backend/asr.py', 'backend/tts.py', 'backend/manual_search.py',
+])
+def test_demo_and_local_audio_changes_do_not_change_production_release(tmp_path, relative):
+    root = fixture_release(tmp_path)
+    original = release.build_release_manifest(root)
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('local Demo changed', encoding='utf-8')
+    assert release.build_release_manifest(root) == original

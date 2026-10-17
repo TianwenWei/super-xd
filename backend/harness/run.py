@@ -8,7 +8,6 @@ injected before a whole tool group is exposed to an executor.
 from __future__ import annotations
 
 import asyncio
-from contextlib import aclosing
 from copy import deepcopy
 import hashlib
 import json
@@ -16,9 +15,11 @@ import time
 from collections.abc import AsyncIterator, Callable
 from typing import Protocol
 
-from jsonschema import Draft202012Validator
+from jsonschema import Draft202012Validator, ValidationError as SchemaValidationError
 
-from .contracts import PreparedRun, RunCheckpoint, RunEvent, RunIdentity, ToolObservation, ToolRequest
+from .model_execution import open_model_stream
+from .diagnostics import safe_diagnostic
+from .contracts import PreparedRun, RunCheckpoint, RunEvent, RunIdentity, ToolObservation, ToolRequest, ToolGroupRejected
 
 
 class ModelStream(Protocol):
@@ -26,7 +27,15 @@ class ModelStream(Protocol):
 
 
 class RunProtocolError(ValueError):
-    pass
+    def __init__(self, message: str, *, code: str = 'run_protocol_conflict', details: dict | None = None):
+        super().__init__(message)
+        self.code = code
+        self.result = deepcopy(details or {})
+
+
+def _invalid_tool_call(reason):
+    return RunProtocolError(reason, code='invalid_tool_call', details={
+        'ok': False, 'executed': False, 'code': 'invalid_tool_call', 'reason': reason, 'retry_model': False})
 
 
 class ModelBudgetExceeded(TimeoutError):
@@ -35,22 +44,6 @@ class ModelBudgetExceeded(TimeoutError):
 
 def canonical(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False)
-
-
-async def _next_item(iterator, cancel):
-    if cancel.is_set():
-        raise asyncio.CancelledError
-    pending = asyncio.create_task(anext(iterator))
-    interrupted = asyncio.create_task(cancel.wait())
-    try:
-        await asyncio.wait((pending, interrupted), return_when=asyncio.FIRST_COMPLETED)
-        if cancel.is_set():
-            raise asyncio.CancelledError
-        return await pending
-    finally:
-        pending.cancel()
-        interrupted.cancel()
-        await asyncio.gather(pending, interrupted, return_exceptions=True)
 
 
 class AgentRun:
@@ -133,12 +126,31 @@ class AgentRun:
     def cancel(self):
         self._cancel.set()
 
-    def _event(self, kind, **data):
+    @property
+    def cancelled(self) -> bool:
+        return self._cancel.is_set()
+
+    def fail(self, code: str, **data) -> RunEvent:
+        self.state.status, self.state.error_code = 'failed', code
+        return self.emit_event('run.failed', code=code, **data)
+
+    def mark_cancelled(self, **data) -> RunEvent:
+        self.cancel()
+        self.state.status = 'cancelled'
+        return self.emit_event('run.cancelled', **data)
+
+    def wait_for_tools(self, *, reconciliation: bool = False) -> None:
+        self.state.status = 'waiting_reconciliation' if reconciliation else 'waiting_tools'
+
+    def record_model_time(self, seconds: float) -> None:
+        self.state.active_seconds += max(0.0, seconds)
+
+    def emit_event(self, kind, **data):
         self.state.sequence += 1
         return RunEvent(identity=self.prepared.identity, sequence=self.state.sequence, type=kind, data=data)
 
     def _suspended(self, new_requests=()):
-        event = self._event('run.suspended', status=self.state.status,
+        event = self.emit_event('run.suspended', status=self.state.status,
                             requests=[request.model_dump() for request in new_requests])
         event.data['checkpoint'] = self.state.model_dump()
         return event
@@ -177,28 +189,50 @@ class AgentRun:
     def _requests(self, message):
         calls = message.get('tool_calls', [])
         if not isinstance(calls, list):
-            raise RunProtocolError('Model tool_calls must be an array')
+            raise _invalid_tool_call('Model tool_calls must be an array')
+        if self.state.tool_calls + len(calls) > self.prepared.budget.max_tool_calls:
+            raise RunProtocolError('tool_call_budget_exhausted', code='tool_call_budget_exhausted')
         requests, identifiers = [], set()
         for call in calls:
             if not isinstance(call, dict) or call.get('type') != 'function':
-                raise RunProtocolError('Invalid model tool call')
+                raise _invalid_tool_call('Invalid model tool call')
             identifier, fn = call.get('id'), call.get('function')
             if not isinstance(identifier, str) or not identifier or identifier in identifiers or not isinstance(fn, dict):
-                raise RunProtocolError('Tool calls require unique IDs within a group')
+                raise _invalid_tool_call('Tool calls require unique IDs within a group')
             identifiers.add(identifier)
             name = fn.get('name')
             if name not in self.validators:
-                raise RunProtocolError('Model requested an unavailable tool')
-            arguments = json.loads(fn.get('arguments') or '{}')
-            if not isinstance(arguments, dict):
-                raise RunProtocolError('Tool arguments must be an object')
-            canonical(arguments)
-            self.validators[name].validate(arguments)
+                raise RunProtocolError('Model requested an unavailable tool', code='unknown_tool',
+                    details={'ok': False, 'executed': False, 'code': 'unknown_tool',
+                             'reason': 'The requested function is not part of the fixed tool interface', 'retry_model': False})
+        # Validate framing for the entire group before generating recoverable
+        # feedback, so every feedback message has a unique valid tool_call_id.
+        for call in calls:
+            identifier, fn = call['id'], call['function']
+            name = fn['name']
+            try:
+                arguments = json.loads(fn.get('arguments') or '{}')
+                if not isinstance(arguments, dict):
+                    raise ValueError('Tool arguments must be an object')
+                canonical(arguments)
+                self.validators[name].validate(arguments)
+            except SchemaValidationError as error:
+                expected = {key: deepcopy(error.schema[key]) for key in ('type', 'enum', 'minimum', 'maximum',
+                    'minLength', 'maxLength', 'minItems', 'maxItems', 'required', 'additionalProperties') if key in error.schema}
+                raise ToolGroupRejected({'code': 'invalid_tool_arguments',
+                    'reason': error.message, 'tool_name': name, 'tool_call_id': identifier,
+                    'parameter_path': list(error.absolute_path), 'validator': error.validator, 'expected': expected}) from error
+            except (ValueError, TypeError) as error:
+                raise RunProtocolError('Tool arguments are not a valid JSON object', code='invalid_tool_arguments',
+                    details={'ok': False, 'executed': False, 'code': 'invalid_tool_arguments',
+                        'reason': 'Tool arguments must be a finite JSON object', 'tool_name': name,
+                        'tool_call_id': identifier, 'retry_model': False,
+                        'parameter_path': [], 'validator': 'json_object', 'expected': {'type': 'object'}}) from error
             invocation = self._invocation_id(identifier)
             requests.append(ToolRequest(invocation_id=invocation, tool_call_id=identifier,
                                         name=name, arguments=arguments, idempotency_key=invocation))
         if self.state.tool_calls + len(requests) > self.prepared.budget.max_tool_calls:
-            raise RunProtocolError('tool_call_budget_exhausted')
+            raise RunProtocolError('tool_call_budget_exhausted', code='tool_call_budget_exhausted')
         if self.validate_group:
             self.validate_group(deepcopy(requests))
         return requests
@@ -213,10 +247,14 @@ class AgentRun:
         deadline = asyncio.timeout(remaining)
         try:
             async with deadline:
-                return await _next_item(stream, self._cancel)
+                return await anext(stream)
         except TimeoutError as error:
             if deadline.expired():
-                raise ModelBudgetExceeded from error
+                exceeded = ModelBudgetExceeded()
+                partial = getattr(error.__cause__, 'trace_partial', None)
+                if partial is not None:
+                    exceeded.trace_partial = deepcopy(partial)
+                raise exceeded from error
             raise
         finally:
             self.state.active_seconds += time.monotonic() - started
@@ -231,7 +269,7 @@ class AgentRun:
                 raise RunProtocolError('A terminal run cannot be resumed')
             if self._cancel.is_set():
                 self.state.status = 'cancelled'
-                yield self._event('run.cancelled')
+                yield self.emit_event('run.cancelled')
                 return
             had_pending = bool(self.state.pending)
             self._observations(observations)
@@ -239,37 +277,37 @@ class AgentRun:
                 yield self._suspended()
                 if self._cancel.is_set():
                     self.state.status = 'cancelled'
-                    yield self._event('run.cancelled')
+                    yield self.emit_event('run.cancelled')
                 return
             if complete_after_tools:
                 if not had_pending:
                     raise RunProtocolError('Receipt completion requires a pending tool group')
                 self.state.status = 'completed'
-                yield self._event('run.completed', receipt_fast_path=True, model_calls=self.state.model_calls,
+                yield self.emit_event('run.completed', receipt_fast_path=True, model_calls=self.state.model_calls,
                                   tool_calls=self.state.tool_calls, active_seconds=self.state.active_seconds)
                 return
             if self.state.model_calls >= self.prepared.budget.max_model_calls:
                 self.state.status, self.state.error_code = 'failed', 'model_call_budget_exhausted'
-                yield self._event('run.failed', code=self.state.error_code)
+                yield self.emit_event('run.failed', code=self.state.error_code)
                 return
             remaining = self.prepared.budget.active_timeout_seconds - self.state.active_seconds
             if remaining <= 0:
                 self.state.status, self.state.error_code = 'failed', 'active_time_budget_exhausted'
-                yield self._event('run.failed', code=self.state.error_code)
+                yield self.emit_event('run.failed', code=self.state.error_code)
                 return
             model_call_active = True
             request_messages = deepcopy(self.state.messages)
             if self.prepare_messages is not None:
                 request_messages = self.prepare_messages(request_messages)
             self.state.model_calls += 1
-            yield self._event('model.started', model_call=self.state.model_calls,
+            yield self.emit_event('model.started', model_call=self.state.model_calls,
                               release_id=self.prepared.release_id, messages=deepcopy(request_messages),
                               tools=deepcopy(self.prepared.tools))
             if self._cancel.is_set():
                 raise asyncio.CancelledError
             message = None
-            async with aclosing(self.model.stream(deepcopy(request_messages), deepcopy(self.prepared.tools),
-                                                  **deepcopy(self.prepared.model_options))) as stream:
+            async with open_model_stream(self.model, request_messages, self.prepared.tools,
+                                         cancel=self._cancel, **self.prepared.model_options) as stream:
                 while True:
                     try:
                         item = await self._next_model_item(stream)
@@ -277,20 +315,28 @@ class AgentRun:
                         break
                     if item.get('type') == 'delta':
                         value = item.get('text')
-                        if not isinstance(value, str):
-                            raise RunProtocolError('Model text delta must be a string')
                         self.state.output += value
-                        yield self._event('text.delta', text=value)
+                        yield self.emit_event('text.delta', text=value)
                     elif item.get('type') == 'message':
-                        if message is not None:
-                            raise RunProtocolError('Model emitted more than one final message')
                         message = deepcopy(item['message'])
-                        yield self._event('model.completed', message=message, metadata=deepcopy(item.get('meta', {})))
+                        yield self.emit_event('model.completed', message=message, metadata=deepcopy(item['meta']),
+                                              raw_return=deepcopy(item['raw_return']))
             if self._cancel.is_set():
                 raise asyncio.CancelledError
-            if not isinstance(message, dict) or message.get('role') != 'assistant':
-                raise RunProtocolError('Model stream ended without an assistant message')
-            requests = self._requests(message)
+            try:
+                requests = self._requests(message)
+            except ToolGroupRejected as rejection:
+                # The entire proposal is closed without dispatch. Its model/tool
+                # usage remains charged; a corrected group gets new invocation IDs.
+                self.state.messages.append(message)
+                calls = message.get('tool_calls', [])
+                self.state.tool_calls += len(calls)
+                for call in calls:
+                    self.state.messages.append({'role': 'tool', 'tool_call_id': call['id'],
+                                                'content': canonical(rejection.result)})
+                yield self.emit_event('policy.rejected', result=deepcopy(rejection.result),
+                                      tool_call_ids=[call['id'] for call in calls])
+                return
             self.state.messages.append(message)
             if requests:
                 self.state.pending = requests
@@ -301,15 +347,16 @@ class AgentRun:
                 yield self._suspended(requests)
                 if self._cancel.is_set():
                     self.state.status = 'cancelled'
-                    yield self._event('run.cancelled')
+                    yield self.emit_event('run.cancelled')
             else:
                 self.state.status = 'completed'
-                yield self._event('run.completed', message=message, model_calls=self.state.model_calls,
+                yield self.emit_event('run.completed', message=message, model_calls=self.state.model_calls,
                                   tool_calls=self.state.tool_calls, active_seconds=self.state.active_seconds)
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as error:
             self.state.status = 'cancelled'
             if self._cancel.is_set():
-                yield self._event('run.cancelled')
+                partial = getattr(error, 'trace_partial', None)
+                yield self.emit_event('run.cancelled', **({'partial': safe_diagnostic(partial)} if partial is not None else {}))
             else:
                 raise
         except GeneratorExit:
@@ -323,7 +370,18 @@ class AgentRun:
             self.state.status = 'failed'
             self.state.error_code = ('active_time_budget_exhausted' if isinstance(error, ModelBudgetExceeded)
                                      else 'model_timeout' if isinstance(error, TimeoutError)
-                                     else 'model_or_protocol_error')
-            yield self._event('run.failed', code=self.state.error_code, error_type=type(error).__name__)
+                                     else 'model_or_protocol_error' if isinstance(error, RunProtocolError) and error.code == 'run_protocol_conflict'
+                                     else getattr(error, 'code', None) or 'model_or_protocol_error')
+            diagnostic = {'error_type': type(error).__name__, 'message': str(error)}
+            public = getattr(error, 'public', None)
+            if callable(public):
+                diagnostic['provider_error'] = deepcopy(public())
+                diagnostic['diagnostics'] = deepcopy(getattr(error, 'details', {}))
+            partial = getattr(error, 'trace_partial', None)
+            if partial is not None:
+                diagnostic['partial'] = deepcopy(partial)
+            if isinstance(getattr(error, 'result', None), dict):
+                diagnostic['policy_result'] = deepcopy(error.result)
+            yield self.emit_event('run.failed', code=self.state.error_code, **safe_diagnostic(diagnostic))
         finally:
             self._active = False

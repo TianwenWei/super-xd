@@ -6,6 +6,9 @@ import json
 import pytest
 
 from backend.db import Database
+from backend.session import Turn
+from backend.harness.contracts import ToolRequest
+from backend.model_context import compact_tool_result
 from backend.worker import ThinkerWorker
 from tests.test_worker import FakeArk, FakeTavily, message, task
 from tests.test_session import make_actor, wait_for, sync_tasks
@@ -59,7 +62,7 @@ async def test_worker_defaults_cap_even_old_config_at_one_minute(tmp_path):
 @pytest.mark.asyncio
 async def test_tool_budget_reserves_delivery_call(tmp_path):
     db = Database(tmp_path / 'worker.sqlite3')
-    current = task(db)
+    current = task(db, worker_options={'max_steps': 3})
     ark = FakeArk(message('search_web', {'query': '展馆参观规定'}),
                   message('extract_web', {'urls': ['https://example.org/official']}),
                   message('finish_task', {'summary': '真实页面已读取。', 'spoken_summary': '查到了页面资料。'}))
@@ -73,7 +76,7 @@ async def test_tool_budget_reserves_delivery_call(tmp_path):
 @pytest.mark.asyncio
 async def test_deadline_cancels_search_and_finalizes_saved_material(tmp_path):
     db = Database(tmp_path / 'worker.sqlite3')
-    current = task(db)
+    current = task(db, worker_options={'timeout_seconds': 0.3})
     cancelled = asyncio.Event()
     async def slow(messages):
         try:
@@ -95,7 +98,7 @@ async def test_deadline_cancels_search_and_finalizes_saved_material(tmp_path):
 @pytest.mark.asyncio
 async def test_deadline_finalizer_timeout_preserves_sources_and_stops(tmp_path):
     db = Database(tmp_path / 'worker.sqlite3')
-    current = task(db)
+    current = task(db, worker_options={'timeout_seconds': 0.15})
     async def slow(messages):
         await asyncio.sleep(10)
     ark = FakeArk(message('search_web', {'query': '展馆票务'}), slow, slow)
@@ -114,12 +117,16 @@ async def test_legacy_diagnostics_cannot_enter_task_speech_or_prompt(make_actor)
     current = actor.db.create_task(actor.id, '调查参观安排')
     actor.db.save_task(current['id'], 1, status='running', summary='正在搜索：site:private.example/path query')
     sync_tasks(actor)
-    reply = actor.task_tool('manage_task', {'action': 'get', 'task_id': current['id']})
-    assert 'site:' not in reply['detail']
+    start = actor.nlp_start_request(Turn('read-status', '进展如何', actor.persona, 1))
+    reply = await actor.nlp.task_service.handle(start, ToolRequest(
+        invocation_id='status', tool_call_id='status', idempotency_key='status',
+        name='manage_task', arguments={'action': 'get', 'task_id': current['id']}))
+    assert 'site:' not in json.dumps(compact_tool_result(reply, 'manage_task'))
     actor.db.save_task(current['id'], 1, status='failed', error='RuntimeError: secret diagnostic', summary='RuntimeError: secret diagnostic')
     done, _ = await wait_for(q, 'stream.done')
     assert 'RuntimeError' not in done['text'] and 'secret diagnostic' not in done['text']
-    prompt = json.dumps(actor.messages_for(actor.current), ensure_ascii=False)
+    start = actor.nlp_start_request(Turn('next-turn', '进展如何', actor.persona, 1))
+    prompt = json.dumps(actor.nlp.compile_start(start).messages, ensure_ascii=False)
     assert 'RuntimeError' not in prompt and 'site:private' not in prompt
 
 
@@ -142,23 +149,28 @@ async def test_progress_notice_deferred_during_playback_and_delivered_once(make_
 
 @pytest.mark.asyncio
 async def test_interrupted_answer_history_uses_playback_metadata(make_actor):
-    actor, q, ark = await make_actor([{'content': '这是完整的回答。后半段未播放。'}])
+    actor, q, ark = await make_actor([{'content': '这是完整的回答。后半段未播放。'}, {'content': '继续说明后半段。'}])
     await actor.post({'type': 'input', 'text': '介绍一下'})
     await wait_for(q, 'stream.done')
     previous = actor.current
     previous.playback_id = 'playback-test'
     previous.played_text = '这是完整的回答。'
     previous.audio_cancelled.set()
-    messages = actor.messages_for(previous)
+    await actor.post({'type': 'input', 'text': '继续说明'})
+    await wait_for(q, 'stream.done')
+    messages = ark.requests[-1]['messages']
     assert all('[朗读已打断]' not in (m.get('content') or '') for m in messages)
-    assert '后半段未播放' not in json.dumps(messages, ensure_ascii=False)
-    assert 'interrupted_playback' in json.dumps(messages)
+    assert '后半段未播放' in json.dumps(messages, ensure_ascii=False)
+    snapshot = next(json.loads(row['content'].splitlines()[-1]) for row in messages
+        if row['role'] == 'system' and row['content'].startswith('当前会话快照'))
+    assert snapshot['playback_history'][-1] == {
+        'turn_id': previous.id, 'heard_text': '这是完整的回答。', 'status': 'partial', 'interrupted': True}
 
 
 @pytest.mark.asyncio
 async def test_full_external_tool_budget_still_allows_finish(tmp_path):
     db = Database(tmp_path / 'worker.sqlite3')
-    current = task(db)
+    current = task(db, worker_options={'max_steps': 4})
     batch = {'role': 'assistant', 'content': None, 'tool_calls': [
         message('search_web', {'query': f'资料来源{i}'}, f'search-{i}')['tool_calls'][0] for i in range(4)]}
     ark = FakeArk(batch, message('finish_task', {'summary': '只有搜索线索，未能核实。',
@@ -208,7 +220,7 @@ async def test_revision_update_refreshes_deferred_progress_without_old_speech(ma
 @pytest.mark.asyncio
 async def test_finalizer_selects_verified_source_id_and_server_adds_actual_link(tmp_path):
     db = Database(tmp_path / 'worker.sqlite3')
-    current = task(db)
+    current = task(db, worker_options={'timeout_seconds': 0.4})
     async def slow(messages):
         await asyncio.sleep(10)
     async def finish(messages):
@@ -230,7 +242,7 @@ async def test_finalizer_selects_verified_source_id_and_server_adds_actual_link(
 @pytest.mark.asyncio
 async def test_invalid_finalizer_source_id_keeps_evidence_without_claiming_deadline(tmp_path):
     db = Database(tmp_path / 'worker.sqlite3')
-    current = task(db)
+    current = task(db, worker_options={'timeout_seconds': 0.3})
     async def slow(messages):
         await asyncio.sleep(10)
     ark = FakeArk(message('search_web', {'query': '展馆参观'}), slow,

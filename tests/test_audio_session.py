@@ -7,6 +7,7 @@ import pytest
 
 from backend.db import Database
 from backend.session import SessionActor
+from tests.test_session import configure_task_fixtures
 
 
 def tool(name, args, call_id='audio_call'):
@@ -19,7 +20,7 @@ class ControlledArk:
         self.responses = list(responses)
         self.delta_sent = asyncio.Event()
 
-    async def stream(self, messages, tools):
+    async def stream(self, messages, tools, **options):
         response = self.responses.pop(0)
         for text in response.get('deltas', [response.get('content', '')]):
             if text:
@@ -69,6 +70,8 @@ async def audio_actor(tmp_path):
     async def make(responses, tts=None):
         ark, tts = ControlledArk(responses), tts or StreamingTTS()
         actor = SessionActor(f'audio{len(actors)}', Database(tmp_path / f'{len(actors)}.sqlite3'), ark, tts)
+        configure_task_fixtures(actor)
+        actor.simulator.execution_ms = actor.simulator.network_rtt_ms = 0
         actors.append(actor)
         control = await actor.attach()
         await control.get()
@@ -151,7 +154,7 @@ async def test_tts_connects_early_and_chat_text_streams_before_the_model_finishe
     assert not actor.speaking
 
 
-async def test_model_preface_is_spoken_after_local_checks_and_success_stays_silent(audio_actor):
+async def test_model_preface_streams_before_dispatch_and_success_stays_silent(audio_actor):
     gate = asyncio.Event()
     actor, control, audio, ark, tts = await audio_actor([
         {'content': '这就把主驾调到二十三度。', 'gate': gate,
@@ -160,26 +163,38 @@ async def test_model_preface_is_spoken_after_local_checks_and_success_stays_sile
     await submit(actor, '把空调温度设为23度')
     await asyncio.wait_for(ark.delta_sent.wait(), 1)
     await actor.queue.join()
-    assert tts.calls == [[]]  # Nothing is spoken before the whole message passed checks.
+    await asyncio.wait_for(tts.text_received.wait(), 1)
+    assert tts.calls == [['这就把主驾调到二十三度。']]
+    assert actor.vehicle == old
+    assert not any(event.get('type') == 'vehicle.command' for event in list(control._queue))
     gate.set()
     command, _ = await until(control, 'vehicle.command')
     await actor.queue.join()
     await until(audio, 'pcm')
     assert actor.vehicle == old and tts.calls[0] == ['这就把主驾调到二十三度。']
-    await actor.post({'type': 'vehicle.execute', 'command_id': command['command_id']})
+    actual = await actor.simulator.execute(command['command_id'])
+    await actor.post({'type': 'vehicle.receipt', 'command_id': command['command_id'],
+                      'receipt_id': actual['receipt_id']})
     receipt, _ = await until(control, 'vehicle.result')
     done, _ = await until(control, 'stream.done')
     assert receipt['result']['ok'] and tts.calls[0] == ['这就把主驾调到二十三度。']
     assert done['metrics']['route'] == 'tool' and done['metrics']['preface'] == '这就把主驾调到二十三度。'
 
 
-async def test_without_a_preface_the_dispatch_template_still_speaks(audio_actor):
+async def test_without_a_preface_core_speaks_only_after_actual_receipt(audio_actor):
     actor, control, audio, _, tts = await audio_actor([
         {'tool_calls': [tool('set_temperature', {'zone': 'driver', 'temperature': 23})]}])
     await submit(actor, '把空调温度设为23度')
-    await until(control, 'vehicle.command')
+    command, _ = await until(control, 'vehicle.command')
+    await actor.queue.join()
+    assert not any(tts.calls)
+    receipt = await actor.simulator.execute(command['command_id'])
+    await actor.post({'type': 'vehicle.receipt', 'command_id': command['command_id'],
+                      'receipt_id': receipt['receipt_id']})
+    await until(control, 'stream.done')
     await until(audio, 'pcm')
-    assert '正在' in ''.join(tts.calls[0])
+    assert ''.join(tts.calls[0]) == actor.current.checkpoint.presentation.speech
+    assert '二十三' in ''.join(tts.calls[0]) and '正在' not in ''.join(tts.calls[0])
 
 
 async def test_tool_timeout_after_preface_reports_failure_and_preserves_state(audio_actor, monkeypatch):
@@ -220,7 +235,7 @@ async def test_rejected_group_keeps_its_spoken_sentence_and_the_retry_answers(au
     await submit(actor, '导航去机场')
     done, events = await until(control, 'stream.done')
     assert not any(e.get('type') == 'vehicle.command' for e in events)
-    assert done['text'] == '这就导航过去。你要去哪个机场？'
+    assert done['text'].splitlines() == ['这就导航过去。', '你要去哪个机场？']
 
 
 async def test_new_turn_cancels_old_stream_and_rejects_late_audio_and_old_playback(audio_actor):

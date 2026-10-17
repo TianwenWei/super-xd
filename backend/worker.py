@@ -7,9 +7,16 @@ import asyncio
 import logging
 import os
 import signal
+from dataclasses import asdict
 from typing import Any
 
+if __name__ == "__main__":
+    from .local_environment import load_local_environment
+    load_local_environment()
+
 from .harness.task_runner import TaskRunner, _safe_error
+from .harness.release import get_release_id
+from .demo.resources import freeze_local_model, local_model_policy_id, local_task_budget
 
 logger = logging.getLogger(__name__)
 
@@ -66,11 +73,11 @@ class ThinkerWorker(TaskRunner):
     """Demo adapter for SQLite state, provider wiring and process scheduling."""
 
     def __init__(self, db: Any, ark: Any = None, tavily: Any = None, *,
-                 max_steps: int = 20, timeout_seconds: float = 60,
+                 max_steps: int | None = None, timeout_seconds: float | None = None,
                  concurrency: int = 2, close_clients: bool = True,
                  catalog: dict[str, Any] | None = None,
                  tool_timeout_seconds: float | None = None,
-                 quick_max_steps: int = 4, quick_timeout_seconds: float = 60,
+                 quick_max_steps: int | None = None, quick_timeout_seconds: float | None = None,
                  weather: Any = None):
         if ark is None or tavily is None:
             from .services.factory import create_llm, create_search
@@ -78,16 +85,40 @@ class ThinkerWorker(TaskRunner):
             tavily = tavily or create_search()
         from .services.reads import verify_forecast_record
         self.db = db
-        super().__init__(SQLiteTaskStore(db), ark, tavily,
-                         trace_sink=SQLiteTaskTraceSink(db), max_steps=max_steps,
-                         timeout_seconds=timeout_seconds, close_clients=close_clients,
-                         catalog=catalog, tool_timeout_seconds=tool_timeout_seconds if tool_timeout_seconds is not None
-                         else float(os.getenv("TOOL_TIMEOUT_SECONDS", "35")),
-                         quick_max_steps=quick_max_steps, quick_timeout_seconds=quick_timeout_seconds,
+        budget = local_task_budget(max_steps=max_steps, timeout_seconds=timeout_seconds,
+            tool_timeout_seconds=tool_timeout_seconds, quick_max_steps=quick_max_steps,
+            quick_timeout_seconds=quick_timeout_seconds)
+        model = freeze_local_model(ark)
+        self._model_owner = ark if model is not ark else None
+        self.release_id, self.model_policy_id = get_release_id(), local_model_policy_id(model, budget)
+        super().__init__(SQLiteTaskStore(db), model, tavily,
+                         trace_sink=SQLiteTaskTraceSink(db), close_clients=close_clients,
+                         catalog=catalog, **asdict(budget),
                          weather=weather, forecast_verifier=verify_forecast_record)
         self.concurrency = max(1, concurrency)
         self._stopping = asyncio.Event()
         self._active: dict[str, asyncio.Task] = {}
+
+    async def run_task(self, task):
+        current = await self.store.refresh(task['id'])
+        if current is None:
+            raise RuntimeError('Task no longer exists')
+        if current['status'] in {'completed', 'failed', 'cancelled', 'waiting_clarification', 'awaiting_confirm'}:
+            return
+        context = current.get('context') or {}
+        if current['status'] != 'cancelling' and (context.get('release_id') != self.release_id or
+                context.get('model_policy_id') != self.model_policy_id):
+            code = 'task_deployment_mismatch'
+            await self._trace(current, 'task.deployment.rejected', {
+                'code': code, 'registered_release_id': context.get('release_id'),
+                'registered_model_policy_id': context.get('model_policy_id'),
+                'release_id': self.release_id, 'model_policy_id': self.model_policy_id,
+                'model_called': False}, status='failed')
+            await self.store.save(current['id'], current['revision'], status='failed', error_code=code,
+                error='任务登记版本与当前部署不一致，请重新创建任务。',
+                summary='任务登记版本已过期或缺失，未开始执行。请重新创建任务。', question=None)
+            return
+        await super().run_task(current)
 
     async def _execute_tool(self, name, *args, **kwargs):
         if name == "get_weather_forecast" and self.weather is None:
@@ -97,6 +128,14 @@ class ThinkerWorker(TaskRunner):
 
     def stop(self) -> None:
         self._stopping.set()
+
+    async def aclose(self) -> None:
+        try:
+            await super().aclose()
+        finally:
+            # The frozen selector shares clients and deliberately does not own them.
+            if self.close_clients and self._model_owner is not None:
+                await self._model_owner.aclose()
 
     async def run_forever(self, poll_interval: float = 0.15) -> None:
         """Claim only free slots. Clarification returns immediately to this loop."""
@@ -136,8 +175,6 @@ class ThinkerWorker(TaskRunner):
 async def _main() -> None:
     from .prompt_config import validate_all
     validate_all()
-    from dotenv import load_dotenv
-    load_dotenv()
     from .db import Database
     parser = argparse.ArgumentParser(description="Independent SQLite Thinker worker")
     parser.add_argument("--database", default=os.getenv("DATABASE_PATH", "data/super_xd.sqlite3"))

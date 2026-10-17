@@ -5,7 +5,6 @@ import asyncio
 from contextlib import asynccontextmanager, aclosing
 import json
 import math
-import os
 import time
 
 import anyio
@@ -15,7 +14,9 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from backend.harness.background import TaskExecutionRequest, TaskMutationRequest, TaskPresentationRequest
 from backend.harness.contracts import Contract, RunIdentity
-from backend.harness.gateway import ResumeRequest, StartRequest
+from backend.harness.gateway_contracts import ResumeRequest, StartRequest
+from backend.harness.observability import Readiness, UsageMetrics
+from backend.nlp_settings import NLPSettings
 from backend.harness.run import RunProtocolError
 from backend.harness.task_transport import GatewayConflict, GatewayTransportError
 
@@ -81,9 +82,13 @@ class BodyLimit:
         await self.app(scope, replay, send)
 
 
-def create_app(service=None, *, max_body_bytes=8 * 1024 * 1024, max_inflight=32,
-               request_timeout_seconds=120, bundle_factory=None):
+def create_app(service=None, *, max_body_bytes=None, max_inflight=None,
+               request_timeout_seconds=None, bundle_factory=None, settings: NLPSettings | None = None):
     """Injected services support offline integration tests; normal startup is real."""
+    settings = settings or NLPSettings()
+    max_body_bytes = settings.max_body_bytes if max_body_bytes is None else max_body_bytes
+    max_inflight = settings.max_inflight if max_inflight is None else max_inflight
+    request_timeout_seconds = settings.request_timeout_seconds if request_timeout_seconds is None else request_timeout_seconds
     if type(max_body_bytes) is not int or max_body_bytes < 1 or type(max_inflight) is not int or max_inflight < 1:
         raise ValueError('Positive body and concurrency limits are required')
     if not math.isfinite(request_timeout_seconds) or request_timeout_seconds <= 0:
@@ -96,35 +101,46 @@ def create_app(service=None, *, max_body_bytes=8 * 1024 * 1024, max_inflight=32,
         if service is None:
             if bundle_factory is None:
                 from backend.harness.assembly import create_nlp_services
-                factory = create_nlp_services
+                async def factory():
+                    return await create_nlp_services(settings=settings)
             else:
                 factory = bundle_factory
             bundle = await factory()
             app.state.nlp = bundle.service
+            app.state.bundle = bundle
+            app.state.metrics = bundle.metrics
+            app.state.readiness = bundle.readiness
         else:
             app.state.nlp = service
+        app.state.local_ready = True
         try:
             yield
         finally:
+            app.state.local_ready = False
             for run in tuple(active.values()):
                 run.cancel()
             if bundle is not None:
                 await bundle.aclose()
 
     app = FastAPI(title='Super XD NLP', version='1', lifespan=lifespan)
+    app.state.bundle = None
+    app.state.local_ready = service is not None
+    app.state.metrics = UsageMetrics()
+    app.state.readiness = Readiness(settings)
     if service is not None:
         app.state.nlp = service
-    app.add_middleware(BodyLimit, limit=max_body_bytes)
+    app.add_middleware(BodyLimit, limit=max_body_bytes, timeout=settings.body_timeout_seconds)
 
     @app.exception_handler(RequestValidationError)
     async def invalid_request(request, error):
         # Validation input can contain conversations, signed media URLs and leases.
-        return JSONResponse({'error_code': 'invalid_request',
-                             'error_count': len(error.errors())}, 422)
+        size_codes = {'start_size_exceeded', 'checkpoint_size_exceeded', 'observations_size_exceeded'}
+        code = next((item['type'] for item in error.errors() if item['type'] in size_codes), 'invalid_request')
+        return JSONResponse({'error_code': code, 'error_count': len(error.errors())}, 422)
 
     @app.exception_handler(RunProtocolError)
     async def incompatible_request(request, error):
-        return JSONResponse({'error_code': 'run_protocol_conflict'}, 409)
+        return JSONResponse({'error_code': error.code}, 409)
 
     @app.exception_handler(GatewayTransportError)
     async def gateway_error(request, error):
@@ -133,10 +149,21 @@ def create_app(service=None, *, max_body_bytes=8 * 1024 * 1024, max_inflight=32,
 
     @app.get('/health/live')
     async def health():
-        nlp = app.state.nlp
-        return {'status': 'ready', 'release_id': nlp.release_id,
-                'model_policy_id': nlp.model_policy_id,
-                'semantic_policy_id': nlp.semantic_policy.policy_id}
+        return {'status': 'alive'}
+
+    @app.get('/health/ready')
+    async def ready():
+        local_ready = app.state.local_ready and (app.state.bundle is None or app.state.bundle.local_ready)
+        status = await app.state.readiness.check(local_ready=local_ready)
+        if app.state.local_ready:
+            nlp = app.state.nlp
+            status.update(release_id=nlp.release_id, model_policy_id=nlp.model_policy_id,
+                          semantic_policy_id=nlp.semantic_policy.policy_id)
+        return JSONResponse(status, 200 if status['ready'] else 503)
+
+    @app.get('/metrics')
+    async def metrics():
+        return {**app.state.metrics.snapshot(), 'inflight': len(slots), 'max_inflight': max_inflight}
 
     def reserve():
         if len(slots) >= max_inflight:
@@ -179,6 +206,8 @@ def create_app(service=None, *, max_body_bytes=8 * 1024 * 1024, max_inflight=32,
                 # Headers have already been sent. A transport failure is not a
                 # synthetic agent completion and must never authorize execution.
                 code = 'request_deadline_exceeded' if isinstance(error, TimeoutError) else 'stream_interrupted'
+                if isinstance(error, RunProtocolError) and error.code == 'checkpoint_size_exceeded':
+                    code = error.code
                 yield json.dumps({'protocol_version': 'gateway-v1', 'type': 'transport.error',
                                   'identity': identity.model_dump(), 'error_code': code,
                                   'outcome_unknown': True}) + '\n'
@@ -251,6 +280,4 @@ def create_app(service=None, *, max_body_bytes=8 * 1024 * 1024, max_inflight=32,
 
 
 def configured_app():
-    return create_app(max_body_bytes=int(os.getenv('NLP_MAX_BODY_BYTES', str(8 * 1024 * 1024))),
-                      max_inflight=int(os.getenv('NLP_MAX_INFLIGHT', '32')),
-                      request_timeout_seconds=float(os.getenv('NLP_REQUEST_TIMEOUT_SECONDS', '120')))
+    return create_app(settings=NLPSettings.from_environment())

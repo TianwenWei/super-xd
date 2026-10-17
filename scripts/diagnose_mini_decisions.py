@@ -1,4 +1,8 @@
 """Six bounded Mini-only replays of two failed decisions; never executes tools."""
+if __name__ == "__main__":
+    from backend.local_environment import load_local_environment
+    load_local_environment()
+
 import argparse
 import asyncio
 from collections import Counter

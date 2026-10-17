@@ -25,7 +25,7 @@ class ScriptedArk:
         self.responses = list(responses)
         self.requests = []
 
-    async def stream(self, messages, tools):
+    async def stream(self, messages, tools, **options):
         self.requests.append(copy.deepcopy({"messages": messages, "tools": tools}))
         item = copy.deepcopy(self.responses.pop(0))
         if item["message"].get("content"):
@@ -48,6 +48,7 @@ async def trace_context(tmp_path):
     async def make(ark=None, session_id=None, vehicle_planner=None):
         actor = SessionActor(session_id or f"trace-session-{len(created)}", db, ark or ScriptedArk(),
                              vehicle_planner=vehicle_planner or FakeVehiclePlanner())
+        actor.simulator.execution_ms = actor.simulator.network_rtt_ms = 0
         created.append(actor)
         actors[actor.id] = actor
         outgoing = await actor.attach()
@@ -68,7 +69,8 @@ async def receive(queue, kind, actor=None):
             event = await queue.get()
             seen.append(event)
             if event["type"] == "vehicle.command" and actor:
-                await actor.post({"type": "vehicle.execute", "command_id": event["command_id"]})
+                receipt = await actor.simulator.execute(event["command_id"])
+                await actor.post({"type": "vehicle.receipt", "command_id": event["command_id"], "receipt_id": receipt["receipt_id"]})
             if event["type"] == kind:
                 return event, seen
 
@@ -89,8 +91,8 @@ async def test_vehicle_delegation_separates_talker_plan_and_actual_receipt_trace
     await actor.post({"type": "input", "text": "打开后视镜加热"})
     done, _ = await receive(queue, "stream.done", actor)
     events = await recorded(actor)
-    started = [event for event in events if event["kind"] == "model.started"]
-    completed = [event for event in events if event["kind"] == "model.completed"]
+    started = [event for event in events if event["kind"] == "model.started" and event["data"].get("agent") == "talker"]
+    completed = [event for event in events if event["kind"] == "model.completed" and event["data"].get("agent") == "talker"]
     assert len(started) == len(completed) == 1
     assert len({event["call_id"] for event in started}) == 1
     assert [event["data"]["model_call_index"] for event in completed] == [1]
@@ -103,17 +105,16 @@ async def test_vehicle_delegation_separates_talker_plan_and_actual_receipt_trace
     assert [event["call_id"] for event in tools] == ["delegate-1"]
     assert [event["data"]["model_call_id"] for event in tools] == [event["call_id"] for event in started]
     assert [tool["function"]["name"] for tool in ark.requests[0]["tools"]] == expected_talker_tool_names()
-    plan = next(event for event in events if event["kind"] == "vehicle.plan.accepted")
-    assert plan["data"]["executed"] is False
-    action = next(event for event in events if event["kind"] == "vehicle.plan.action_completed")
-    assert action["data"]["parent_call_id"] == "delegate-1"
-    assert action["data"]["result"]["ok"] is True
-    outer = next(event for event in events if event["kind"] == "tool.completed" and event["call_id"] == "delegate-1")
-    assert outer["data"]["result"]["source"] == "vehicle_plan"
-    assert outer["data"]["result"]["action_receipts"][0]["result"]["ok"] is True
+    planner_return = next(event for event in events if event['kind'] == 'model.completed'
+                          and event['data'].get('agent') == 'vehicle_planner')
+    actual = next(event for event in events if event['kind'] == 'vehicle.receipt')
+    outer = next(event for event in events if event['kind'] == 'tool.completed' and event['call_id'] == 'delegate-1')
+    assert actual['data']['result']['ok'] is True
+    assert planner_return['trace_id'] < actual['trace_id'] < outer['trace_id']
+    assert outer['data']['result']['receipts'][0]['result']['executed'] is True
     assert len(planner.requests) == 1
     final = next(event for event in events if event["kind"] == "turn.completed")
-    assert final["data"]["output_source"] == "persona_template"
+    assert final["data"]["output_source"] == "verified_receipts"
     assert final["data"]["output"] == done["text"] and "后视镜加热开了" in done["text"]
     assert actor.vehicle["mirrors"]["heating"] is True
     response = await client.get(f"/api/sessions/{actor.id}/traces", params={"turn_id": done["turn_id"]})
@@ -146,7 +147,7 @@ class InterruptedArk:
         # The routing call withholds deltas from the UI, so tests wait on this.
         self.streaming = asyncio.Event()
 
-    async def stream(self, messages, tools):
+    async def stream(self, messages, tools, **options):
         self.calls += 1
         if self.calls != 1:
             yield {"type": "delta", "text": "新轮次正常回答。"}
@@ -181,10 +182,10 @@ async def test_cancelled_model_keeps_received_partial_under_old_turn(trace_conte
     done, _ = await receive(queue, "stream.done")
     await old.model_task
     events = await recorded(actor)
-    cancelled = next(event for event in events if event["kind"] == "model.cancelled")
+    cancelled = next(event for event in events if event["kind"] == "run.cancelled")
     started = next(event for event in events if event["kind"] == "model.started" and event["turn_id"] == old.id)
     assert cancelled["turn_id"] == old.id != done["turn_id"]
-    assert cancelled["status"] == "cancelled" and cancelled["call_id"] == started["call_id"]
+    assert cancelled["status"] == "stale" and cancelled["call_id"] == started["call_id"]
     assert cancelled["data"]["partial"]["message"]["content"] == "旧轮次已返回片段"
     assert cancelled["data"]["partial"]["meta"]["usage"] is None
     assert done["text"] == "新轮次正常回答。"
@@ -205,16 +206,16 @@ async def test_late_old_model_callback_is_retained_without_new_turn_pollution(tr
     ark.release.set()
     await old.model_task
     events = await recorded(actor)
-    kind = "model.completed" if late == "message" else "model.error"
+    kind = "run.cancelled"
     stale = next(event for event in events if event["kind"] == kind and event["turn_id"] == old.id)
     assert stale["status"] == "stale"
     assert stale["call_id"] != next(event["call_id"] for event in events
                                    if event["kind"] == "model.completed" and event["turn_id"] == done["turn_id"])
     if late == "message":
-        assert stale["data"]["message"]["content"] == "旧轮次迟到完整内容"
-        assert stale["data"]["message"]["tool_calls"][0]["id"] == "must-not-execute"
+        assert stale["data"]["partial"]["late_return"]["message"]["content"] == "旧轮次迟到完整内容"
+        assert stale["data"]["partial"]["late_return"]["message"]["tool_calls"][0]["id"] == "must-not-execute"
     else:
-        assert "old-call failed" in stale["data"]["error"]
+        assert "old-call failed" in stale["data"]["partial"]["late_error"]["message"]
         assert "trace-test-key" not in json.dumps(stale)
     assert done["text"] == actor.current.output == "新轮次正常回答。"
     assert not any(event["kind"] in {"tool.started", "vehicle.dispatched"} for event in events)
@@ -237,16 +238,16 @@ async def test_model_trace_status_follows_actor_queue_order(trace_context, late)
     done, _ = await receive(queue, "stream.done")
     await old.model_task
     events = await recorded(actor)
-    kind = "model.completed" if late == "message" else "model.error"
+    kind = "run.cancelled"
     result = next(event for event in events if event["kind"] == kind and event["turn_id"] == old.id)
     assert old.interrupted and result["status"] == "stale"
     assert result["call_id"] == next(event["call_id"] for event in events
                                     if event["kind"] == "model.started" and event["turn_id"] == old.id)
     if late == "message":
-        assert result["data"]["message"]["content"] == "旧轮次迟到完整内容"
-        assert result["data"]["meta"]["usage"] is None
+        assert result["data"]["partial"]["late_return"]["message"]["content"] == "旧轮次迟到完整内容"
+        assert result["data"]["partial"]["late_return"]["meta"]["usage"] is None
     else:
-        assert "old-call failed" in result["data"]["error"]
+        assert "old-call failed" in result["data"]["partial"]["late_error"]["message"]
     assert done["text"] == actor.current.output == "新轮次正常回答。"
     assert not any(event["kind"] in {"tool.started", "vehicle.dispatched"} for event in events)
 
@@ -262,7 +263,8 @@ async def test_late_receipt_is_old_turn_stale_and_duplicate_does_not_add_trace(t
     old = actor.current
     await actor.post({"type": "input", "text": "新输入"})
     done, _ = await receive(queue, "stream.done")
-    await actor.post({"type": "vehicle.execute", "command_id": command["command_id"]})
+    receipt = await actor.simulator.execute(command["command_id"])
+    await actor.post({"type": "vehicle.receipt", "command_id": command["command_id"], "receipt_id": receipt["receipt_id"]})
     events = await recorded(actor)
     receipt = next(event for event in events if event["kind"] == "vehicle.receipt")
     assert receipt["turn_id"] == old.id != done["turn_id"]
@@ -272,7 +274,8 @@ async def test_late_receipt_is_old_turn_stale_and_duplicate_does_not_add_trace(t
     assert actor.current.output == "新轮次正常回答。"
     assert not any(item.get("tool_call_id") == "old-volume-call" for item in old.messages)
     assert not any(e['type'] == 'vehicle.result' for e in queue._queue)
-    await actor.post({"type": "vehicle.execute", "command_id": command["command_id"]})
+    receipt = await actor.simulator.execute(command["command_id"])
+    await actor.post({"type": "vehicle.receipt", "command_id": command["command_id"], "receipt_id": receipt["receipt_id"]})
     assert await recorded(actor) == events
 
 
@@ -409,13 +412,14 @@ async def test_trace_recording_failure_is_visible_without_breaking_actor(trace_c
     done, _ = await receive(queue, "stream.done")
     await actor.trace_queue.join()
     response = await client.get(f"/api/sessions/{actor.id}/traces")
-    assert done["text"] == "本轮回答正常。"
+    assert done["metrics"]["error"] == "diagnostics_unavailable"
+    assert done["text"] != "本轮回答正常。"
     assert "database unavailable" in response.json()["recording_error"]
     assert "trace-storage-secret" not in response.text
     monkeypatch.setattr(db, "append_trace", original)
 
 
-async def test_blocked_trace_writer_does_not_block_foreground_answer(trace_context, monkeypatch):
+async def test_blocked_trace_writer_keeps_actor_responsive_but_gates_model_until_commit(trace_context, monkeypatch):
     make, _, db = trace_context
     entered, release = threading.Event(), threading.Event()
     original = db.append_trace
@@ -432,9 +436,14 @@ async def test_blocked_trace_writer_does_not_block_foreground_answer(trace_conte
         actor.trace("test.writer_blocked", {"injected": True})
         assert await asyncio.to_thread(entered.wait, 1)
         await actor.post({"type": "input", "text": "本轮输入"})
-        done, _ = await asyncio.wait_for(receive(queue, "stream.done"), timeout=1)
-        assert done["text"] == "日志等待时仍能回答。"
+        await actor.queue.join()
+        assert not actor.ark.requests and not actor.current.finished
+        await actor.post({'type': 'persona.set', 'preset': 'professional'})
+        await actor.queue.join()
         assert not release.is_set() and actor.trace_queue.qsize() > 0
+        release.set()
+        done, _ = await receive(queue, 'stream.done')
+        assert done['text'] == '日志等待时仍能回答。'
     finally:
         release.set()
         await actor.trace_queue.join()

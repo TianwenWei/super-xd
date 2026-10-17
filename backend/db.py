@@ -64,6 +64,8 @@ class Database:
               trace_id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
               turn_id TEXT, task_id TEXT, revision INTEGER, call_id TEXT, step INTEGER,
               kind TEXT NOT NULL, status TEXT, created_at TEXT NOT NULL, data TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS task_operations (
+              idempotency_key TEXT PRIMARY KEY, signature TEXT NOT NULL, result TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id);
             CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id,event_id);
             CREATE INDEX IF NOT EXISTS idx_trace_session ON trace_events(session_id,trace_id);
@@ -195,15 +197,38 @@ class Database:
                 items.append(item)
             return items
 
-    def create_task(self, session_id, goal, context=None):
-        task_id, at = uuid4().hex[:12], utcnow()
+    def create_task(self, session_id, goal, context=None, *, task_id=None, idempotency_key=None):
+        task_id, at = task_id or uuid4().hex[:12], utcnow()
         deadline = (datetime.fromisoformat(at) + timedelta(seconds=60)).isoformat()
         with self.connection() as con:
+            con.execute('BEGIN IMMEDIATE')
+            signature = json.dumps(['create', session_id, task_id, goal, context or {}], sort_keys=True, ensure_ascii=False)
+            prior = self._operation(con, idempotency_key, signature)
+            if prior is not None:
+                return prior
             con.execute('INSERT INTO tasks(id,session_id,goal,context,created_at,updated_at,deadline_at,summary) VALUES(?,?,?,?,?,?,?,?)',
                         (task_id, session_id, goal, json.dumps(context or {}, ensure_ascii=False), at, at, deadline, feedback_text('task.db.queued')))
             task = self._get(con, task_id)
             self._event(con, task, 'created')
+            self._save_operation(con, idempotency_key, signature, task)
             return task
+
+    @staticmethod
+    def _operation(con, key, signature):
+        if key is None:
+            return None
+        row = con.execute('SELECT signature,result FROM task_operations WHERE idempotency_key=?', (key,)).fetchone()
+        if row is None:
+            return None
+        if row['signature'] != signature:
+            raise ValueError('Idempotency key was reused for a different task operation')
+        return json.loads(row['result'])
+
+    @staticmethod
+    def _save_operation(con, key, signature, task):
+        if key is not None:
+            con.execute('INSERT INTO task_operations(idempotency_key,signature,result) VALUES(?,?,?)',
+                        (key, signature, json.dumps(task, ensure_ascii=False)))
 
     def get_task(self, task_id):
         with self.connection() as con:
@@ -229,11 +254,15 @@ class Database:
                 self._event(con, task, 'running')
             return task
 
-    def mutate_task(self, task_id, action, text='', expected_revision=None):
+    def mutate_task(self, task_id, action, text='', expected_revision=None, *, idempotency_key=None, requeue=False):
         if action not in {'reply', 'update', 'cancel'}:
             raise ValueError('未知任务操作')
         with self.connection() as con:
             con.execute('BEGIN IMMEDIATE')
+            signature = json.dumps(['mutate', task_id, action, text, expected_revision], ensure_ascii=False)
+            prior = self._operation(con, idempotency_key, signature)
+            if prior is not None:
+                return prior
             task = self._get(con, task_id)
             if task is None:
                 raise ValueError('任务不存在')
@@ -253,7 +282,7 @@ class Database:
                 context.setdefault('clarification_history', []).append(clarification)
             if action != 'cancel':
                 constraints.append(text.strip())
-            status = 'cancelling' if action == 'cancel' else ('running' if task['status'] == 'running' else 'queued')
+            status = 'cancelling' if action == 'cancel' else ('running' if task['status'] == 'running' and not requeue else 'queued')
             self._transition_clock(con, task, status)
             summary = feedback_text('task.db.cancel_pending') if action == 'cancel' else feedback_text('task.db.update_pending')
             con.execute("UPDATE tasks SET revision=?,constraints=?,context=?,status=?,summary=?,result=NULL,question=NULL,error=NULL,error_code=NULL,progress='{}',updated_at=? WHERE id=?",
@@ -262,6 +291,7 @@ class Database:
                         (task_id, action, text.strip(), revision, utcnow()))
             task = self._get(con, task_id)
             self._event(con, task, action)
+            self._save_operation(con, idempotency_key, signature, task)
             return task
 
     def inbox(self, task_id):

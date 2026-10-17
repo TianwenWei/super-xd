@@ -4,6 +4,10 @@ Run from the project root with ``.venv/bin/python -m scripts.probe_asr``.
 The local PCM fixture can be reused; credentials and request headers are never
 written to the report. This does not measure physical microphone capture.
 """
+if __name__ == "__main__":
+    from backend.local_environment import load_local_environment
+    load_local_environment()
+
 import argparse
 import asyncio
 import audioop
@@ -13,7 +17,6 @@ from pathlib import Path
 import time
 from uuid import uuid4
 
-from backend import settings  # Loads server-only .env before creating adapters.
 from backend.asr import VolcanoASR
 from backend.tts import VolcanoTTS
 

@@ -27,7 +27,7 @@ Talker 通过固定的 `search_manual(query, max_results?)` 工具检索车书�
 安装可选依赖（项目根目录）：
 
 ```sh
-uv pip install --python .venv/bin/python -r requirements.manual.txt
+uv sync --locked --extra demo --extra manual-index
 ```
 
 项目 `.env` 配置以下变量；专用密钥只授权 `Doubao-embedding-vision`，与原有 `ARK_API_KEY` 分开：

@@ -3,8 +3,8 @@ from copy import deepcopy
 
 import pytest
 
-from backend.catalog import execute_tool, initial_vehicle_state
-from backend.session import receipt_detail
+from backend.demo.vehicle_simulator import execute_tool, initial_vehicle_state
+from backend.speech_config import receipt_detail
 from backend.prompt_templates import load_prompt
 from test_session import make_actor, wait_for
 from test_vehicle_delegation import delegate
@@ -42,18 +42,19 @@ async def test_empty_builtin_failure_preserves_original_cause_without_schema_mas
                'plan_call_id': 'actual-plan-call', 'model_call_id': 'actual-pro-call'}
     if code:
         failure['code'] = code
-    actor, queue, _ = await make_actor([{'tool_calls': [delegate(['mirrors'])]}], FakeVehiclePlanner(failure))
+    actor, queue, _ = await make_actor([{'tool_calls': [delegate(['mirrors'])]},
+        {'content': '规划没有完成，动作没有下发。'}], FakeVehiclePlanner(failure))
     before = deepcopy(actor.vehicle)
     await actor.post({'type': 'input', 'text': '折叠后视镜。'})
     done, events = await wait_for(queue, 'stream.done')
     result = actor.current.tool_results['delegate']
     assert result['code'] == expected_code and result['reason'] == reason
-    assert result['status'] == 'failed' and result['executed'] is False
-    assert result['action_receipts'] == [] and result['intents'] == []
+    assert result['ok'] is False and result['executed'] is False
+    assert result['receipts'] == [] and result['plan']['intents'] == []
     assert actor.vehicle == before and not any(e['type'] == 'vehicle.command' for e in events)
     assert '规划没有完成' in done['text'] and '动作没有下发' in done['text']
     assert 'minItems' not in result['reason'] and result['code'] != 'vehicle_plan_invalid'
-    assert done['metrics']['error'] == expected_code
+    assert done['metrics']['error'] is None  # The model explained an explicit planner failure.
 
 
 @pytest.mark.parametrize('status,actions,intents', [
@@ -66,7 +67,8 @@ async def test_empty_builtin_failure_preserves_original_cause_without_schema_mas
 async def test_failure_handling_cannot_bypass_action_or_intent_validation(make_actor, status, actions, intents):
     invalid = {'status': status, 'ok': False, 'reason': 'planner_model_step_limit',
                'question': '', 'actions': actions, 'intents': intents, 'keep_paths': []}
-    actor, queue, _ = await make_actor([{'tool_calls': [delegate(['mirrors'])]}], FakeVehiclePlanner(invalid))
+    actor, queue, _ = await make_actor([{'tool_calls': [delegate(['mirrors'])]},
+        {'content': '计划未通过核实，没有执行。'}], FakeVehiclePlanner(invalid))
     await actor.post({'type': 'input', 'text': '折叠后视镜。'})
     _, events = await wait_for(queue, 'stream.done')
     assert actor.current.tool_results['delegate']['code'] == 'vehicle_plan_invalid'
@@ -82,8 +84,8 @@ async def test_dependency_and_authorized_prerequisite_instruction_reaches_talker
     await wait_for(queue, 'stream.done')
     instructions = ark.requests[0]['messages'][0]['content']
     assert instructions.startswith(load_prompt('talker').split('{{hot_tool_names}}', 1)[0])
-    assert '必须等另一个动作完成才能做' in instructions
-    assert '先解除童锁才能开窗' in instructions
-    assert '就把整句话一次交给车控规划层（delegate_vehicle_control）' in instructions
-    assert '前台和车控规划层同时操作车辆会互相冲突' in instructions
+    assert '没有执行依赖' in instructions
+    assert '只要含一项冷能力或动作依赖' in instructions
+    assert '整句一次委托delegate_vehicle_control' in instructions
+    assert '不先执行热动作，也不把热函数与委托混在同次调用' in instructions
     assert actor.vehicle['windows']['child_lock'] is True

@@ -1,103 +1,93 @@
 # NLP Agent Harness
 
-本仓库交付独立NLP服务。Gateway提供鉴权后的原话、结构化历史、车况、能力及任务版本；NLP负责理解、规划、工具编排和表达。Gateway保存上下文与checkpoint并转交工具请求，设备团队执行动作并提供真实回执。
+本仓库交付独立 NLP 服务：理解原话、构造模型上下文、规划、编排工具、生成表达。Gateway 负责身份与会话、上下文和 checkpoint 持久化、任务账本/租约、工具交接；工具和设备团队负责真实执行及回执。生产 NLP 不启动 SQLite、Demo actor、ASR/TTS、模拟器或设备连接。
 
-## 运行链路
+## 核心与适配器
 
 ```mermaid
 flowchart LR
-    G[外部 Gateway] --> H[内部 HTTP / NDJSON]
-    H --> T[Talker]
-    T --> P[前台 Reasoner]
-    T --> B[后台 TaskService / TaskRunner]
-    T --> C[业务策略与回执编排]
-    P --> C
-    C --> G
-    B --> L[Gateway任务账本 / 租约]
-    G --> D[工具服务 / 设备执行团队]
-    D --> G
+    G[外部 Gateway] --> H[HTTP / NDJSON]
+    H --> N[NLPService]
+    D[Demo Session / LocalGateway] --> N
+    E[行为评测 / FixtureGateway] --> N
+    N --> T[Talker / AgentRun]
+    T --> F[前台 Reasoner / ForegroundGroup]
+    T --> B[TaskService / TaskRunner]
+    F --> G
+    B --> L[Gateway 任务账本]
 ```
 
-生产入口为`backend.nlp_app:configured_app`，组合根为`backend/harness/assembly.py`。生产服务不启动Demo会话actor、SQLite、ASR/TTS、WebSocket或模拟器。
-
-| 模块 | 职责 |
+| 模块 | 实际职责 |
 | --- | --- |
-| `harness/context.py`、`talker.py` | 稳定前缀、历史选择、动态快照与固定26工具 |
-| `harness/contracts.py`、`run.py` | 版本化运行、流式模型、预算、工具组校验、挂起与恢复 |
-| `harness/gateway.py` | Gateway输入编译、子运行编排、完整交接与诊断 |
-| `harness/product_policy.py` | 来源约束、任务选择、媒体/导航准备、回执状态转换 |
-| `harness/vehicle_planner.py` | skill证据、intent账本、计划结构/来源/保持约束校验 |
-| `harness/foreground.py` | Planner子动作与领域依赖按真实回执推进，记录执行账本 |
-| `harness/background.py`、`task_runner.py` | 任务登记、修订、执行、澄清、检索、收尾 |
-| `harness/task_transport.py` | Gateway任务账本的HTTP适配器；revision CAS、执行租约、追踪 |
-| `harness/release.py`、`diagnostics.py` | 发布指纹、模型策略版本、脱敏诊断 |
+| `backend/nlp_app.py`、`harness/assembly.py` | 生产入口、生命周期、冻结配置、资源装配 |
+| `harness/gateway_contracts.py` | Gateway 输入/输出、结构化历史、checkpoint v2 的严格 wire 模型 |
+| `harness/contracts.py`、`ports.py` | 内部运行数据与策略、诊断、前台宿主端口 |
+| `harness/gateway.py` | NLPService 编译、恢复、前后台组合与交接 |
+| `harness/run.py`、`model_execution.py` | Agent 循环与预算；共享模型结果/usage 归一、取消及流关闭原语 |
+| `harness/context.py`、`talker.py` | 历史选择、固定前缀、能力投影与固定 26 工具 |
+| `harness/product_policy.py`、`foreground.py` | 来源/权限与精确参数、真实回执推进依赖、未知结果等待 |
+| `harness/vehicle_planner.py` | 前台计划、skill 证据、intent/动作账本及保持约束 |
+| `harness/background.py`、`task_runner.py` | 后台任务登记、修订、执行、澄清、检索、收尾、版本化呈现 |
+| `harness/evidence.py` | 来源/版本/内容指纹、证据范围、跨恢复的检索进展 |
+| `harness/task_transport.py`、`task_store.py` | Gateway 任务存储端口及 HTTP 适配 |
+| `harness/release.py`、`diagnostics.py`、`observability.py` | 发布指纹、脱敏批量追踪、进程指标及可选就绪探测 |
 
-热车控成功后直接消费回执完成，不再额外调用Talker。查询、失败或需要表达的结果仍回到模型。复杂车控在NLP内部规划，不向Gateway发送“请调用Planner”占位请求。计划动作逐项交接；前一控制动作没有真实结果及后续所需的新车况时，不继续推导执行。
+wire 模块不导入运行器、执行器或存储实现；它复用共享严格模型与纯编译/证据类型。`ports.py` 描述业务策略和宿主边界，前台编排不反向导入 GatewayRun。模型调用原语只统一协议，不把前台动作账本与后台任务状态机强行合成同一个循环。
 
-媒体支持play/pause/resume/stop/exit/next/previous/seek/volume/get_status；导航支持start/get_status/route/set_origin/add_waypoint/remove_waypoint/cancel。依赖动作在收到前序真实回执后重新准备。`expected`是命令预期，不能直接推进事实状态。执行地点由部署bindings与Gateway能力事实共同约束。
+Demo 的 `SessionActor` 经 `demo/session_nlp.py` 与 `demo/local_gateway.py` 驱动同一个 NLPService。它保留输入、音频播放、界面、实际模拟器回执和 SQLite 调度适配；不再实现另一份模型路由/业务工具循环。行为评测的 `evals/gateway_driver.py` 同样提交 StartRequest、保存交接并回传显式 fixture 的执行结果。生产核心不得反向导入这些适配器，`scripts/check_import_boundaries.py` 同时检查静态与实际导入。
 
-后台任务由NLP调用Gateway任务账本登记，真实确认后才报告已登记；Gateway获得执行租约后调用NLP执行接口。TaskRunner复用既有quick/research、澄清、修订、来源约束和收尾规则；不自行抢占任务或写SQLite。Gateway负责暂停澄清计时、过期、唯一执行者和状态/事件原子性。任务回流通过present接口再次读取实际任务，核对revision/status后生成带event_key的播报和结果卡；人设表达使用模板，不增加模型调用。
+## 执行、上下文与恢复
+
+Talker 一次调用决定并表达。咨询与执行由模型理解，代码校验结构、来源、能力与回执，不追加每轮意图分类模型。纯控制/登记的确定成功直接消费回执完成；查询及需要解释的失败按真实结果继续推理。前台 Planner 只产出计划，ForegroundGroup 验证完整动作并逐项交接；媒体/导航依赖必须在前序真实回执后重新准备，不能用 expected 状态推进。
+
+历史 assistant 内容保留完整生成答案，`playback_history` 单独表达未知、未开始、部分、完成和已确认听到的片段。未知播放不能当作空答案。动态事实在固定规则、人设、原生示例和历史之后，先列当前音区和变化标志。Talker 的固定前缀从catalog文字配置生成85项完整冷能力语义说明，仍只有26工具；动态冷车控索引按 skill 保留 available/unavailable/missing 名称及可用数量，不从语义目录或 feature=true 推断缺失能力。完整声明保留在 StartRequest，供前台编排与执行校验使用。
+
+检索结果的来源 ID、版本和内容指纹用于判断有无新增证据；排序、分数和再次查询时间不算新证据。证据范围描述对象、时段、粒度及覆盖范围，不证明答案被支持。首个空结果允许一次改写；再次无新增证据会阻止继续调用同一检索工具，返回可收束的结构化反馈。前台默认每工具最多 4 次、合计 8 次；后台同时受任务步骤/查询预算约束。进展账本随运行/任务 checkpoint 保存，unknown 结果不当作确定证据。
+
+Gateway wire 使用 `gateway-v1`，其中 `run.checkpoint_version=2`：原 StartRequest 保存一次，后续仅保存本轮生成消息、运行计数、交接和回执账本；固定 prompt/schema/history 前缀由同版本编译器重建，并校验 prepared_digest。子编排车况保存相对初始车况的领域差量。源码/prompt、冻结模型及执行配置、业务策略任一版本不匹配均拒绝恢复；旧 v1 运行 checkpoint 不隐式转换。完整追踪另走诊断存储，不能以删审计来控制 checkpoint 体积。
+
+默认 HTTP body 上限 8 MiB；StartRequest 上限 6 MiB；checkpoint 非 Start 部分上限 1 MiB；单批回执上限 256 KiB。接收回执前还检查剩余续跑空间，超限不接受任何回执。接口不静默截断业务内容；Gateway 应保留已确认交接与执行结果，不能因超限重新执行动作。精确字段和失败语义见 [Gateway 契约](GATEWAY_CONTRACT.md)。
+
+后台 TaskService 调用 Gateway 账本登记，确认提交后才报告 registered。Gateway 获取执行租约后调用 execute；澄清、修订、过期与状态/事件原子性属于 Gateway。present 重新读取 revision/status，匹配时返回可去重 event_key、播报与卡片，不增加模型调用；建议操作不构成执行授权。
 
 ## 配置与启动
 
 ```sh
-.venv/bin/python -m scripts.validate_prompt_config
-.venv/bin/python -m scripts.validate_service_config
-.venv/bin/python -m uvicorn backend.nlp_app:configured_app --factory --host 127.0.0.1 --port 8001
+uv sync --frozen --no-dev
+NLP_GATEWAY_URL=http://gateway.internal .venv/bin/python -m uvicorn backend.nlp_app:configured_app --factory --host 127.0.0.1 --port 8001
 ```
 
-使用现有`config/services.toml`选定四个模型角色（Talker、前台Planner、后台Thinker及其finalizer）。前三份主prompt与四个模型配置角色不是一一对应的Agent数量；finalizer是后台任务的收尾阶段。
+依赖与 Python 版本由 `pyproject.toml`、`uv.lock` 锁定；生产只需基础依赖，Demo、车书索引和本地 VAD 为独立 extras。生产 factory 显式读取环境构造不可变 NLPSettings，不隐式加载 `.env`；Demo 和脚本的显式入口可调用本地环境加载器。模型/检索使用 `config/services.toml` 及已选择的本地配置，启动时解析并冻结，凭证不写入版本哈希或诊断。
 
-| 配置 | 用途 |
+| 环境变量 | 用途/默认值 |
 | --- | --- |
-| `NLP_GATEWAY_URL` | 必填，Gateway内部任务账本和诊断服务根地址 |
-| `NLP_GATEWAY_TOKEN` | 可选，内部服务Bearer凭证；网络身份也可由部署层承担 |
-| `NLP_GATEWAY_TIMEOUT_SECONDS` | 单次Gateway请求超时，默认10秒 |
-| `NLP_MAX_BODY_BYTES` | 入站完整JSON上限，默认8 MiB，含chunked请求 |
-| `NLP_MAX_INFLIGHT` | 每进程同时推进的请求上限，默认32；超限429 |
-| `NLP_REQUEST_TIMEOUT_SECONDS` | 单次HTTP推进期限，默认120秒，与模型预算独立 |
-| 既有模型、搜索、天气配置 | 仅创建NLP所需客户端；缺凭证明确失败，不生成替代结果 |
+| `NLP_GATEWAY_URL`、`NLP_GATEWAY_TOKEN` | Gateway 根地址必填；内部 Bearer 凭证可选 |
+| `NLP_GATEWAY_TIMEOUT_SECONDS` | Gateway 单次请求 10 秒 |
+| `NLP_GATEWAY_HEALTH_URL` | 可选显式健康 URL；未设置则不探测 Gateway |
+| `NLP_READINESS_TIMEOUT_SECONDS`、`NLP_READINESS_CACHE_SECONDS` | 就绪探测 2 秒、缓存 5 秒；不调用模型 |
+| `NLP_MAX_BODY_BYTES`、`NLP_BODY_TIMEOUT_SECONDS` | HTTP body 8 MiB、接收 30 秒 |
+| `NLP_MAX_INFLIGHT`、`NLP_REQUEST_TIMEOUT_SECONDS` | 每进程 32 并发、单次推进 120 秒 |
+| `THINKER_MAX_STEPS`、`THINKER_TIMEOUT_SECONDS`、`TOOL_TIMEOUT_SECONDS` | 后台默认 20 步、60 秒、单工具 12 秒；启动冻结 |
 
-内部接口只应对受信任Gateway开放；终端不直接调用，也不上传checkpoint。生产流式代理需关闭缓冲。进程内取消只影响本实例正在运行的请求，跨实例路由/租约属于Gateway。完整接入约定见[Gateway V1契约](GATEWAY_CONTRACT.md)。
+`/health/live` 只报告进程存活；`/health/ready` 报告本地资源和可选 Gateway 探测及发布版本；`/metrics` 返回按模型角色聚合的调用、失败/取消、时长和实际 usage，不保存对话文本。未知 token 数不伪造为已测量。内部接口须由部署层隔离，流式代理关闭缓冲；跨实例排他和取消路由由 Gateway 管理。
 
-## Prompt维护
+当前指标为进程内 JSON 聚合，尚未接入 OpenTelemetry/Prometheus exporter，也未覆盖首 token 延迟和策略拒绝分布；这些需随部署监控补齐。压测、滚动升级和真车联调仍需在实际 Gateway 与设备环境验收。checkpoint 当前不使用 HMAC，依赖可信内部接口及 Gateway 服务器存储边界；若允许终端或其他不可信主体回传，须先增加认证签名或改成服务端引用。
 
-行为主入口收拢为：
+## Prompt 与验证
 
-- `prompts/talker.md`：职责、决策、工具、表达、三种人设及动态上下文模板。
-- `prompts/reasoner_foreground.md`：前台车控规划和结构化纠错阶段。
-- `prompts/reasoner_background.md`：共同规则、quick/research、澄清/修订、收尾及来源选择。
+行为主入口仍只有 `talker.md`、`reasoner_foreground.md`、`reasoner_background.md`。启动严格校验命名 section 与变量，请求只选择角色/阶段/当前人设所需内容。工具文字 TOML、104 条原生示例消息（34 个调用）、固定播报和 embedding 指令保持独立，详见 [Prompt 索引](../prompts/README.md)。
 
-每份按命名section维护，启动校验重复/缺失/多余section及变量。请求只选取该阶段需要的section，不把整份后台文档每轮都发送。人设表达边界与选中风格组合；车况、音区、时间、任务等继续以动态上下文传入。
+```sh
+.venv/bin/python -m scripts.validate_prompt_config
+.venv/bin/python -m scripts.validate_service_config
+.venv/bin/python -m scripts.check_import_boundaries --smoke-startup
+.venv/bin/python -m pytest -q
+```
 
-工具说明TOML、原生few-shot JSON、固定播报TOML和embedding指令保持独立。结构化示例未因文件合并被改写。详细索引及统计CLI见[prompts/README.md](../prompts/README.md)。
+`evals.harness` 经生产 NLPService 评估精确参数、禁止动作、检索次数与跨人设差异；`general_principles.json` 先定义咨询/执行、证据范围、播放追问及无进展收束场景。带 rubric 的轮次自动用独立配置模型逐项审查并保存原文依据、脱敏原始响应和错误原因，供应商/解析失败记为 unreviewed，不能算语义通过；人工抽查仍然必要。它不是生产路径里的串行模型调用。
 
-## Demo与清理边界
+当前离线30请求对照为 `data/evals/final-capability-catalog-before.json` 与 `final-capability-catalog-frozen.json`，统计在 `final-capability-catalog-frozen-statistics.json`。固定冷能力目录增加语义信息，渲染core由6,838增至11,026字符；消息数、工具结构和104条原生示例不变，工具文字纠正了旧Demo执行假设。此前同一125条能力事实的结构投影使快照27,710→13,377字符，两项变化需分别衡量，不能只报压缩收益。token与延迟以最终真实评测的供应商usage为准，不用字符换算。
 
-`backend/app.py`、`session.py`、`worker.py`、`db.py`及前端保留为仍在使用的本地验证适配器。它们消费同一份NLP上下文、前台Planner、后台TaskRunner和共享领域规则。`worker.py`只负责本地SQLite调度，不再复制后台推理核心。
+此前真实模型探针、话术审查和供应商故障记录保留在本机忽略目录 `data/evals/nlp-configured-*`，属于当时版本和有限样本，不充当本轮验收。外部 Gateway 尚未联调，离线合同测试与模拟回执不能证明真车执行或部署网络已验收。
 
-旧`backend/vehicle_planner.py`已移动到harness，调用方直接引用新模块，不保留转发壳。被替代的碎片prompt、旧Planner/Thinker未来方案和重复历史说明已删除；仍有效的服务接口、车书资料和实测记录保留。不会为了删除旧名字而破坏仍在使用的Demo测试入口。
-
-## 验证边界
-
-离线测试覆盖协议严格校验、来源与能力、前后台编排、真实回执格式、版本/预算/取消、Gateway HTTP适配、流式断线及部署装配。测试中的模型、HTTP响应和设备回执均为显式测试替身，不是产品回退路径。
-
-评测入口与运行服务统一使用`create_llm()`，遵循所选服务配置、profile凭证及角色模型；报告保存配置来源和实际模型。显式模型实验与历史capture回放保留指定模型，凭证仍来自所选profile。HTTP失败读取响应体并保留脱敏后的供应商错误码、原因和请求ID，不能仅凭403断言整个项目的模型服务不可用。
-
-文件合并的字符差异不等于token和延迟收益。此前30组固定时钟对照用于确认最初抽取保真；三主prompt整理后system内容有意变化，应使用新的capture/compare报告，不能继续宣称全部请求逐字相同。
-
-Gateway契约按目标接口实现，尚未经外部团队联调；当前可做本地合同测试和集成模拟，真实Gateway、真实设备结果及部署网络条件仍须在对接环境验证。这不影响本仓库内生产入口、业务策略和前后台调度实现的完整交付。
-
-### 本轮验证记录（2026-10-17）
-
-- 403排查修复后全量后端：1711 passed（30.30秒）；重构阶段前端：102 passed，TypeScript/Vite构建通过。
-- Prompt、服务配置校验与`git diff --check`通过；独立uvicorn进程启动并返回真实health响应，未调用外部模型或Gateway。
-- 30组固定时钟capture对照保留消息数、模型参数、工具定义、非system消息和104条原生示例。角色规则有意变化：Talker每请求减少353字符，research减少314，quick增加18，前台主规则增加59；这不是token或延迟测量。
-- 前台离线审计：1次Talker、1次Planner、2个独立执行回执，最终completed，8批HTTP诊断；未用计划/预检替代回执。完整轨迹为本机忽略文件`data/evals/nlp-final-orchestration-trace.json`。
-- 后台HTTP合同测试覆盖实际适配器注册、租约、澄清、revision更新、继续执行和呈现；过期呈现不输出播报，未知写入不自动重试。
-- 更正原9次HTTP403探针：旧评测绕过服务配置，默认读取`ARK_API_KEY`；该凭证返回`AccountOverdueError`（账号欠费）。项目实际profile使用另一个凭证变量，真实调用成功。旧失败不代表项目所选模型服务不可用，也不构成行为或延迟基线。
-- 修复后闲聊专项：三个人设各3次，9/9通过，无HTTP403；首句P50/P90为2034/4539ms，平均每轮1次模型调用。结果位于本机忽略文件`data/evals/nlp-configured-provider-probe.json`，仅代表这9次请求，不是全量行为、语音或真车验收。
-- 同一批9条回复用配置中的后台模型做话术辅助审查，全部获得评分，平均4.89/5；这是模型辅助评分，不替代人工验收，结果为`data/evals/nlp-configured-provider-probe.speech.json`。
-- 温控/前台Reasoner首次补测6次中3次通过、3次出现`ProviderError`；旧报告缺详细轨迹，无法仅凭约20.5秒耗时判定具体网络原因。原报告保留为`data/evals/nlp-configured-control-probe.json`。现已在临时数据库删除前导出完整脱敏trace，逐轮保留供应商错误、实际请求和回执。
-- 带trace的顺序复测6/6通过：首句P50/P90为2135/2672ms，每轮Talker调用1次；三个前台Reasoner场景各再调用1次Pro，合计9次模型调用。实际使用Mini `doubao-seed-2-0-mini-260428`与Pro `doubao-seed-2-1-pro-260915`；模拟设备回执均已记录。报告为`data/evals/nlp-configured-control-traced-probe.json`，不能用复测通过抹去前一轮失败。
-- 恢复原并发设置复测6/6通过：首句P50/P90为2340/3413ms，同样共9次模型调用，详见`data/evals/nlp-configured-control-concurrent-trace.json`。未再出现403，也未复现前三次连接类失败；这些有限样本不证明并发稳定性已验收。
+终态的固定表达由`harness/presentation.py`统一生成并保存在checkpoint；Demo与评测消费同一个presentation。它只引用真实执行状态或已确认任务登记；参数目标不能代替实际状态。模型已有对应预告或最终答案时不追加重复播报，原始模型返回独立保留。Demo后台Worker与前台注册使用同一份冻结模型及预算指纹，旧或缺登记版本任务明确失败且不调用模型。

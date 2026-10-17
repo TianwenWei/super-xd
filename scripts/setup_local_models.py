@@ -1,4 +1,8 @@
 """Download the selected Silero model, then verify offline inference."""
+if __name__ == "__main__":
+    from backend.local_environment import load_local_environment
+    load_local_environment()
+
 import hashlib
 import json
 from pathlib import Path

@@ -244,6 +244,16 @@
           "no_commands": true
         }
       }
-    ]
+    ],
+    "lookup_fixtures": {
+      "search_media": [
+        {
+          "ok": true,
+          "kind": "media",
+          "provider": "fixture-radio",
+          "items": []
+        }
+      ]
+    }
   }
 ]

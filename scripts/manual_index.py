@@ -1,4 +1,8 @@
 """Standalone single-manual SQLite vector index; no changes to actor routing."""
+if __name__ == "__main__":
+    from backend.local_environment import load_local_environment
+    load_local_environment()
+
 import argparse
 import asyncio
 from hashlib import sha256
