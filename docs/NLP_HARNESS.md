@@ -49,6 +49,8 @@ Demo 的 `SessionActor` 经 `demo/session/nlp.py` 与 `demo/gateway.py` 驱动�
 
 模型返回的工具级`extra_content`和assistant顶层续推字段均保留。历史使用`AssistantRecord.provider_metadata={extra_content: ...}`承载顶层数据；编译回模型原生位置，不能由Gateway合成或改写签名，也不作为设备权限。
 
+模型响应进入运行层时，工具调用缺省或空串的`arguments`统一规范为`"{}"`，之后仍按工具schema校验必填参数。运行、恢复、呈现和Demo历史消费同一份规范消息；非空非法JSON及非对象参数仍被拒绝，供应商原始返回保留在独立诊断的`raw_return`中。
+
 ## 执行、上下文与恢复
 
 Talker 一次调用决定并表达。咨询与执行由模型理解，代码校验结构、来源、能力与回执，不追加每轮意图分类模型。纯控制/登记的确定成功直接消费回执完成；查询及需要解释的失败按真实结果继续推理。前台 Planner 只产出计划，ForegroundGroup 验证完整动作并逐项交接；媒体/导航依赖必须在前序真实回执后重新准备，不能用 expected 状态推进。

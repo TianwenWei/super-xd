@@ -14,6 +14,26 @@ from tests.support.gateway_contract import (start_request, service, ScriptedMode
                                     resume_request, observation, policy, advertise, binding)
 
 
+@pytest.mark.parametrize('status', ['unknown', 'completed'])
+async def test_resume_preflight_does_not_adopt_receipts_or_emit_diagnostics(status):
+    from tests.support.gateway_diagnostics import BatchDiagnostics
+
+    diagnostics = BatchDiagnostics()
+    model = ScriptedModel([{'tool_calls': [call()]}])
+    kernel = service(model, diagnostics=diagnostics)
+    first = (await collect(kernel.start(start_request())))[-1]
+    before = first.checkpoint.model_dump_json()
+    diagnostic_count = len(diagnostics.records)
+    receipt = observation(first.checkpoint, status=status)
+    resumed = kernel.resume(resume_request(first.checkpoint, [receipt]))
+    assert first.checkpoint.model_dump_json() == before
+    assert resumed.checkpoint().model_dump_json() == before
+    assert len(diagnostics.records) == diagnostic_count and len(model.requests) == 1
+    result = (await collect(resumed))[-1]
+    assert result.type == ('run.suspended' if status == 'unknown' else 'run.completed')
+    assert not result.requests and len(model.requests) == 1
+
+
 async def test_large_accepted_start_roundtrips_without_duplicate_prefix_or_vehicle():
     value = start_request().model_dump()
     value['context']['vehicle']['state']['_meta']['large_fact'] = 'x' * (MAX_START_BYTES - 8192)

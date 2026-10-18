@@ -105,7 +105,7 @@ class NLPService:
                                   release_id=self.release_id, budget=request.budget)
 
     def transcript(self, checkpoint: GatewayCheckpoint) -> list[dict]:
-        """Original model transcript, including the compiled prefix, for trusted audit."""
+        """Accepted model transcript, including the compiled prefix, for trusted audit."""
         if checkpoint.semantic_policy_id != self.semantic_policy.policy_id:
             raise RunProtocolError('Transcript requires the original semantic policy release')
         if checkpoint.model_policy_id != self.model_policy_id:
@@ -164,7 +164,7 @@ class GatewayRun:
     """NLP-owned child orchestration with caller-owned durable checkpoints."""
 
     def _model_messages(self, messages):
-        # The raw transcript remains in the checkpoint for product receipt
+        # The accepted transcript remains in the checkpoint for product receipt
         # replay and audit. Only the actual model request drops task internals.
         prefix = len(self._run.prepared.messages)
         vehicle_baseline = {'state': project_vehicle_state(_vehicle_context_state(self.start.context)),
@@ -224,8 +224,19 @@ class GatewayRun:
         self._child = None
         self._active = False
         self._validate_orchestration()
+        self._validate_observations()
         if cancel:
             self._run.cancel()
+
+    def _validate_observations(self):
+        # Reject protocol conflicts before the HTTP stream sends its headers.
+        # Child receipts belong to the external handoff, not the parent's group.
+        if not self._observations:
+            return
+        if self.orchestration.groups and not self.orchestration.groups[-1].done:
+            ForegroundGroup(self, self.orchestration.groups[-1]).validate_observations(self._observations)
+        else:
+            self._run.validate_observations(self._observations)
 
     def _validate_orchestration(self):
         state, budget = self._run.state, self._run.prepared.budget

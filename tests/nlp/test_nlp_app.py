@@ -7,7 +7,9 @@ import httpx
 import pytest
 
 from super_xd.nlp.api.app import create_app
-from tests.support.gateway_contract import ScriptedModel, call, service, start_request
+from tests.support.gateway_contract import ScriptedModel, call, service, start_request, observation
+from super_xd.nlp.contracts.gateway_v1 import GatewayOutput, ResumeRequest
+from super_xd.nlp.engine.run import RunProtocolError
 from super_xd.demo.devices.simulator import execute_tool
 
 
@@ -40,6 +42,87 @@ async def test_http_start_receipt_resume_and_policy_version_conflict():
                                               'checkpoint': terminal['checkpoint']})).status_code == 409
     payload['checkpoint']['model_policy_id'] = 'other-release'
     assert (await post(app, '/v1/runs/resume', payload)).status_code == 409
+
+
+@pytest.mark.parametrize('conflict', ['foreign_invocation', 'batch_conflict', 'accepted_conflict'])
+async def test_http_receipt_conflicts_reject_before_stream_and_allow_corrected_retry(conflict):
+    model = ScriptedModel([{'tool_calls': [call(), call('get_weather', {'location': '巴黎', 'date': 'today'}, 'b')]},
+                           {'content': '已收到查询结果。'}])
+    nlp = service(model)
+    app = create_app(nlp, max_inflight=1)
+    started = await post(app, '/v1/runs/start', start_request().model_dump())
+    handoff = GatewayOutput.model_validate_json(started.text.splitlines()[-1])
+    assert handoff.type == 'run.suspended'
+    checkpoint = handoff.checkpoint
+    volume, weather = observation(checkpoint), observation(checkpoint, 1)
+    payload = {'identity': handoff.identity.model_dump(), 'checkpoint': checkpoint.model_dump()}
+    changed = weather.model_copy(update={'result': {'conflicting': True}})
+    if conflict == 'accepted_conflict':
+        partial = await post(app, '/v1/runs/resume', {**payload, 'observations': [weather.model_dump()]})
+        suspended = json.loads(partial.text.splitlines()[-1])
+        assert suspended['type'] == 'run.suspended' and not suspended['requests']
+        payload['checkpoint'] = suspended['checkpoint']
+        invalid = [changed]
+    elif conflict == 'batch_conflict':
+        invalid = [weather, changed]
+    else:
+        invalid = [volume, weather.model_copy(update={'invocation_id': 'not-in-this-handoff'})]
+    invalid_payload = {**payload, 'observations': [item.model_dump() for item in invalid]}
+    original = deepcopy(invalid_payload)
+    response = await post(app, '/v1/runs/resume', invalid_payload)
+    assert response.status_code == 409
+    assert response.headers['content-type'].startswith('application/json')
+    assert response.json() == {'error_code': 'run_protocol_conflict'}
+    assert invalid_payload == original and len(model.requests) == 1
+    # Service callers must receive the same rejection before consuming events.
+    with pytest.raises(RunProtocolError):
+        nlp.resume(ResumeRequest.model_validate(invalid_payload))
+    corrected = await post(app, '/v1/runs/resume', {
+        **payload, 'observations': [volume.model_dump(), weather.model_dump(), weather.model_dump()]})
+    events = [json.loads(line) for line in corrected.text.splitlines()]
+    assert corrected.status_code == 200 and events[-1]['type'] == 'run.completed'
+    assert not any(event.get('requests') for event in events)
+
+
+async def test_http_child_receipt_preflight_preserves_unknown_and_completed_duplicates():
+    from tests.support.orchestration import planned_fixture
+
+    input_, talker, planner, nlp = planned_fixture()
+    app = create_app(nlp)
+    started = await post(app, '/v1/runs/start', input_.model_dump())
+    first = GatewayOutput.model_validate_json(started.text.splitlines()[-1])
+    child = first.requests[0].request
+    parent = first.checkpoint.run.pending[0]
+    assert child.invocation_id != parent.invocation_id
+    payload = {'identity': first.identity.model_dump(), 'checkpoint': first.checkpoint.model_dump()}
+    unknown = {'identity': first.identity.model_dump(), 'invocation_id': child.invocation_id,
+               'status': 'unknown', 'result': {'reason': 'receipt pending'}}
+    parent_receipt = {**unknown, 'invocation_id': parent.invocation_id}
+    rejected = await post(app, '/v1/runs/resume', {**payload, 'observations': [parent_receipt]})
+    assert rejected.status_code == 409
+    waiting = await post(app, '/v1/runs/resume', {**payload, 'observations': [unknown, unknown]})
+    suspended = json.loads(waiting.text.splitlines()[-1])
+    assert suspended['checkpoint']['run']['status'] == 'waiting_reconciliation'
+    assert suspended['requests'] == []
+    vehicle = deepcopy(input_.context.vehicle.state)
+    assert execute_tool(child.name, child.arguments, vehicle)['ok']
+    confirmed = {**unknown, 'status': 'completed',
+                 'result': {'ok': True, 'executed': True, 'vehicle_state': deepcopy(vehicle)}}
+    second = await post(app, '/v1/runs/resume', {
+        **payload, 'checkpoint': suspended['checkpoint'], 'observations': [confirmed]})
+    next_handoff = json.loads(second.text.splitlines()[-1])
+    assert next_handoff['type'] == 'run.suspended' and len(next_handoff['requests']) == 1
+    next_child = next_handoff['requests'][0]['request']
+    assert next_child['invocation_id'] != child.invocation_id
+    assert execute_tool(next_child['name'], next_child['arguments'], vehicle)['ok']
+    final_receipt = {**confirmed, 'invocation_id': next_child['invocation_id'],
+                     'result': {'ok': True, 'executed': True, 'vehicle_state': vehicle}}
+    done = await post(app, '/v1/runs/resume', {
+        **payload, 'checkpoint': next_handoff['checkpoint'], 'observations': [confirmed, final_receipt]})
+    terminal = json.loads(done.text.splitlines()[-1])
+    assert terminal['type'] == 'run.completed'
+    assert len(terminal['checkpoint']['orchestration']['groups'][-1]['completed_plans'][0]['receipts']) == 2
+    assert len(talker.inputs) == len(planner.inputs) == 1
 
 
 @pytest.mark.asyncio

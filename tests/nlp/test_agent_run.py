@@ -83,6 +83,20 @@ async def test_invalid_identity_is_rejected_atomically_and_correct_result_can_re
     assert (await collect(run, [valid]))[-1].type == 'run.completed'
 
 
+async def test_receipt_preflight_is_pure_and_rejects_conflicting_batch():
+    run = AgentRun(prepared(), ScriptedModel([{'tool_calls': [call()]}]))
+    await collect(run)
+    valid = observation(run, run.state.pending[0])
+    before = run.checkpoint().model_dump_json()
+    accepted = run.validate_observations([valid, valid])
+    assert accepted == {valid.invocation_id: valid}
+    assert run.checkpoint().model_dump_json() == before
+    conflicting = valid.model_copy(update={'status': 'unknown'})
+    with pytest.raises(RunProtocolError):
+        run.validate_observations([valid, conflicting])
+    assert run.checkpoint().model_dump_json() == before
+
+
 async def test_conflicting_duplicate_result_and_changed_release_are_rejected():
     model = ScriptedModel([{'tool_calls': [call('Paris', 'a'), call('Lyon', 'b')]}])
     run = AgentRun(prepared(), model)

@@ -109,8 +109,12 @@ class AgentRun:
                 raise RunProtocolError('Pending tool group does not match the model transcript')
             for call, request in zip(calls, state.pending):
                 fn = call.get('function', {})
+                try:
+                    arguments = json.loads(fn.get('arguments'))
+                except (TypeError, ValueError) as error:
+                    raise RunProtocolError('Pending tool call arguments are not valid JSON') from error
                 if (call.get('id') != request.tool_call_id or fn.get('name') != request.name
-                        or json.loads(fn.get('arguments') or '{}') != request.arguments
+                        or arguments != request.arguments
                         or request.invocation_id != self._invocation_id(request.tool_call_id)
                         or request.idempotency_key != request.invocation_id or request.name not in self.validators):
                     raise RunProtocolError('Pending request differs from its original tool call')
@@ -156,7 +160,8 @@ class AgentRun:
         event.data['checkpoint'] = self.state.model_dump()
         return event
 
-    def _observations(self, observations):
+    def validate_observations(self, observations):
+        """Validate a receipt batch without changing the live continuation."""
         accepted = deepcopy(self.state.observations)
         pending = {request.invocation_id: request for request in self.state.pending}
         for supplied in observations:
@@ -167,6 +172,11 @@ class AgentRun:
             if previous is not None and previous != result and previous.status != 'unknown':
                 raise RunProtocolError('Conflicting result for an already resolved tool invocation')
             accepted[result.invocation_id] = result
+        return accepted
+
+    def _observations(self, observations):
+        accepted = self.validate_observations(observations)
+        pending = {request.invocation_id: request for request in self.state.pending}
         self.state.observations = accepted
         if not pending:
             return
@@ -212,7 +222,7 @@ class AgentRun:
             identifier, fn = call['id'], call['function']
             name = fn['name']
             try:
-                arguments = json.loads(fn.get('arguments') or '{}')
+                arguments = json.loads(fn.get('arguments'))
                 if not isinstance(arguments, dict):
                     raise ValueError('Tool arguments must be an object')
                 canonical(arguments)

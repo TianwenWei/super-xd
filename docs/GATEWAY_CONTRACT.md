@@ -36,6 +36,8 @@ Gateway提供原话与事实，不提交system prompt、工具schema或模型参
 
 请求验证失败422；身份/版本/协议冲突409；并发满429；Gateway不可用503；任务HTTP期限504。校验响应不回显完整输入、checkpoint或凭证。默认每进程32并发、8 MiB HTTP body上限、30秒body接收期限、120秒HTTP推进期限；环境配置见[NLP运行说明](NLP_HARNESS.md)。
 
+resume的交接归属、已确认回执冲突及同批回执冲突在流启动前校验，返回409/run_protocol_conflict，整批回执不被采纳。相同回执重复提交仍保持幂等；unknown可由后续确认结果解决，已确认结果不能被改写。
+
 响应已经开始时不能再变更HTTP状态码。传输异常使用独立一行`{protocol_version:"gateway-v1",type:"transport.error",identity,error_code,outcome_unknown:true}`结束；它不是Agent完成事件、不是新checkpoint、更不能授权执行。断线会取消本次模型/子调用。Gateway只能依据已经完整接收并原子保存的交接记录处理后续，不因断线自动重新start或执行动作。
 
 接口面向受信任的内部Gateway，部署层负责访问隔离/服务身份；本项目不重复实现用户鉴权。NDJSON代理需关闭缓冲。正在流式执行的cancel须路由同一实例；已挂起run使用resume的cancel字段。跨实例排他和重试决策由Gateway管理。

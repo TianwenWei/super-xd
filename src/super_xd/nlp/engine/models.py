@@ -61,6 +61,20 @@ class ObservedModelResult:
     usage: TokenUsage
 
 
+def _message_for_run(message: dict[str, Any]) -> dict[str, Any]:
+    normalized = deepcopy(message)
+    calls = normalized.get('tool_calls')
+    if isinstance(calls, list):
+        for call in calls:
+            function = call.get('function') if isinstance(call, dict) else None
+            if isinstance(function, dict) and ('arguments' not in function or function['arguments'] == ''):
+                # Providers may omit all argument deltas for a no-argument
+                # function. Every consumer receives the same JSON encoding;
+                # the untouched provider message remains in raw_return.
+                function['arguments'] = '{}'
+    return normalized
+
+
 def normalize_result(returned: Any, *, raw_return: Any = None) -> ObservedModelResult:
     """Validate the single provider result contract without message metadata magic."""
     raw = ({'message': returned.message, 'meta': returned.metadata} if isinstance(returned, ProviderResult) else returned) if raw_return is None else raw_return
@@ -79,7 +93,7 @@ def normalize_result(returned: Any, *, raw_return: Any = None) -> ObservedModelR
         json.dumps([message, metadata], allow_nan=False)
     except (TypeError, ValueError) as error:
         raise MalformedModelResponse('Model message/metadata must be finite JSON', raw) from error
-    return ObservedModelResult(deepcopy(message), deepcopy(metadata), deepcopy(raw), extract_usage(metadata))
+    return ObservedModelResult(_message_for_run(message), deepcopy(metadata), deepcopy(raw), extract_usage(metadata))
 
 
 async def await_model(operation: Awaitable[T], cancel: asyncio.Event | None = None) -> T:

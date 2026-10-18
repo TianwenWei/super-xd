@@ -59,7 +59,8 @@ class ForegroundGroup:
                 if state.external_pending != original:
                     raise RunProtocolError('Pending external group differs from the original request group')
 
-    def accept(self, observations):
+    def validate_observations(self, observations):
+        """Check the whole receipt batch without adopting facts or applying policy."""
         known = deepcopy(self.state.receipts)
         pending = {item.request.invocation_id: item for item in self.state.external_pending}
         for value in observations:
@@ -74,7 +75,12 @@ class ForegroundGroup:
             if item.invocation_id not in pending:
                 raise RunProtocolError('Receipt does not belong to the current external handoff')
             known[item.invocation_id] = item
-        self.state.receipts = known
+        return known
+
+    def accept(self, observations):
+        self.state.receipts = self.validate_observations(observations)
+        known = self.state.receipts
+        pending = {item.request.invocation_id: item for item in self.state.external_pending}
         for identifier, outgoing in pending.items():
             value = known.get(identifier)
             if (value is not None and value.status == 'completed' and value.result.get('ok') is True
