@@ -2,7 +2,7 @@
 
 服务选择位于 `config/services.toml` 的 `embedding` 段。默认 `ark` 保留现有独立 `ARK_EMBEDDING_API_KEY`、火山 multimodal 请求结构、Corpus/Query 指令与1024维索引；不会借用 Talker 的 API Key。
 
-`backend/services/embedding.py` 提供 `build_embedding(profile)`，结果统一支持 `embed(text, query=False)`、`model`、`dimensions`、`provider`、`info()` 和 `aclose()`。返回真实向量、model、provider、usage、耗时和脱敏后的实际请求/响应 trace。
+`src/super_xd/demo/resources/embedding.py` 提供 `build_embedding(profile)`，结果统一支持 `embed(text, query=False)`、`model`、`dimensions`、`provider`、`info()` 和 `aclose()`。返回真实向量、model、provider、usage、耗时和脱敏后的实际请求/响应 trace。
 
 ## OpenAI 兼容接口
 

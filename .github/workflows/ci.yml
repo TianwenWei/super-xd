@@ -17,7 +17,8 @@ jobs:
       - run: uv run --no-sync python -m scripts.validate_prompt_config
       - run: uv run --no-sync python -m scripts.validate_service_config
       - run: uv run --no-sync mypy
-      - run: uv run --no-sync ruff check backend evals scripts tests
+      - run: uv run --no-sync ruff check src evals scripts tests
+      - run: uv run --no-sync ruff check src --select F401,F841
   production:
     runs-on: ubuntu-latest
     steps:
@@ -28,6 +29,7 @@ jobs:
       - run: uv export --locked --no-dev --no-editable --no-emit-project --format requirements-txt --output-file requirements.nlp.lock.txt
       - run: git diff --exit-code requirements.nlp.lock.txt
       - run: docker build -t super-xd-nlp:ci .
+      - run: docker run --rm --network none --entrypoint python super-xd-nlp:ci /checks/check_import_boundaries.py --smoke-startup
   frontend:
     runs-on: ubuntu-latest
     steps:

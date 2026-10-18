@@ -1,11 +1,11 @@
 """Validate service choices without starting clients or making network requests."""
 if __name__ == "__main__":
-    from backend.local_environment import load_local_environment
+    from super_xd.demo.environment import load_local_environment
     load_local_environment()
 
 import json
 
-from backend.services.config import DOMAINS, load_services_config
+from super_xd.nlp.config.services import DOMAINS, load_services_config
 
 
 def main():

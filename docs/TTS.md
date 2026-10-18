@@ -30,7 +30,7 @@
 
 ## 适配器与计时
 
-`backend/tts.py` 与 `backend/speech_stream.py` 提供：
+`src/super_xd/demo/audio/volcengine_tts.py` 与 `src/super_xd/demo/audio/speech_stream.py` 提供：
 
 | 接口 | 行为 |
 |---|---|
@@ -50,11 +50,11 @@ PCM audio 项含 audio bytes、sample_rate、channels、format、nonzero 及阶�
 离线回归明确注入 fake 网络客户端，覆盖二进制协议分片、PCM 对齐、错误/取消关闭连接、干净会话顺序复用、预热等待、独立计时、actor 不阻塞、回执门控、旧轮次隔离及真实 ASGI 路由。测试字节只证明协议和顺序，不能证明真实声音或实际延迟。
 
 ```bash
-.venv/bin/python -m pytest -q tests/test_speech_stream.py tests/test_audio_session.py tests/test_audio_endpoint.py tests/test_audio_benchmark.py
+.venv/bin/python -m pytest -q tests/demo/test_speech_stream.py tests/demo/test_audio_session.py tests/demo/test_audio_endpoint.py tests/evals/test_audio_benchmark.py
 # 有费用/网络的适配器专项，不替代浏览器端到端验收
 .venv/bin/python -m scripts.probe_tts_ws
 # 默认1500ms；历史2000ms需显式--target-ms 2000，输出新文件
 .venv/bin/python -m scripts.audio_benchmark --input browser-audio.json --manifest audio-manifest.json --output data/validation/audio-latency-new-run.json
 ```
 
-完整 MP3 接口 `/api/sessions/{session_id}/tts` 仍供独立调用，服务端收齐后返回，当前 UI 主流程使用流式 PCM。两种链路须分别测量，不能混合其延迟分母。采样、失败记录与生成材料管理见[音频验收方法](AUDIO_VALIDATION.md)。
+UI使用流式PCM；提供商合成辅助方法仅供独立探针和协议测试，测量结果与浏览器链路分别记录。采样、失败记录与生成材料管理见[音频验收方法](AUDIO_VALIDATION.md)。

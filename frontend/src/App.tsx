@@ -11,7 +11,6 @@ import VehicleCalls from './VehicleCalls';
 import bydLogo from './assets/byd-logo.svg';
 import { applyVehicleReceipt, bindVehicleCommand, liveVehicleCall, mergeVehicleCalls, snapshotVehicleCalls } from './vehicleCallViews';
 import { StreamingSpeech } from './StreamingSpeech';
-import { StreamingRecognition } from './StreamingRecognition';
 import { HandsFreeRecognition } from './HandsFreeRecognition';
 import type { RecognitionFailure } from './HandsFreeRecognition';
 import AudioMeasurements from './AudioMeasurements';
@@ -178,7 +177,6 @@ export default function App() {
   const activeTurn = useRef<string | null>(null);
   const invalidatedTurns = useRef(new Set<string>());
   const speechEngine = useRef<StreamingSpeech | null>(null);
-  const recognitionEngine = useRef<StreamingRecognition | null>(null);
   const handsFreeEngine = useRef<HandsFreeRecognition | null>(null);
   const captureActive = useRef(false);
   const captureId = useRef('');
@@ -233,42 +231,6 @@ export default function App() {
     error: setError,
     allowed: turn => !captureActive.current && !invalidatedTurns.current.has(turn),
   });
-  if (!recognitionEngine.current) recognitionEngine.current = new StreamingRecognition({
-    capture: (id, active) => {
-      if (active) {
-        captureId.current = id; captureActive.current = true; voiceVersion.current++; mediaEngine.current?.setFocus('capture', true);
-        send({ type: 'asr.capture', capture_id: id, active: true });
-        // Reserve recording first, then playback(false), on the same control WS.
-        void speechEngine.current?.setEnabled(false); setAutoSpeak(false);
-      } else {
-        if (captureId.current === id) { captureActive.current = false; captureId.current = ''; mediaEngine.current?.setFocus('capture', false); }
-        if (ws.current?.readyState === WebSocket.OPEN) send({ type: 'asr.capture', capture_id: id, active: false });
-      }
-    },
-    unlockSpeech: () => speechEngine.current!.unlock(),
-    phase: setRecognitionPhase, transcript: setRecognitionPreview, records: setRecognitionRecords, error: setError,
-    final: async (finalText, id) => {
-      if (!recognitionEngine.current?.isCurrent(id) || !connectedRef.current) return;
-      let enabled = false;
-      try {
-        if (configRef.current?.tts?.configured) enabled = await speechEngine.current!.setEnabled(true);
-        else setError('识别已完成；语音朗读尚未配置，本轮使用文字回复。');
-      } catch (error) { setError(`识别已完成；语音朗读无法启用：${error instanceof Error ? error.message : String(error)}`); }
-      if (!recognitionEngine.current?.isCurrent(id) || !connectedRef.current) return;
-      captureActive.current = false; speechPreference.current = enabled; setAutoSpeak(enabled);
-      await submitInputRef.current(finalText, id);
-    },
-    settled: reason => {
-      if (reason === 'final') return;
-      // Cancel an in-flight final→TTS enable even when the prior preference was off.
-      void speechEngine.current?.setEnabled(false);
-      if (reason === 'disposed' || reason === 'disconnected' || !speechPreference.current || captureActive.current || !connectedRef.current) return;
-      const version = voiceVersion.current;
-      void speechEngine.current?.setEnabled(true).then(enabled => {
-        if (version === voiceVersion.current && !captureActive.current && connectedRef.current) setAutoSpeak(enabled);
-      }).catch(error => setError(`语音朗读无法恢复：${error instanceof Error ? error.message : String(error)}`));
-    },
-  });
   if (!handsFreeEngine.current) handsFreeEngine.current = new HandsFreeRecognition({
     unlockSpeech: async () => {
       await speechEngine.current!.unlock();
@@ -305,7 +267,7 @@ export default function App() {
   function startHandsFree() {
     if (!connectedRef.current || !sessionId || handsFreeEngine.current?.active) return;
     continuousVoicePreference.current = true; setContinuousVoice(true); setVoiceIssue(null);
-    recognitionEngine.current?.cancel('handsfree'); setError('');
+    setError('');
     void handsFreeEngine.current?.start(sessionId);
   }
   function toggleHandsFree() {
@@ -326,7 +288,6 @@ export default function App() {
   }, [connected, sessionId, config?.asr?.configured, config?.tts?.configured, config?.vad?.configured]);
   const stopSpeech = useCallback(() => speechEngine.current?.cancel('user_stop'), []);
   async function toggleSpeech(enabled: boolean) {
-    if (recognitionEngine.current?.active) return;
     speechPreference.current = enabled; setSpeechWanted(enabled); saveVoicePreference('super-xd-speech-replies', enabled);
     setAudioUnlocking(enabled);
     try { const active = await speechEngine.current!.setEnabled(enabled); setAutoSpeak(active); }
@@ -358,7 +319,7 @@ export default function App() {
       socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/${id}`);
       ws.current = socket;
       socket.onopen = () => { if (disposed) return; connectedRef.current = true; setConnected(true); setConnecting(false); setError(''); speechEngine.current?.connect(id); };
-      socket.onclose = event => { if (disposed) return; connectedRef.current = false; setAutoSpeak(false); recognitionEngine.current?.cancel('disconnected'); handsFreeEngine.current?.cancel('disconnected'); voiceVersion.current++; speechEngine.current?.disconnect(); mediaEngine.current?.disconnect(); deviceQueries.current?.disconnect(); setConnected(false); cockpitBusyRef.current = false; setCockpitBusy(false); if (event.code === 4404) { setConnecting(false); setError('会话已失效，请点击“新建会话”重新开始。原型仅保证连续在线会话。'); return; } setConnecting(true); reconnect = setTimeout(() => connect(id), 2000); };
+      socket.onclose = event => { if (disposed) return; connectedRef.current = false; setAutoSpeak(false); handsFreeEngine.current?.cancel('disconnected'); voiceVersion.current++; speechEngine.current?.disconnect(); mediaEngine.current?.disconnect(); deviceQueries.current?.disconnect(); setConnected(false); cockpitBusyRef.current = false; setCockpitBusy(false); if (event.code === 4404) { setConnecting(false); setError('会话已失效，请点击“新建会话”重新开始。原型仅保证连续在线会话。'); return; } setConnecting(true); reconnect = setTimeout(() => connect(id), 2000); };
       socket.onerror = () => { if (!disposed) setError('连接暂时中断，正在重新连接。'); };
       socket.onmessage = event => {
         if (disposed) return;
@@ -469,13 +430,13 @@ export default function App() {
       };
     }
     start();
-    return () => { disposed = true; connectedRef.current = false; clearTimeout(reconnect); recognitionEngine.current?.dispose(); handsFreeEngine.current?.dispose(); socket?.close(); speechEngine.current?.disconnect(); mediaEngine.current?.disconnect(); deviceQueries.current?.disconnect(); };
+    return () => { disposed = true; connectedRef.current = false; clearTimeout(reconnect); handsFreeEngine.current?.dispose(); socket?.close(); speechEngine.current?.disconnect(); mediaEngine.current?.disconnect(); deviceQueries.current?.disconnect(); };
   }, [stopSpeech]);
 
   async function submitInput(value = text, voiceCaptureId?: string): Promise<boolean> {
     if (!value.trim() || !connectedRef.current || ws.current?.readyState !== WebSocket.OPEN || (!voiceCaptureId && audioUnlocking)) return false;
-    if (voiceCaptureId && !recognitionEngine.current?.isCurrent(voiceCaptureId) && !handsFreeEngine.current?.isCurrent(voiceCaptureId)) return false;
-    if (!voiceCaptureId) { recognitionEngine.current?.cancel('text_input'); handsFreeEngine.current?.discardCapture('text_input'); setError(''); }
+    if (voiceCaptureId && !handsFreeEngine.current?.isCurrent(voiceCaptureId)) return false;
+    if (!voiceCaptureId) { handsFreeEngine.current?.discardCapture('text_input'); setError(''); }
     const version = ++voiceVersion.current;
     const submittedAt = performance.now();
     const requestId = crypto.randomUUID();
@@ -485,13 +446,13 @@ export default function App() {
       catch (error) { setAutoSpeak(false); setError(`语音回复未能启用：${error instanceof Error ? error.message : String(error)}`); }
     }
     if (version !== voiceVersion.current || !connectedRef.current) return false;
-    if (voiceCaptureId && !recognitionEngine.current?.isCurrent(voiceCaptureId) && !handsFreeEngine.current?.isCurrent(voiceCaptureId)) return false;
+    if (voiceCaptureId && !handsFreeEngine.current?.isCurrent(voiceCaptureId)) return false;
     const stopped = speechEngine.current?.submit(requestId, value.trim(), submittedAt, tasks);
     if (activeTurn.current) invalidatedTurns.current.add(activeTurn.current);
     activeTurn.current = null;
     await Promise.resolve(stopped);
     if (version !== voiceVersion.current || !connectedRef.current) return false;
-    if (voiceCaptureId) { recognitionEngine.current?.markSubmitted(voiceCaptureId, submittedAt, requestId); handsFreeEngine.current?.markSubmitted(voiceCaptureId, submittedAt, requestId); }
+    if (voiceCaptureId) { handsFreeEngine.current?.markSubmitted(voiceCaptureId, submittedAt, requestId); }
     setMessages(current => [...current.map(row => row.state === 'streaming' ? { ...row, state: 'interrupted' as const } : row), { id: `user-${crypto.randomUUID()}`, role: 'user', text: value.trim() }]);
     send({ type: 'input', text: value.trim(), client_request_id: requestId });
     // The ASR preview is separate: voice submission must preserve an existing typed draft.
@@ -551,7 +512,7 @@ export default function App() {
           </div></article>)}
           <div ref={messagesEnd}/>
         </div>
-        <div className="compose-area"><label className="speaker-selector"><span>当前音区</span><select aria-label="当前用户座位（模拟音区）" title="未指定位置的车控默认作用于这里；切换从下一轮生效" value={speakerSeat} disabled={!connected || recognizing} onChange={e => send({ type: 'speaker.set', seat: e.target.value })}><option value="driver">主驾</option><option value="front_passenger">副驾</option><option value="rear_left">左后排</option><option value="rear_right">右后排</option></select></label>{!config?.tts?.configured && <div className="tts-configuration">语音朗读待配置{config?.tts?.provider ? `（${config.tts.provider}）` : ''}：{config?.tts?.missing_fields?.join('、') || '服务端语音凭证'}</div>}{!config?.asr?.configured && <div className="asr-configuration">语音输入待配置{config?.asr?.provider ? `（${config.asr.provider}）` : ''}{config?.asr?.missing_fields?.length ? `：${config.asr.missing_fields.join('、')}` : ''} · 可使用文字输入</div>}{(recognizing || handsFreeActive) && <div className="voice-capture" role="status" aria-live="polite"><div><span className={`capture-dot ${recognitionPhase === 'recording' ? 'recording' : ''}`}/><strong>{recognitionPhase === 'requesting' ? '等待麦克风权限…' : recognitionPhase === 'connecting' ? '正在连接语音识别…' : recognitionPhase === 'resuming' ? '正在恢复麦克风音频…' : recognitionPhase === 'listening' ? '持续监听中，直接说话即可打断助手' : recognitionPhase === 'recording' ? '正在听，停顿后自动发送' : recognitionPhase === 'recognizing' ? '录音已结束，正在识别…' : '识别完成，准备回复…'}</strong><button type="button" onClick={() => { recognitionEngine.current?.cancel('user_cancel'); stopHandsFree(); }}>取消</button></div><p>{recognitionPreview || '麦克风在回复播放期间保持开启；停止说话约 0.64 秒后识别并发送。'}</p>{recognitionPreview && <small>识别预览 · 尚未发送</small>}</div>}{continuousVoice && !handsFreeActive && !recognizing && <div className="voice-entry" role="status"><div><strong>连续语音待就绪</strong><p>{voiceIssue === 'provider' ? '语音识别服务未就绪，修复服务授权或连接后可在这里重试。' : voiceIssue === 'permission' ? '请在浏览器中允许麦克风，然后进入语音对话。' : voiceUnavailable ? '正在等待会话及语音服务就绪。' : '请允许麦克风和声音；就绪后回复期间也会持续监听。'}</p></div><button type="button" disabled={voiceUnavailable} onClick={startHandsFree}>{voiceIssue === 'provider' ? '重试语音连接' : '进入语音对话'}</button></div>}<form className="composer" onSubmit={e => { e.preventDefault(); submitInput(); }}><label className="sr-only" htmlFor="chat-input">对助手说点什么</label><textarea ref={inputRef} id="chat-input" value={text} onChange={e => { recognitionEngine.current?.cancel('text_input'); handsFreeEngine.current?.discardCapture('text_input'); voiceVersion.current++; setText(e.target.value); }} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submitInput(); } }} placeholder="对我说点什么…" title="Enter 发送 · Shift + Enter 换行；新输入会停止当前回复与朗读" rows={1}/><div className="composer-actions"><button type="button" className={`voice-button ${handsFreeActive ? 'recording' : ''}`} disabled={!voiceSessionOpen && voiceUnavailable} aria-pressed={handsFreeActive} aria-busy={voiceSessionOpen && !handsFreeActive} aria-label={voiceSessionOpen ? '停止连续语音对话' : '开始连续语音对话'} title={voiceSessionOpen ? '点击关闭麦克风，退出连续语音' : voiceUnavailable ? '连续语音对话尚未就绪' : '点击开启麦克风，停顿后自动发送'} onClick={toggleHandsFree}><Icon name="mic" size={19}/></button>{speaking && <button type="button" className="stop-speaking" onClick={stopSpeech} aria-label="停止朗读"><Icon name="stop" size={16}/></button>}<button className="send-button" type="submit" disabled={!text.trim() || !connected || audioUnlocking} aria-label="发送消息"><Icon name="send" size={23}/></button></div></form><div className="compose-footnote"><div className="compose-topline"><span>{runningTasks.length > 0 && <><i className="task-dot"/>{runningTasks.length} 个后台任务正在处理</>}</span><button type="button" className={`handsfree-toggle ${handsFreeActive ? 'enabled' : ''}`} aria-pressed={continuousVoice} disabled={!voiceSessionOpen && voiceUnavailable} onClick={toggleHandsFree}>{voiceSessionOpen ? '关闭连续语音' : continuousVoice ? '进入语音对话' : '开启连续语音'}</button>{speechWanted && !autoSpeak && !audioUnlocking && connected && config?.tts?.configured && (handsFreeActive || !continuousVoice) && <button type="button" onClick={() => void toggleSpeech(true)}>启用声音</button>}<label className="speech-toggle"><input type="checkbox" checked={speechWanted} disabled={!config?.tts?.configured || !connected || audioUnlocking || !!recognitionEngine.current?.active} onChange={e => void toggleSpeech(e.target.checked)}/><Icon name="sound" size={15}/>{audioUnlocking ? '解锁声音…' : !speechWanted ? '语音回复已关闭' : autoSpeak ? '语音回复已就绪' : '语音回复 · 等待启用'}</label></div><AudioMeasurements records={audioRecords} recognitionRecords={recognitionRecords} sessionId={sessionId} pageId={pageId}/></div></div>
+        <div className="compose-area"><label className="speaker-selector"><span>当前音区</span><select aria-label="当前用户座位（模拟音区）" title="未指定位置的车控默认作用于这里；切换从下一轮生效" value={speakerSeat} disabled={!connected || recognizing} onChange={e => send({ type: 'speaker.set', seat: e.target.value })}><option value="driver">主驾</option><option value="front_passenger">副驾</option><option value="rear_left">左后排</option><option value="rear_right">右后排</option></select></label>{!config?.tts?.configured && <div className="tts-configuration">语音朗读待配置{config?.tts?.provider ? `（${config.tts.provider}）` : ''}：{config?.tts?.missing_fields?.join('、') || '服务端语音凭证'}</div>}{!config?.asr?.configured && <div className="asr-configuration">语音输入待配置{config?.asr?.provider ? `（${config.asr.provider}）` : ''}{config?.asr?.missing_fields?.length ? `：${config.asr.missing_fields.join('、')}` : ''} · 可使用文字输入</div>}{(recognizing || handsFreeActive) && <div className="voice-capture" role="status" aria-live="polite"><div><span className={`capture-dot ${recognitionPhase === 'recording' ? 'recording' : ''}`}/><strong>{recognitionPhase === 'requesting' ? '等待麦克风权限…' : recognitionPhase === 'connecting' ? '正在连接语音识别…' : recognitionPhase === 'resuming' ? '正在恢复麦克风音频…' : recognitionPhase === 'listening' ? '持续监听中，直接说话即可打断助手' : recognitionPhase === 'recording' ? '正在听，停顿后自动发送' : recognitionPhase === 'recognizing' ? '录音已结束，正在识别…' : '识别完成，准备回复…'}</strong><button type="button" onClick={() => { stopHandsFree(); }}>取消</button></div><p>{recognitionPreview || '麦克风在回复播放期间保持开启；停止说话约 0.64 秒后识别并发送。'}</p>{recognitionPreview && <small>识别预览 · 尚未发送</small>}</div>}{continuousVoice && !handsFreeActive && !recognizing && <div className="voice-entry" role="status"><div><strong>连续语音待就绪</strong><p>{voiceIssue === 'provider' ? '语音识别服务未就绪，修复服务授权或连接后可在这里重试。' : voiceIssue === 'permission' ? '请在浏览器中允许麦克风，然后进入语音对话。' : voiceUnavailable ? '正在等待会话及语音服务就绪。' : '请允许麦克风和声音；就绪后回复期间也会持续监听。'}</p></div><button type="button" disabled={voiceUnavailable} onClick={startHandsFree}>{voiceIssue === 'provider' ? '重试语音连接' : '进入语音对话'}</button></div>}<form className="composer" onSubmit={e => { e.preventDefault(); submitInput(); }}><label className="sr-only" htmlFor="chat-input">对助手说点什么</label><textarea ref={inputRef} id="chat-input" value={text} onChange={e => { handsFreeEngine.current?.discardCapture('text_input'); voiceVersion.current++; setText(e.target.value); }} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submitInput(); } }} placeholder="对我说点什么…" title="Enter 发送 · Shift + Enter 换行；新输入会停止当前回复与朗读" rows={1}/><div className="composer-actions"><button type="button" className={`voice-button ${handsFreeActive ? 'recording' : ''}`} disabled={!voiceSessionOpen && voiceUnavailable} aria-pressed={handsFreeActive} aria-busy={voiceSessionOpen && !handsFreeActive} aria-label={voiceSessionOpen ? '停止连续语音对话' : '开始连续语音对话'} title={voiceSessionOpen ? '点击关闭麦克风，退出连续语音' : voiceUnavailable ? '连续语音对话尚未就绪' : '点击开启麦克风，停顿后自动发送'} onClick={toggleHandsFree}><Icon name="mic" size={19}/></button>{speaking && <button type="button" className="stop-speaking" onClick={stopSpeech} aria-label="停止朗读"><Icon name="stop" size={16}/></button>}<button className="send-button" type="submit" disabled={!text.trim() || !connected || audioUnlocking} aria-label="发送消息"><Icon name="send" size={23}/></button></div></form><div className="compose-footnote"><div className="compose-topline"><span>{runningTasks.length > 0 && <><i className="task-dot"/>{runningTasks.length} 个后台任务正在处理</>}</span><button type="button" className={`handsfree-toggle ${handsFreeActive ? 'enabled' : ''}`} aria-pressed={continuousVoice} disabled={!voiceSessionOpen && voiceUnavailable} onClick={toggleHandsFree}>{voiceSessionOpen ? '关闭连续语音' : continuousVoice ? '进入语音对话' : '开启连续语音'}</button>{speechWanted && !autoSpeak && !audioUnlocking && connected && config?.tts?.configured && (handsFreeActive || !continuousVoice) && <button type="button" onClick={() => void toggleSpeech(true)}>启用声音</button>}<label className="speech-toggle"><input type="checkbox" checked={speechWanted} disabled={!config?.tts?.configured || !connected || audioUnlocking} onChange={e => void toggleSpeech(e.target.checked)}/><Icon name="sound" size={15}/>{audioUnlocking ? '解锁声音…' : !speechWanted ? '语音回复已关闭' : autoSpeak ? '语音回复已就绪' : '语音回复 · 等待启用'}</label></div><AudioMeasurements records={audioRecords} recognitionRecords={recognitionRecords} sessionId={sessionId} pageId={pageId}/></div></div>
       </section>
       <aside className={`task-panel panel ${activeTab === 'tasks' ? 'mobile-active' : ''}`}><div className="panel-heading"><div><span className="eyebrow">复杂的事，慢慢想</span><h2>后台任务 <span className="heading-count">{tasks.length}</span></h2></div><button className="add-task" aria-label="新建后台任务" onClick={() => setShowTaskCreate(!showTaskCreate)}>+</button></div><p className="task-intro">复杂规划、比较和调研会在这里继续。<br/>不影响你聊天和控制车辆。</p>{showTaskCreate && <form className="task-create" onSubmit={e => { e.preventDefault(); if (taskGoal.trim()) { send({ type: 'task.create', goal: taskGoal.trim() }); setTaskGoal(''); setShowTaskCreate(false); } }}><label htmlFor="task-goal">你想调研什么？</label><textarea id="task-goal" value={taskGoal} onChange={e => setTaskGoal(e.target.value)} placeholder="例如：找巴黎周末亲子室内活动，附来源"/><button className="small-primary" disabled={!taskGoal.trim() || !connected}>开始后台任务</button></form>}<div className="task-list">{tasks.length === 0 ? <div className="tasks-empty"><div className="task-orbit"><Icon name="clock" size={28}/></div><strong>暂时没有后台任务</strong><p>你可以直接告诉助手需求，<br/>也可以手动新建一个任务。</p><button onClick={() => setShowTaskCreate(true)} disabled={!connected}>新建调研任务 <span>↗</span></button></div> : tasks.map(task => <TaskCard key={task.id} task={task} send={send} onTrace={() => openTrace({ type: 'task', id: task.id })}/>)}</div><div className="research-note"><Icon name="link" size={16}/><p>联网信息来自实时检索，结果附来源链接和查询时间。车辆控制与导航均为模拟。</p></div></aside>
     </main>

@@ -1,10 +1,10 @@
 """Validate all prompt/text configuration locally, without calling any service."""
 if __name__ == "__main__":
-    from backend.local_environment import load_local_environment
+    from super_xd.demo.environment import load_local_environment
     load_local_environment()
 
 import json
-from backend.prompt_config import validate_all
+from super_xd.nlp.prompts.config import validate_all
 
 
 def main():

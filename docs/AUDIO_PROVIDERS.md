@@ -6,11 +6,11 @@
 
 在进程启动前设置 `SERVICE_REGION=europe`，选择 ElevenLabs Scribe ASR 与火山双向流式 TTS，同时按 `config/regions.toml` 选择四个 Google EU Gemini 3.8 Flash 模型角色。TTS 复用原有 `volcengine` profile 与小何 2.0 音色 `zh_female_xiaohe_uranus_bigtts`，使用已有火山语音凭证；ASR 继续使用 `ELEVENLABS_API_KEY` 和 ElevenLabs 标准全球路由。欧洲预设名称不代表整套服务具有欧洲数据驻留保证。`SERVICE_REGION=china` 仍选择火山 ASR/TTS 和 Ark 模型。ElevenLabs Flash TTS 与 Google Chirp 3 HD TTS 都保留为显式可选 profile；后者使用 `location="eu"` 的官方端点、可用 ADC 与 `GOOGLE_CLOUD_PROJECT`。
 
-地区选择只在启动时生效，须重启 API 与 Worker；不按 IP 猜测、不按请求失败自动切换。选中地区时忽略 `ASR_PROFILE` / `TTS_PROFILE`，避免得到半套地区配置。单独选择 vLLM 等音频 profile 前，先取消 `SERVICE_REGION`。未设置该变量仍使用显式配置，仓库没有全局欧洲默认；本机 `.env` 的欧洲选择只是本地设置。其他服务域与角色预算不会随地区改变，详见 [服务配置](SERVICE_PROVIDERS.md#地区预设)。
+地区选择只在启动时生效，须重启 API 与 Worker；不按 IP 猜测、不按请求失败自动切换。选中地区时忽略 `ASR_PROFILE` / `TTS_PROFILE`，避免得到半套地区配置。单独选择 vLLM 等音频 profile 前，先取消 `SERVICE_REGION`。未设置该变量仍使用显式配置，仓库没有全局欧洲默认。其他服务域与角色预算不会随地区改变，详见 [服务配置](SERVICE_PROVIDERS.md#地区预设)。
 
 ## 内线契约
 
-`backend/services/audio.py` 提供 `ASRProvider`、`ASRStream`、`TTSProvider` 和不可变 `AudioFormat`。
+`src/super_xd/demo/audio/providers.py` 提供 `ASRProvider`、`ASRStream`、`TTSProvider` 和不可变 `AudioFormat`。
 
 - ASR：16kHz、单声道、PCM s16le；每段 `open(request_id)`，依次 `send_audio(pcm)`，`finish()` 结束输入，`results()` 返回 partial/final；`aclose()` 幂等取消该段。partial 是完整当前假设，final 是完整本段结果。
 - TTS：增量文本输入，24kHz、单声道、PCM s16le 输出。`alignment` 只来自提供商真实句子边界；没有边界时不虚构用户已听到的内容。原始厂商事件只作为脱敏诊断保存。
@@ -64,4 +64,4 @@ max_record_seconds = 60
 
 ## 验证
 
-`tests/test_audio_providers.py` 覆盖真实 WAV 字节/格式与 multipart 字段、鉴权和缺配、HTTP 错误、无效文本、取消上传、资源关闭、PCM 格式、逻辑音色与真实对齐。测试音频和响应均是显式离线夹具，不代表真实识别或语音合成成功。现有 ASR/TTS/VAD/音频端点和打断测试继续运行。
+`tests/demo/test_audio_providers.py` 覆盖真实 WAV 字节/格式与 multipart 字段、鉴权和缺配、HTTP 错误、无效文本、取消上传、资源关闭、PCM 格式、逻辑音色与真实对齐。测试音频和响应均是显式离线夹具，不代表真实识别或语音合成成功。现有 ASR/TTS/VAD/音频端点和打断测试继续运行。

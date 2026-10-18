@@ -9,26 +9,27 @@ import json
 import time
 from uuid import uuid4
 
-from backend.catalog import TOOLS
-from backend.cockpit import CockpitServices, LocalMediaCatalog
-from backend.cockpit.controller import scoped_place
-from backend.cockpit.device import DeviceRequest
-from backend.demo.cockpit_device import CockpitDevice
-from backend.demo.local_gateway import LocalGateway, history_records
-from backend.demo.resources import LocalResources, freeze_local_model, local_task_budget, local_model_policy_id
-from backend.harness.background import TaskService
-from backend.harness.contracts import RunIdentity, ToolObservation
-from backend.harness.gateway import NLPService
-from backend.harness.gateway_contracts import GatewayOutput, HistoryTurn, StartRequest
-from backend.harness.product_policy import ProductTalkerPolicy
-from backend.harness.model_execution import extract_usage
-from backend.harness.task_runner import TaskRunner
-from backend.harness.vehicle_planner import VehicleControlPlanner
-from backend.manual_search import ManualSearchClient
-from backend.models import utcnow, sanitized_error
-from backend.services.contracts import ProviderError
-from backend.harness.diagnostics import safe_diagnostic
-from backend.services.factory import create_maps, create_search
+from super_xd.nlp.prompts.catalog import TOOLS
+from super_xd.demo.devices.cockpit import CockpitServices
+from super_xd.demo.resources.media import LocalMediaCatalog
+from super_xd.nlp.policy.cockpit import scoped_place
+from super_xd.demo.devices.catalog import DeviceRequest
+from super_xd.demo.devices.executor import CockpitDevice
+from super_xd.demo.gateway import LocalGateway, history_records
+from super_xd.demo.resources.runtime import LocalResources, freeze_local_model, local_task_budget, local_model_policy_id
+from super_xd.nlp.orchestration.tasks.service import TaskService
+from super_xd.nlp.contracts.run import RunIdentity, ToolObservation
+from super_xd.nlp.orchestration.gateway import NLPService
+from super_xd.nlp.contracts.gateway_v1 import GatewayOutput, HistoryTurn, StartRequest
+from super_xd.nlp.policy.product import ProductTalkerPolicy
+from super_xd.nlp.engine.models import extract_usage
+from super_xd.nlp.orchestration.tasks.runner import TaskRunner
+from super_xd.nlp.orchestration.vehicle_planner import VehicleControlPlanner
+from super_xd.demo.resources.manual_search import ManualSearchClient
+from super_xd.nlp.adapters.common import utcnow, sanitized_error
+from super_xd.nlp.contracts.providers import ProviderError
+from super_xd.nlp.diagnostics import safe_diagnostic
+from super_xd.nlp.adapters.factory import create_maps, create_search
 
 
 def model_secrets(model):
@@ -55,6 +56,7 @@ class TurnProgress:
     first_by_call: dict = field(default_factory=dict)
     finished: float | None = None
     failure: dict | None = None
+    receipts: list[dict] = field(default_factory=list)
 
 
 class MemoryTaskLedger:
@@ -74,8 +76,8 @@ class MemoryTaskLedger:
     async def refresh(self, task_id):
         return await self.read(task_id)
 
-    async def create_task(self, task_id, goal, context, idempotency_key):
-        signature = json.dumps([self.conversation_id, task_id, goal, context], sort_keys=True)
+    async def create_task(self, task_id, goal, context, idempotency_key, *, delivery_mode='background'):
+        signature = json.dumps([self.conversation_id, task_id, goal, context, delivery_mode], sort_keys=True)
         if idempotency_key in self.root.operations:
             previous, result = self.root.operations[idempotency_key]
             if previous != signature:
@@ -83,13 +85,22 @@ class MemoryTaskLedger:
             return deepcopy(result)
         now = utcnow()
         result = {'id': task_id, 'session_id': self.conversation_id, 'goal': goal, 'context': deepcopy(context),
-                  'status': 'queued', 'revision': 1, 'summary': '', 'constraints': [], 'sources': [],
+                  'status': 'queued', 'delivery_mode': delivery_mode, 'revision': 1, 'summary': '', 'constraints': [], 'sources': [],
                   'result': None, 'question': None, 'steps': 0, 'checkpoint': {}, 'transcript': [],
                   'running_seconds': 0, 'running_since': None, 'created_at': now, 'updated_at': now,
                   'deadline_at': (datetime.now(timezone.utc) + timedelta(seconds=60)).isoformat()}
         self.root.tasks[task_id] = deepcopy(result)
         self.root.operations[idempotency_key] = signature, deepcopy(result)
         return result
+
+    async def continue_in_background(self, task_id, revision, idempotency_key):
+        task = await self.read(task_id)
+        if task is None or task['revision'] != revision:
+            raise ValueError('Task revision conflict')
+        if task['status'] not in {'cancelling', 'cancelled'}:
+            task['delivery_mode'] = 'background'
+            self.root.tasks[task_id] = deepcopy(task)
+        return task
 
     async def mutate_task(self, task_id, revision, action, text, idempotency_key):
         signature = json.dumps([self.conversation_id, task_id, revision, action, text])
@@ -131,8 +142,8 @@ class MemoryTaskLedger:
 
 class EvaluationGateway:
     def __init__(self, case, model, *, planner=None, maps=None):
-        from backend.demo.device import VehicleSimulator
-        from backend.demo.vehicle_simulator import initial_vehicle_state
+        from super_xd.demo.devices.vehicle import VehicleSimulator
+        from super_xd.demo.devices.simulator import initial_vehicle_state
         model = freeze_local_model(model)
         self.case, self.model = case, model
         self.vehicle = VehicleSimulator(initial_vehicle_state(), execution_ms=0, network_rtt_ms=0)
@@ -248,6 +259,9 @@ class EvaluationGateway:
                 self.cockpit_commands.append({'domain': command['domain'], 'action': command['action'],
                                               'arguments': deepcopy(command['arguments'])})
         self.record('tool.completed', {'name': request.name, 'arguments': arguments, 'result': result}, start.identity.turn_id)
+        if dispatch.operation == 'control' and self.progress is not None:
+            self.progress.receipts.append({'invocation_id': request.invocation_id,
+                'name': request.name, 'arguments': deepcopy(arguments), 'result': deepcopy(result)})
         if (dispatch.operation == 'control' and result.get('ok') is True
                 and result.get('executed') is True and result.get('outcome_unknown') is not True):
             self.last_execution_receipt_ms = (time.perf_counter() - self.turn_started) * 1000
@@ -420,7 +434,10 @@ class EvaluationGateway:
         else:
             first_useful = self.last_execution_receipt_ms
         result = {'turn_id': progress.request.identity.turn_id if progress.request else None,
+            'input_context': {'speaker_seat': progress.request.speaker_seat,
+                              **progress.request.context.model_dump()} if progress.request else None,
             'commands': self.commands, 'cockpit_commands': self.cockpit_commands,
+            'receipts': deepcopy(progress.receipts),
             'cockpit_device_mode': 'explicit_eval_fixture' if self.cockpit else None, 'cockpit': deepcopy(self.device.state),
             'talker_calls': self.talker_calls, 'lookups': self.lookups, 'lookup_results': self.lookup_results,
             'vehicle': deepcopy(self.vehicle.state), 'vehicle_before': progress.vehicle_before,

@@ -50,11 +50,6 @@ keep_mutation = "按最新车况执行会改变要求保持的设置，本动作
 dependency_failed = "依赖动作未成功，未执行本动作。"
 keep_unconfirmed = "要求保持的设置在等待期间发生了变化，不能确认保持成功。"
 no_receipt = "未取得实际执行回执。"
-parameters = "设置参数没确认清楚，这次没有调整。请把要求说具体一点。"
-unavailable_tool = "这项功能暂时没能执行，请换个说法再试。"
-temperature_unit = "度"
-range = "{{label}}只能在{{minimum}}到{{maximum}}{{unit}}之间。"
-instruction_format = "这次的执行指令格式出了问题，没有调整。可以再试一次。"
 model_connection_pending = "后续处理时连接出了问题，还有请求没确认。请稍后再试。"
 model_connection = "连接出了问题，暂时没能回答。请稍后再试。"
 model_timeout = "响应超时。"
@@ -73,13 +68,6 @@ vehicle_failure = "抱歉，{{reasons}}"
 action_not_executed = "动作未执行"
 plan_not_executed = "车控计划未执行。"
 executor_rejected = "执行器拒绝"
-
-[errors.field]
-volume = "音量"
-temperature = "温度"
-level = "档位"
-position = "车窗开度"
-default = "这个数值"
 
 [vehicle]
 kept_settings = "要求保持的设置没动。"
@@ -159,7 +147,6 @@ code_99 = "雷暴伴大冰雹"
 notice = "以下为网页搜索摘要，未读取或核实页面全文。"
 
 [task.db]
-step = "正在推理，第 {{step}} 步。"
 queued = "排队等待后台处理"
 running = "正在分析任务"
 cancel_pending = "正在取消，等待当前步骤边界"

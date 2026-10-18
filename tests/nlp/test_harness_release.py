@@ -1,0 +1,199 @@
+"""Release identity is content based, cached and separate from runtime secrets."""
+from pathlib import Path
+
+import pytest
+
+import super_xd.nlp.release as release
+from super_xd.nlp.contracts.run import PreparedRun, RunIdentity
+from super_xd.nlp.engine.run import AgentRun, RunProtocolError
+
+
+def fixture_release(root):
+    for directory in release.SOURCE_DIRECTORIES:
+        (root / directory).mkdir(parents=True, exist_ok=True)
+    paths = {*release.SOURCE_FILES, *release.REQUIRED_PROMPTS, 'config/services.toml', 'config/regions.toml',
+             'prompts/talker/tools.toml', 'src/super_xd/nlp/engine/extra.py',
+             'src/super_xd/nlp/catalog/vehicle.py', 'src/super_xd/nlp/api/app.py',
+             'src/super_xd/nlp/config/regions.py', 'src/super_xd/nlp/adapters/models/google_auth.py',
+             'src/super_xd/nlp/contracts/providers.py', 'src/super_xd/nlp/catalog/cockpit.py',
+             'src/super_xd/nlp/catalog/manual.py', 'src/super_xd/nlp/catalog/maps.py', 'src/super_xd/nlp/catalog/web.py'}
+    for relative in paths:
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f'fixture content for {relative}\n', encoding='utf-8')
+    return root
+
+
+def test_release_identity_is_independent_of_root_and_mtime(tmp_path):
+    first = fixture_release(tmp_path / 'first')
+    second = fixture_release(tmp_path / 'second')
+    (second / 'prompts/talker.md').touch()
+    assert release.build_release_manifest(first) == release.build_release_manifest(second)
+
+
+def test_installed_package_and_checkout_have_identical_release_identity(tmp_path):
+    import shutil
+    root = fixture_release(tmp_path / 'source')
+    package = tmp_path / 'installed/super_xd'
+    shutil.copytree(root / 'src/super_xd', package)
+    resources = package / 'resources'
+    shutil.copytree(root / 'prompts', resources / 'prompts')
+    shutil.copytree(root / 'config', resources / 'config')
+    assert release.build_release_manifest(root) == release.build_release_manifest(resources, package_root=package)
+
+
+@pytest.mark.parametrize('relative', [
+    'prompts/talker.md', 'prompts/reasoner_foreground.md', 'prompts/reasoner_background.md',
+    'prompts/talker/tools.toml', 'prompts/talker/examples.json',
+    'config/services.toml', 'config/regions.toml', 'src/super_xd/nlp/catalog/vehicle.py', 'src/super_xd/nlp/api/app.py', 'src/super_xd/nlp/engine/extra.py',
+    'src/super_xd/nlp/contracts/providers.py', 'src/super_xd/nlp/config/regions.py', 'src/super_xd/nlp/adapters/models/google_auth.py', 'src/super_xd/nlp/catalog/cockpit.py',
+    'src/super_xd/nlp/catalog/manual.py', 'src/super_xd/nlp/catalog/maps.py', 'src/super_xd/nlp/catalog/web.py',
+])
+def test_changed_runtime_input_changes_release_id(tmp_path, relative):
+    root = fixture_release(tmp_path)
+    before = release.build_release_manifest(root)
+    (root / relative).write_text('changed deployment content\n', encoding='utf-8')
+    after = release.build_release_manifest(root)
+    assert before['release_id'] != after['release_id']
+    assert {key for key in before['files'] if before['files'][key] != after['files'][key]} == {relative}
+
+
+def test_new_and_removed_prompt_modules_change_release_identity(tmp_path):
+    root = fixture_release(tmp_path)
+    original = release.build_release_manifest(root)
+    path = root / 'prompts/talker/extra.md'
+    path.write_text('new module', encoding='utf-8')
+    assert release.build_release_manifest(root)['release_id'] != original['release_id']
+    path.unlink()
+    assert release.build_release_manifest(root) == original
+
+
+def test_only_declared_release_inputs_are_read_and_manifest_contains_hashes(tmp_path, monkeypatch):
+    root = fixture_release(tmp_path)
+    for relative in ('.env', 'config/.env', 'prompts/.env', 'prompts/README.md', 'private.json'):
+        (root / relative).write_text('private fixture content', encoding='utf-8')
+    actual_read = Path.read_bytes
+    observed = []
+
+    def read(path):
+        relative = path.relative_to(root).as_posix()
+        assert relative not in {'.env', 'config/.env', 'prompts/.env', 'prompts/README.md', 'private.json'}
+        observed.append(relative)
+        return actual_read(path)
+
+    monkeypatch.setattr(Path, 'read_bytes', read)
+    first = release.build_release_manifest(root)
+    monkeypatch.setenv('ARK_API_KEY', 'changed-offline-fixture-key')
+    monkeypatch.setenv('TALKER_MODEL', 'changed-runtime-model')
+    assert release.build_release_manifest(root) == first
+    assert set(observed) == set(first['files'])
+    assert all(len(value) == 64 and set(value) <= set('0123456789abcdef') for value in first['files'].values())
+
+
+def test_cached_getters_are_independent_copies_and_perform_no_file_io(monkeypatch):
+    expected = release.get_release_manifest()
+
+    def unexpected_io(*args, **kwargs):
+        pytest.fail('Release getters must not read files on request paths')
+
+    monkeypatch.setattr(Path, 'open', unexpected_io)
+    monkeypatch.setattr(Path, 'read_bytes', unexpected_io)
+    returned = release.get_release_manifest()
+    returned['files'].clear()
+    returned['release_id'] = 'mutated'
+    assert release.get_release_manifest() == expected
+    assert release.get_release_id() == expected['release_id']
+
+
+@pytest.mark.parametrize('relative', ['config/services.toml', 'config/regions.toml'])
+def test_missing_required_source_fails_without_silent_release_fallback(tmp_path, relative):
+    root = fixture_release(tmp_path)
+    (root / relative).unlink()
+    with pytest.raises(FileNotFoundError):
+        release.build_release_manifest(root)
+
+
+def test_symlinked_prompt_cannot_read_a_private_file(tmp_path):
+    root = fixture_release(tmp_path / 'project')
+    private = tmp_path / 'private.env'
+    private.write_text('private fixture content', encoding='utf-8')
+    (root / 'prompts/talker/linked.toml').symlink_to(private)
+    with pytest.raises(ValueError):
+        release.build_release_manifest(root)
+
+
+def test_checkpoint_from_previous_release_requires_explicit_migration(tmp_path):
+    root = fixture_release(tmp_path)
+    prepared = PreparedRun(
+        identity=RunIdentity(run_id='run', request_id='request', turn_id='turn', context_revision=1),
+        messages=[{'role': 'user', 'content': 'offline fixture'}],
+        release_id=release.build_release_manifest(root)['release_id'])
+    checkpoint = AgentRun(prepared, None).checkpoint()
+    assert AgentRun(prepared, None, checkpoint=checkpoint).checkpoint() == checkpoint
+    (root / 'prompts/talker.md').write_text('new policy', encoding='utf-8')
+    changed = prepared.model_copy(update={'release_id': release.build_release_manifest(root)['release_id']})
+    with pytest.raises(RunProtocolError):
+        AgentRun(changed, None, checkpoint=checkpoint)
+
+
+async def test_task_trace_uses_cached_release_and_preserves_provider_metadata():
+    from super_xd.nlp.orchestration.tasks.runner import TaskRunner
+
+    class Sink:
+        async def emit(self, session_id, kind, data, **fields):
+            return data
+
+    runner = object.__new__(TaskRunner)
+    runner.trace_sink = Sink()
+    metadata = {'model': 'actual-provider-model', 'usage': {'input_tokens': 7}}
+    data = await runner._trace({'id': 'task', 'session_id': 'session', 'revision': 1},
+                              'model.completed', {'meta': metadata, 'release_id': 'untrusted-override'})
+    assert data['release_id'] == release.get_release_id()
+    assert data['meta'] == metadata
+
+
+async def test_planner_model_trace_includes_same_release_as_manifest():
+    from super_xd.demo.devices.simulator import initial_vehicle_state
+    from super_xd.nlp.orchestration.vehicle_planner import VehicleControlPlanner
+    from tests.support.vehicle_planner import FakeArk, response, temperature_plan
+
+    plan = await VehicleControlPlanner(FakeArk([response(temperature_plan())])).plan(
+        '把所有温区设为23度。', initial_vehicle_state(), ['climate'])
+    assert plan['ok'] is True
+    started = next(event for event in plan['trace_events'] if event['kind'] == 'model.started')
+    assert started['data']['release_id'] == release.get_release_id()
+    assert started['data']['model'] == plan['provenance']['model']
+
+
+async def test_talker_model_trace_includes_cached_release(tmp_path):
+    from super_xd.demo.tasks.database import Database
+    from super_xd.demo.session.actor import SessionActor
+    from tests.support.session import FakeArk, wait_for
+    from tests.support.vehicle import FakeVehiclePlanner
+
+    actor = SessionActor('release-fixture', Database(tmp_path / 'trace.sqlite3'),
+                         FakeArk([{'content': '你好'}]), vehicle_planner=FakeVehiclePlanner())
+    try:
+        queue = await actor.attach()
+        await queue.get()
+        await actor.post({'type': 'input', 'text': '你好'})
+        await wait_for(queue, 'stream.done')
+        await actor.trace_queue.join()
+        started = next(event for event in actor.db.traces_after(actor.id) if event['kind'] == 'model.started')
+        assert started['data']['release_id'] == release.get_release_id()
+    finally:
+        await actor.close()
+
+
+@pytest.mark.parametrize('relative', [
+    'src/super_xd/demo/session/actor.py', 'src/super_xd/demo/tasks/worker.py', 'src/super_xd/demo/tasks/database.py', 'src/super_xd/demo/devices/simulator.py',
+    'src/super_xd/demo/audio/providers.py', 'src/super_xd/demo/audio/volcengine_asr.py', 'src/super_xd/demo/audio/volcengine_tts.py', 'src/super_xd/demo/resources/manual_search.py',
+    'src/super_xd/demo/audio/google_tts.py', 'src/super_xd/demo/audio/elevenlabs_asr.py', 'src/super_xd/demo/audio/elevenlabs_tts.py',
+])
+def test_demo_and_local_audio_changes_do_not_change_production_release(tmp_path, relative):
+    root = fixture_release(tmp_path)
+    original = release.build_release_manifest(root)
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('local Demo changed', encoding='utf-8')
+    assert release.build_release_manifest(root) == original

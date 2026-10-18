@@ -4,10 +4,11 @@ Uses public Paris landmarks, never user location. Saves only selected evidence;
 credentials and authenticated request URLs are never logged.
 """
 if __name__ == "__main__":
-    from backend.local_environment import load_local_environment
+    from super_xd.demo.environment import load_local_environment
     load_local_environment()
 
 import asyncio
+from scripts.reports import report_path, write_report
 from datetime import datetime, timedelta, date
 import json
 import os
@@ -17,15 +18,13 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from backend.weather import WeatherClient
+from super_xd.nlp.adapters.reads.weather import WeatherClient
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def read_key():
-    # .env is loaded by backend.settings; shell startup files are not credentials sources.
-    from backend import settings  # noqa: F401
     return os.environ.get('GOOGLE_MAPS_API_KEY', '')
 
 
@@ -146,10 +145,10 @@ async def main():
     report = {'observed_at': observed_at, 'real_api': True, 'public_test_locations': True,
               'scope': 'Direct service calls only; no Talker integration or browser navigation simulation tested.',
               'passed': sum(r['ok'] for r in records), 'total': len(records), 'records': records}
-    output = ROOT / 'docs' / 'google-maps-live.json'
-    output.write_text(json.dumps(report, ensure_ascii=False, indent=2))
+    output = write_report(report, report_path('google-maps-live'))
     print(json.dumps({'report': str(output), 'passed': report['passed'], 'total': report['total']}))
+    return 0 if report['passed'] == report['total'] else 1
 
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    raise SystemExit(asyncio.run(main()))

@@ -20,12 +20,12 @@ import time
 from pathlib import Path
 
 if __name__ == '__main__':
-    from backend.local_environment import load_local_environment
+    from super_xd.demo.environment import load_local_environment
     load_local_environment()
 
 from evals.gateway_driver import EvaluationGateway, model_secrets
-from backend.harness.release import get_release_manifest
-from backend.harness.diagnostics import safe_diagnostic
+from super_xd.nlp.release import get_release_manifest
+from super_xd.nlp.diagnostics import safe_diagnostic
 
 CASE_DIR = Path(__file__).resolve().parent / 'cases'
 TURN_TIMEOUT = 90
@@ -489,7 +489,7 @@ async def main(argv=None):
              and (not args.case or c['id'] in args.case)]
     if not cases:
         parser.error('No eval cases matched the selected --case/--tag filters')
-    from backend.services.factory import create_llm
+    from super_xd.nlp.adapters.factory import create_llm
     ark = create_llm()
     try:
         configuration = {'source': ark.config.source, **ark.info()}

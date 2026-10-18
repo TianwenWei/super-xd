@@ -1,21 +1,22 @@
 """Configured LLM/Volcengine speech acceptance with delayed simulated receipts."""
 if __name__ == "__main__":
-    from backend.local_environment import load_local_environment
+    from super_xd.demo.environment import load_local_environment
     load_local_environment()
 
 import asyncio
+from scripts.reports import report_path, write_report
 from contextlib import AsyncExitStack
 import json
 from pathlib import Path
 import tempfile
 import time
 
-from backend.db import Database
-from backend.models import utcnow
-from backend.session import SessionActor
-from backend.services.audio import build_tts
-from backend.services.config import load_services_config
-from backend.services.factory import create_llm
+from super_xd.demo.tasks.database import Database
+from super_xd.nlp.adapters.common import utcnow
+from super_xd.demo.session.actor import SessionActor
+from super_xd.demo.audio.providers import build_tts
+from super_xd.nlp.config.services import load_services_config
+from super_xd.nlp.adapters.factory import create_llm
 
 
 async def run_case(root, name, text, *, driving_race=False, config=None):
@@ -87,6 +88,7 @@ async def evaluate_case(root, name, text, ark, tts, config, *, driving_race=Fals
 
 
 async def main():
+    output = report_path('engineering-live')
     config = load_services_config()
     report={'observed_at':utcnow(),'real_model':True,'real_tts':True,'simulated_vehicle':True,'browser_render_tested':False,
             'scope':'configured LLM roles and selected Volcengine TTS; simulated device receipts',
@@ -98,9 +100,10 @@ async def main():
                                ('chat','用三句话介绍一下秋天适合散步的原因。',False)]:
             record=await run_case(Path(directory),name,text,driving_race=race,config=config)
             report['cases'].append(record)
-            Path('docs/engineering-live.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))
+            write_report(report, output)
             print(json.dumps({'case':name,'passed':record['passed'],'first_nonzero_pcm_ms':record['first_nonzero_pcm_ms']},ensure_ascii=False),flush=True)
     report['passed']=all(case['passed'] for case in report['cases'])
-    Path('docs/engineering-live.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))
+    write_report(report, output)
+    return 0 if report['passed'] else 1
 
-if __name__=='__main__': asyncio.run(main())
+if __name__=='__main__': raise SystemExit(asyncio.run(main()))

@@ -1,19 +1,20 @@
 """Configured Talker + selected Google Places/Weather with simulated receipts."""
 if __name__ == "__main__":
-    from backend.local_environment import load_local_environment
+    from super_xd.demo.environment import load_local_environment
     load_local_environment()
 
 import asyncio
+from scripts.reports import report_path, write_report
 import json
 from contextlib import AsyncExitStack
 from pathlib import Path
 import tempfile
 
-from backend.db import Database
-from backend.models import utcnow
-from backend.session import SessionActor
-from backend.services.config import load_services_config
-from backend.services.factory import create_llm, create_maps
+from super_xd.demo.tasks.database import Database
+from super_xd.nlp.adapters.common import utcnow
+from super_xd.demo.session.actor import SessionActor
+from super_xd.nlp.config.services import load_services_config
+from super_xd.nlp.adapters.factory import create_llm, create_maps
 
 
 async def main():
@@ -90,10 +91,10 @@ async def evaluate(maps, ark, config):
             await asyncio.gather(*(run(*case) for case in cases[start:start+2]))
     report['passed'] = sum(c['passed'] for c in report['cases'])
     report['total'] = len(cases)
-    output = Path('docs/maps-fc-live.json')
-    output.write_text(json.dumps(report, ensure_ascii=False, indent=2))
+    output = write_report(report, report_path('maps-fc-live'))
     print(json.dumps({'passed': report['passed'], 'total': report['total'], 'report': str(output)}))
+    return 0 if report['passed'] == report['total'] else 1
 
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    raise SystemExit(asyncio.run(main()))

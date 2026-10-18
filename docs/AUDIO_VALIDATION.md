@@ -20,8 +20,10 @@
 
 前瞻预告可以随模型文本流播；完整工具组验证前不能下发。预告不能宣称已完成；确定成功已有预告时不重复播报，失败和unknown必须反馈。无预告时核对一次dispatch反馈或实际完成反馈，任务登记必须有真实账本确认。模型原文、实际audio.text、完整任务报告和证据分别核验。
 
+`scripts.audio_benchmark` 不再把所有回执前音频视为违规。若首音频早于车控回执或任务登记，必须把实际先播文本放进 `pre_receipt_spoken_text`，另附人工或模型语义审阅：`pre_receipt_speech_review` 包含 `status="reviewed"`、`kind="progress"`、同一 `turn_id`、`reviewer="human"|"model"`、与前述文本完全一致的 `text`，以及覆盖到回执时点的 `through_perf_ms`。缺审阅、错轮次或文本不一致仍不能通过。代码只验证审阅与本轮证据的绑定，不用关键词判断时态；真实回执、目标状态和任务登记仍单独校验。若记录了 `completion_claim_perf_ms`，完成宣称不得早于实际回执。这项审阅不由浏览器自动填写，也不能用首字时间代替音频。
+
 ```sh
-.venv/bin/python -m pytest -q tests/test_speech_stream.py tests/test_audio_session.py tests/test_audio_endpoint.py tests/test_audio_benchmark.py
+.venv/bin/python -m pytest -q tests/demo/test_speech_stream.py tests/demo/test_audio_session.py tests/demo/test_audio_endpoint.py tests/evals/test_audio_benchmark.py
 .venv/bin/python -m scripts.audio_benchmark --plan
 .venv/bin/python -m scripts.audio_benchmark --input data/validation/browser-audio.json --manifest data/validation/audio-manifest.json --output data/validation/audio-report.json
 ```

@@ -19,6 +19,11 @@
           "commands_exact": true
         }
       }
+    ],
+    "personas": [
+      "professional",
+      "warm",
+      "playful"
     ]
   },
   {

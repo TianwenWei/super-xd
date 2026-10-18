@@ -37,4 +37,4 @@
 
 远端 CP 的出处链接由前端直接展示。当前远端适配器没有本地 `document()` 或 `page_image()` 文件能力，这两项明确返回 `unsupported_capability`；不会拿本地 D9 PDF 冒充远端资料。`with_page_images()` 仅保留 CP 已返回的真实图片。已有本地 RAG 继续提供真实 PDF 与原始整页图。
 
-契约测试：`.venv/bin/python -m pytest tests/test_manual_providers.py tests/test_manual_search.py tests/test_embedding_providers.py`。MockTransport 覆盖真实 HTTP 字段、来源校验、缺配置和脱敏；测试不代表已连接任何尚未配置的真实车书 CP。
+契约测试：`.venv/bin/python -m pytest tests/nlp/test_manual_providers.py tests/demo/test_manual_search.py tests/nlp/test_embedding_providers.py`。MockTransport 覆盖真实 HTTP 字段、来源校验、缺配置和脱敏；测试不代表已连接任何尚未配置的真实车书 CP。

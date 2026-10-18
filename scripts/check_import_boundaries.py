@@ -8,23 +8,28 @@ import importlib.util
 from pathlib import Path
 import sys
 
-ROOT = Path(__file__).resolve().parents[1]
-FORBIDDEN = ('backend.demo', 'backend.session', 'backend.worker', 'backend.db', 'backend.app',
-             'backend.asr', 'backend.tts', 'backend.speech_stream', 'backend.manual_search',
-             'backend.manual_embeddings', 'backend.web_search', 'backend.local_environment',
-             'numpy', 'sqlite3', 'dotenv', 'onnxruntime', 'websockets')
+from super_xd.nlp.resources import CONFIG_ROOT, PACKAGE_ROOT
+
+FORBIDDEN = ('super_xd.demo', 'numpy', 'sqlite3', 'dotenv', 'onnxruntime', 'websockets')
+LAYER_RULES = {
+    'contracts': ('engine', 'orchestration', 'policy', 'adapters', 'prompts', 'api', 'assembly'),
+    'catalog': ('orchestration', 'policy', 'adapters', 'prompts', 'api', 'assembly'),
+    'engine': ('orchestration', 'policy', 'adapters', 'prompts', 'api', 'assembly'),
+    'policy': ('orchestration', 'adapters', 'api', 'assembly'),
+}
 
 
 def forbidden(name: str) -> bool:
     return any(name == prefix or name.startswith(prefix + '.') for prefix in FORBIDDEN)
 
 
-def check_import_boundaries() -> None:
-    """AST includes dormant imports; runtime checks include transitive imports."""
-    paths = [ROOT / 'backend' / name for name in ('nlp_app.py', 'nlp_settings.py', 'catalog.py')]
-    paths += list((ROOT / 'backend/harness').glob('*.py')) + list((ROOT / 'backend/tool_schemas').glob('*.py'))
-    for path in paths:
-        module = '.'.join(path.relative_to(ROOT).with_suffix('').parts)
+def check_static_boundaries(package_root: Path = PACKAGE_ROOT) -> None:
+    """Check every production source, including imports inside dormant branches."""
+    for path in (package_root / 'nlp').rglob('*.py'):
+        relative = path.relative_to(package_root)
+        module = 'super_xd.' + '.'.join(relative.with_suffix('').parts).removesuffix('.__init__')
+        layer = relative.parts[1] if len(relative.parts) > 2 else ''
+        blocked = tuple('super_xd.nlp.' + name for name in LAYER_RULES.get(layer, ()))
         for node in ast.walk(ast.parse(path.read_text())):
             names = []
             if isinstance(node, ast.Import):
@@ -32,10 +37,20 @@ def check_import_boundaries() -> None:
             elif isinstance(node, ast.ImportFrom):
                 base = node.module or ''
                 if node.level:
-                    base = importlib.util.resolve_name('.' * node.level + base, module.rpartition('.')[0])
+                    package = module if path.name == '__init__.py' else module.rpartition('.')[0]
+                    base = importlib.util.resolve_name('.' * node.level + base, package)
                 names = [base, *(base + '.' + item.name for item in node.names)]
             if any(forbidden(name) for name in names):
-                raise AssertionError(f'{path.relative_to(ROOT)}:{node.lineno}: production imports a Demo dependency')
+                raise AssertionError(f'{relative}:{node.lineno}: production imports a Demo dependency')
+            if any(name == prefix or name.startswith(prefix + '.') for name in names for prefix in blocked):
+                raise AssertionError(f'{relative}:{node.lineno}: forbidden {layer} dependency: {names}')
+            if layer in LAYER_RULES and any(name.split('.')[0] in {'httpx', 'requests', 'aiohttp', 'socket'} for name in names):
+                raise AssertionError(f'{relative}:{node.lineno}: IO belongs in an adapter')
+
+
+def check_import_boundaries() -> None:
+    """Runtime guarding also covers transitive imports and startup registrations."""
+    check_static_boundaries()
 
     class Boundary:
         def find_spec(self, fullname, path=None, target=None):
@@ -46,10 +61,10 @@ def check_import_boundaries() -> None:
     guard = Boundary()
     sys.meta_path.insert(0, guard)
     try:
-        import backend.nlp_app
-        import backend.harness.assembly
-        from backend.harness.talker import talker_tools
-        from backend.prompt_config import validate_all
+        import super_xd.nlp.api.app
+        import super_xd.nlp.assembly
+        from super_xd.nlp.orchestration.talker import talker_tools
+        from super_xd.nlp.prompts.config import validate_all
         validate_all()
         assert len(talker_tools()) == 26
         assert not any(forbidden(name) for name in sys.modules)
@@ -58,14 +73,14 @@ def check_import_boundaries() -> None:
 
 
 def check_release_coverage() -> None:
-    from backend.harness.release import get_release_manifest
+    from super_xd.nlp.release import get_release_manifest
     files = get_release_manifest()['files']
     missing = []
     for name, module in tuple(sys.modules.items()):
-        if name == 'backend' or name.startswith('backend.'):
+        if name == 'super_xd' or name.startswith('super_xd.'):
             path = getattr(module, '__file__', None)
             if path and Path(path).suffix == '.py':
-                relative = Path(path).resolve().relative_to(ROOT).as_posix()
+                relative = 'src/super_xd/' + Path(path).resolve().relative_to(PACKAGE_ROOT).as_posix()
                 if relative not in files:
                     missing.append(relative)
     assert not missing, 'Imported production source missing from release: ' + ', '.join(sorted(missing))
@@ -75,12 +90,12 @@ async def smoke_startup() -> None:
     """Open real local clients with offline credentials; ASGI checks perform no upstream requests."""
     import os
     import httpx
-    from backend.harness.assembly import create_nlp_services
-    from backend.nlp_app import create_app
-    from backend.nlp_settings import NLPSettings
-    from backend.services.config import load_services_config
+    from super_xd.nlp.assembly import create_nlp_services
+    from super_xd.nlp.api.app import create_app
+    from super_xd.nlp.settings import NLPSettings
+    from super_xd.nlp.config.services import load_services_config
 
-    config = load_services_config(ROOT / 'config/services.toml')
+    config = load_services_config(CONFIG_ROOT / 'services.toml')
     for profile in config.document['llm']['profiles'].values():
         if profile.get('key_env'):
             os.environ[profile['key_env']] = 'offline-startup-fixture'

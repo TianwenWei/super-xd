@@ -6,19 +6,19 @@ Talker固定26工具（15热车控、3调度、3地点/天气、网页、车书�
 
 完整工具组校验后才交接；模拟器独立执行并返回receipt_id、实际状态和版本，浏览器ACK不代表成功。前瞻预告可流式播放，成功已有预告时不重复播报，失败/unknown明确反馈。前端分别显示原生vehicle_calls、Planner动作及实际回执；没有对应回执不得把plan.ok或预检当执行。刷新/重连从session.snapshot恢复当前会话状态，不伪造服务重启后的历史会话恢复。
 
-公共Demo类型在`backend/types.py`，前端类型在`frontend/src/types.ts`。
+公共 Demo 类型在 `src/super_xd/demo/contracts.py`，共享目录及人设类型在 `src/super_xd/nlp/contracts/catalog.py`，前端类型在 `frontend/src/types.ts`。
 
 ## HTTP
 
-- `GET /api/health`：模型连接预热与服务健康；`retrieval` 为车控目录状态，`manual` 为独立车书索引状态。
+- `GET /api/health`：模型连接预热与服务健康；`manual` 为独立车书索引状态。
 - `GET /api/config`：persona、100函数/10skill/热工具、模型、TTS及ASR配置状态；`manual` 包含向量模型、密钥是否配置、索引就绪情况、标题、页数和片段数。无密钥。
 - `GET /api/manual/pdf`：当前车书原始 PDF，`application/pdf` 内联返回；前端可加 `#page=<page>` 打开命中页。
 - `GET /api/manual/{manual_id}/pages/{page}.png`：当前车书合法页的原始 PDF 整页 PNG；未知ID/越界页码404，预览不可用503。
 - `POST /api/sessions`：创建 session_id。
+- `DELETE /api/sessions/{session_id}`：关闭并移除内存会话，返回`{closed:true}`；不存在返回404。释放会话资源，保留SQLite记录，不等于取消已登记的研究任务。
 - `POST /api/sessions/{session_id}/vehicle/commands/{command_id}/execute`：执行已登记模拟命令；按command_id幂等。默认200ms下行、300ms执行、200ms上行；返回receipt_id、ok、reason_code、resume_condition、state、state_version、timings。未知命令拒绝，浏览器只能把该回执ID回传。
 - `GET /api/sessions/{session_id}`：车况、任务、近期审计 `history`（最近 12 轮），以及 `turns` 轮次汇总（turn_id/text/output/finished/proactive/task_id/persona_version/metrics）。完整持久化记录通过 traces 接口读取。
 - `GET /api/sessions/{session_id}/traces`：模型实际输出与 Agent 轨迹，支持增量分页和 turn/task 筛选，详见下节。
-- `POST /api/sessions/{session_id}/tts`：保留兼容的完整 MP3 接口，`{turn_id,text}`；仅当前已完成轮、文本需匹配该轮输出。新界面主流程使用下述独立 PCM WebSocket。新轮取消合成并拒绝迟到结果，缺 Speech 凭证明确报错。
 
 ## 轨迹读取
 
@@ -90,6 +90,7 @@ Talker 用独立队列和线程异步写入，SQLite 日志操作不阻塞前台
 | vehicle.configure | settings：speed_kph、gear、navigation_active、call_active、timezone（IANA）、location、location_country；P档不能有车速。地点为用户提供的城市或地标，空字符串清除默认位置 |
 | vehicle.receipt | command_id、receipt_id；必须匹配模拟执行端真实保存的回执，拒绝自报成功与旧ACK |
 | audio.played | turn_id、playback_id、played_ms；AudioWorklet真实渲染样本数换算，支持已打断轮次归档 |
+| attention.set | in_call、demanding_driving可选boolean；Demo注入注意力事实以验证播报仲裁 |
 | task.create | goal |
 | task.get | task_id 可选；多个任务不明确则返回消歧 |
 | speaker.set | seat 必填：driver / front_passenger / rear_left / rear_right；更新会话默认音区，返回speaker.changed；从下一轮生效 |
@@ -149,11 +150,11 @@ Talker 用独立队列和线程异步写入，SQLite 日志操作不阻塞前台
 
 单次纯 POI 查询的最终口述列表由真实结果按原序生成，与卡片序号及 `recent_places` 一致；避免模型自行重排后“第一个”选错。原模型文字保留在 model.completed，最终来源标记为 `verified_place_results`。直接“导航到明确地点”在查到唯一候选后继续调用导航 FC，收到车端回执即结束，无额外润色模型。
 
-任务状态：queued / running / waiting_clarification / cancelling / completed / failed / cancelled。task含id/goal/constraints/context/status/revision/summary/result/question/error/steps/sources/created_at/updated_at。context包含登记时车况、近期对话、活跃任务与时区，以及按revision保留的澄清问答。来源包含真实工具生成的 URL、queried_at、extracted 状态。
+任务状态：queued / running / waiting_clarification / cancelling / completed / failed / cancelled；awaiting_confirm只作契约预留，当前未接不可逆工具确认执行链。task含id/delivery_mode/goal/constraints/context/status/revision/summary/result/question/error/steps/sources/created_at/updated_at。context包含登记时车况、近期对话、活跃任务与时区，以及按revision保留的澄清问答。来源包含真实工具生成的 URL、queried_at、extracted 状态。
 
-Talker调度工具为固定三个：`delegate_vehicle_control`、`delegate_task`、`manage_task`。`load_skill`仅供独立Pro车控层使用。`delegate_task`可选`query_mode=quick|research`与简短`spoken_goal`，完整要求保留在goal；只有明确要求详细朗读时`read_details=true`。`manage_task(action=get,task_ids=[...])`可一次读取多个明确任务，与单个task_id互斥；数组须非空、不同且全部属于当前会话，任何无效ID整批拒绝。reply/update/cancel仍仅支持单个task_id，用户回答已有澄清时reply原任务，不另建重复任务。
+Talker调度工具为固定三个：`delegate_vehicle_control`、`delegate_task`、`manage_task`。`load_skill`仅供独立Pro车控层使用。`delegate_task`可选`mode=foreground|background`、`query_mode=quick|research`与简短`spoken_goal`，完整要求保留在goal；只有明确要求详细朗读时`read_details=true`。`manage_task(action=get,task_ids=[...])`可一次读取多个明确任务，与单个task_id互斥；数组须非空、不同且全部属于当前会话，任何无效ID整批拒绝。reply/update/cancel仍仅支持单个task_id，用户回答已有澄清时reply原任务，不另建重复任务。
 
-Talker跨轮保持固定23个工具；Pro加载仅在该委托上下文保留。模型上下文只压缩副本：历史任务保留目标、条件、状态、问题和口语结果，移除重复车况/上下文/工具schema；原始消息、参数、全部报告和trace保持完整。读取车况工具后由同一Talker解释具体值；混合读写在后续失败时仍确认已实际执行的动作，避免把部分成功描述成完全未执行。
+Talker跨轮保持固定26个工具；Pro加载仅在该委托上下文保留。模型上下文只压缩副本：历史任务保留目标、条件、状态、问题和口语结果，移除重复车况/上下文/工具schema；原始消息、参数、全部报告和trace保持完整。读取车况工具后由同一Talker解释具体值；混合读写在后续失败时仍确认已实际执行的动作，避免把部分成功描述成完全未执行。
 
 后台天气工具`get_weather_forecast(city,date,country_code?)`使用真实Open-Meteo城市地理编码与预报API，明确目标当地日期、IANA时区、摄氏单位与最低/最高温；歧义城市须澄清，错日期/空值/历史数据不可作为未来预报回退。结果的`forecast_records`与原始JSON可供核对，`web_evidence=forecast`或`verified`区分结构化数据与网页材料；这不代表模型已经逐句完成事实审核。用户要求指定官网时仍需实际读取官网，并说明日期不能核实等限制。接口依据[Forecast API](https://open-meteo.com/en/docs)与[Geocoding API](https://open-meteo.com/en/docs/geocoding-api)。
 
@@ -182,38 +183,28 @@ Talker跨轮保持固定23个工具；Pro加载仅在该委托上下文保留。
 
 核心计时在同一页面的 performance.now 时间域：表单 submit→首个合法非零 PCM 到达；静音/空帧/元数据不计。另报首 PCM 入队、Worklet 首次真实样本/非零样本渲染的主线程通知观测。postMessage 入队不等于播放，Worklet 观测包含线程通知延迟且不是扬声器声学起点。最新每次query目标为≤1500ms；旧口径的历史数据不能充当当前验收结果。全部提交分母、三条路径预算与采样边界见[音频验收](AUDIO_VALIDATION.md)。
 
-## 独立识别 WebSocket `/ws/{session_id}/asr`
-
-每次显式录音使用独立连接，同一会话最多一段；仅本机 Origin。会话不存在关闭码 4404。ASR 接口只做识别，任何 partial/final 都不会直接创建轮次或触发动作；前端在用户结束录音并收到有效 final 后，经原控制 WebSocket 发送一次 `input`。
-
-| 方向 / 消息 | 字段及含义 |
-|---|---|
-| 客户端 asr.start | capture_id（1–80位字母/数字/下划线/连字符）、format=pcm_s16le、sample_rate=16000、channels=1 |
-| 服务端 asr.ready | capture_id、format/sample_rate/channels、metrics；只表示上游连接与配置已发送，供应商可能随后拒绝 |
-| 客户端二进制 | 非空、偶数字节的16kHz单声道PCM，每帧最多6400 bytes（200ms），总计最多60秒 |
-| 客户端 asr.stop | capture_id；最后一帧PCM之后发送，只结束录音输入，仍等待完整云端终结 |
-| 客户端 asr.cancel | capture_id；取消本次，关闭连接并丢弃内容 |
-| 服务端 asr.partial / asr.final | capture_id、text（完整转写快照）、metrics；partial仅预览，final必须在stop之后且具完整请求终结标记 |
-| 服务端 asr.error | capture_id、code、message（脱敏）；不提交本次转写 |
-
-未结束录音时不因供应商某段 `definite=true` 提交。连接/发送和停止后等待各受配置超时限制，整次连接90秒上限；录音音频最多60秒。取消/错误释放录音占位；成功 final 保留到客户端实际发送 input 或显式释放，90秒租期兜底，避免恢复TTS前后台结果抢先朗读。trace记录 `asr.started/completed/cancelled/error`，最终文本与安全计时可回看，原始麦克风PCM不写入数据库。
-
-前端导出的 `recognition_records` 记录麦克风请求、ready、首帧发送、停止、首partial、final、实际提交的同页时钟，并关联client_request_id。供应商metrics与浏览器时钟分开。原query→非零PCM起点保持最终文本真正提交，不用ASR首字替代模型或TTS延迟。详见[配置及验证边界](ASR.md)。
-
 ## 执行与隔离
 
-`SessionActor` 主循环独占会话状态写入。Ark 网络生成通过 asyncio task 只投递事件，不阻塞主循环。工具命令/回执通过 command_id 对应；用户打断不能删除已执行记录。前端按 turn_id 丢弃旧文本与音频。
+`SessionActor` 主循环独占会话状态写入。模型网络生成通过 asyncio task 只投递事件，不阻塞主循环。工具命令/回执通过 command_id 对应；用户打断不能删除已执行记录。前端按 turn_id 丢弃旧文本与音频。
 
 `Database` 每次操作短事务，WAL；任务修改立即推进 revision 并写 inbox，worker 在步骤边界消费。claim 排除本 worker 活跃任务，默认并发 2。旧 revision 乐观写失败；终态拒绝迟到完成；已取消不能被补充隐式复活。普通进度只更新卡片，主动结果需生成/朗读均空闲。
 
-`ArkClient` 使用标准 OpenAI function calling；100个车控函数开启strict schema，Talker disabled thinking，Thinker enabled thinking。strict只约束结构与类型；会话层还对显式导航命令的完整地点原文做一致性校验，发生缩写或改名时拒绝下发且不修改参数。`TavilyClient` 真实 Search/Extract。`VolcanoTTS` 使用独立 Speech 凭证。任何缺凭证、超时、无结果和参数错误均显式反馈，无固定模型回复/搜索数据/替代声音。
+`ModelService`只接受`ModelRequest`并按冻结角色绑定模型；结果为`ModelResult(message, metadata)`或`ModelEvent`流，没有旧thinker布尔参数或assistant消息中的_meta包装。`ChatCompletionsTransport`统一HTTP/SSE、累计预算、重试与取消；Ark、Vertex、Compatible仅负责认证和payload。100个车控契约的strict/schema只约束结构与类型，来源和权限仍由策略精确核对。`TavilyClient`位于reads适配器，负责真实Search/Extract；音频使用独立Speech凭证。缺配置、超时、无结果和非法参数均明确反馈。
+
+`delegate_task.mode=foreground/background`只决定交付；`query_mode=quick/research`决定检索策略，均使用同一只读TaskRunner。前台先登记并等待独立Worker推进，默认8秒后对同一任务执行delivery-mode CAS；task_id、revision、lease、checkpoint、证据和预算不变。当前没有跨worker租约移交。任务在前台已交付后按版本去重；用户打断只是解除等待，取消研究仍需manage_task cancel。
+
+通知由actor中的NotificationQueue和纯speaking策略决定。旧revision/status或到期消息丢弃，progress只上屏；生成、ASR、朗读、断线、通话或繁忙驾驶期间延后。Demo可通过`attention.set`输入布尔`in_call/demanding_driving`事实，不自动推断；该事件是集成测试入口。普通结果有效期10分钟，澄清使用clarification_expires_at，重复事件不延长。展示数据读取失败从0.25秒退避至最多15秒，并受通知有效期约束；旧回调不能触发重复播报。事件表达使用确定性路径，不额外调用Talker模型。
+
+SessionRegistry每60秒回收闲置30分钟、没有控制/音频连接、无生成且没有queued/running/cancelling/waiting_clarification任务的会话。回收只释放内存与会话资源；SQLite记录保留，旧session_id不会自动重建。
+
+历史工具级extra_content和assistant顶层extra_content分别写入HistoricalCall和AssistantRecord.provider_metadata；Demo桥接、checkpoint恢复和历史编译保留供应商opaque续推字段，不能改写或把它当作执行权限。
 
 2026-10-14 范围补充：`delegate_task` 的 `query_domain=weather` 在当前原型仅支持显式 `query_mode=quick`。其他/缺省mode返回 `weather_quick_required`、`retry_model=true`、`executed=false`，登记前拒绝且不改写参数；同一Talker在原5次上限内继续。`general` research协议保留。明确指向已有任务/历史查询结果的读取请求须先取得本轮真实get证据；错误直答仅存原模型轨迹，不展示或合成。已完成任务引用与主动历史播报保留归属；这些检查不是通用自然语言意图或事实验证。
 
 
-任务持久字段：`running_seconds/running_since/clarification_expires_at/checkpoint/deadline_at/deadline_paused_at/progress/progress_notified/error_code`。从登记开始最长60秒，排队计入；waiting_clarification暂停截止时间，仍有独立的默认1800秒澄清期限。补充条件、revision推进和进程重启不重置已用预算。30秒尚在queued/running时，事务内写一次`progress_notice`事件，actor在没有对话、朗读或ASR占用时播报当前阶段；终态取代待播进度。最后15秒取消尚未结束的常规调用，预留一次关闭思考、仅可finish_task的收尾调用；60秒仍未得到合法结果则失败，保留真实来源与checkpoint，拒绝迟到提交。工具预算不消耗交付调用，最后一步同样仅允许交付。`result.partial=true`标明预算收尾的阶段结果，不表示完整需求已全部核实。技术error/搜索参数保留在DB、卡片诊断和trace；模型任务上下文与默认TTS使用结构化阶段、来源读取数量和error_code对应的口语，不回放原始异常。
+任务持久字段：`delivery_mode/running_seconds/running_since/clarification_expires_at/checkpoint/deadline_at/deadline_paused_at/progress/progress_notified/error_code`。从登记开始最长60秒，排队计入；waiting_clarification暂停截止时间，仍有独立的默认1800秒澄清期限。补充条件、revision推进和进程重启不重置已用预算。30秒尚在queued/running时，事务内写一次`progress_notice`事件，仅更新屏幕；终态取代旧进度。最后15秒取消尚未结束的常规调用，预留一次关闭思考、仅可finish_task的收尾调用；60秒仍未得到合法结果则失败，保留真实来源与checkpoint，拒绝迟到提交。工具预算不消耗交付调用，最后一步同样仅允许交付。`result.partial=true`标明预算收尾的阶段结果，不表示完整需求已全部核实。技术error/搜索参数保留在DB、卡片诊断和trace；模型任务上下文与默认TTS使用结构化阶段、来源读取数量和error_code对应的口语，不回放原始异常。
 
-播放打断信息在快照`interrupted_playback`内记录，历史assistant正文只保留确认播放的文字，不拼接可被模型复述的打断标记。车辆`_meta.timezone`进入Talker和Thinker上下文；初值来自`DEFAULT_TIMEZONE`（未配置时UTC）。`DEFAULT_LOCATION`与`DEFAULT_LOCATION_COUNTRY`设置用户提供的默认位置，未配置时不猜地点。每次Talker请求在历史之后的会话快照中注入`current_location:{name,country,source:user_setting}`（未知时null）、同一时刻的`current_utc/current_local/current_date/timezone`，当地时间由IANA时区转换并处理夏令时。用户提供的位置设置也作为地点参数的来源；后台任务保留位置来源与登记时车况，Thinker仍使用执行时的UTC时间和任务时区。固定prompt前缀和工具集保持稳定，不新增模型调用。
+播放打断信息在快照`interrupted_playback`内记录，历史assistant正文保留完整生成文本，`playback_history`分别记录播放状态和已确认听到的片段，不覆盖原始生成记录。车辆`_meta.timezone`进入Talker和Thinker上下文；初值来自`DEFAULT_TIMEZONE`（未配置时UTC）。`DEFAULT_LOCATION`与`DEFAULT_LOCATION_COUNTRY`设置用户提供的默认位置，未配置时不猜地点。每次Talker请求在历史之后的会话快照中注入`current_location:{name,country,source:user_setting}`（未知时null）、同一时刻的`current_utc/current_local/current_date/timezone`，当地时间由IANA时区转换并处理夏令时。用户提供的位置设置也作为地点参数的来源；后台任务保留位置来源与登记时车况，Thinker仍使用执行时的UTC时间和任务时区。固定prompt前缀和工具集保持稳定，不新增模型调用。
 
 限时收尾使用快速模型并保持中性表达；其临时`finish_task` schema只接收`source_ids`，从本任务实际读取/验证的来源账本中选择。服务端将ID映射成真实URL并附到阅读报告，模型不需要拼接网址，原有来源校验继续执行。原始模型ID参数、解析后的URL参数、工具回执均进入trace。收尾调用不再启动搜索，也不因校验失败反复调用模型；校验失败使用`finalization_failed`友好说明，保留已取得资料。
 
@@ -221,7 +212,7 @@ Talker跨轮保持固定23个工具；Pro加载仅在该委托上下文保留。
 
 `session.snapshot.speaker`和`speaker.changed.speaker`包含`seat/audio_zone/display_name/default_targets/control_defaults`。模拟会话默认主驾（可用`DEFAULT_SPEAKER_SEAT`配置上述四个值之一），前端“当前音区”可切换。当前原型没有麦克风声源定位，座位来自会话设置；集成方可在`input`事件携带`speaker_seat`，只覆盖本轮，不改变会话默认值。非法值在启动轮次前拒绝。
 
-每轮开始固定speaker并写入`turn.started`轨迹。Talker将其放在历史之后、本轮输入之前的system会话快照；Vehicle Planner另有动态system音区消息，用户原话不重写；后台任务保存登记轮次音区，Thinker也以system数据接收。人设不改变音区或默认目标，工具集仍固定23个。
+每轮开始固定speaker并写入`turn.started`轨迹。Talker将其放在历史之后、本轮输入之前的system会话快照；Vehicle Planner另有动态system音区消息，用户原话不重写；后台任务保存登记轮次音区，Thinker也以system数据接收。人设不改变音区或默认目标，Talker工具集仍固定26个。
 
 | 音区 | 座椅 / 车窗 / 车门 / 阅读灯 | 温区 | 车内照明 | 后视镜侧 |
 | --- | --- | --- | --- | --- |

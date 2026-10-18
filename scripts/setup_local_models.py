@@ -1,6 +1,6 @@
 """Download the selected Silero model, then verify offline inference."""
 if __name__ == "__main__":
-    from backend.local_environment import load_local_environment
+    from super_xd.demo.environment import load_local_environment
     load_local_environment()
 
 import hashlib
@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from urllib.request import urlopen
 
-from backend.vad import MODEL_PATH, SileroVAD
+from super_xd.demo.audio.vad import MODEL_PATH, SileroVAD
 
 VAD_URL = 'https://raw.githubusercontent.com/snakers4/silero-vad/v5.1.2/src/silero_vad/data/silero_vad.onnx'
 

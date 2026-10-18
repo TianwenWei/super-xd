@@ -7,9 +7,10 @@ Replay keeps the captured model/options, selecting credentials and endpoints
 from the current service configuration. It never substitutes a role's model.
 """
 from __future__ import annotations
+from super_xd.nlp.contracts.providers import ModelRequest
 
 if __name__ == "__main__":
-    from backend.local_environment import load_local_environment
+    from super_xd.demo.environment import load_local_environment
     load_local_environment()
 
 import argparse
@@ -45,15 +46,18 @@ def model_role(case_role):
 
 
 def import_runtime():
-    return SimpleNamespace(task_runner=importlib.import_module('backend.harness.task_runner'),
-                           gateway=importlib.import_module('backend.harness.gateway'),
-                           wire=importlib.import_module('backend.harness.gateway_contracts'),
-                           policy=importlib.import_module('backend.harness.product_policy'),
-                           fixtures=importlib.import_module('backend.demo.vehicle_simulator'),
-                           resources=importlib.import_module('backend.demo.resources'),
-                           local_gateway=importlib.import_module('backend.demo.local_gateway'),
-                           **{name: importlib.import_module(f'backend.{name}') for name in
-                              ('catalog', 'persona', 'models', 'settings')})
+    return SimpleNamespace(task_runner=importlib.import_module('super_xd.nlp.orchestration.tasks.runner'),
+                           research=importlib.import_module('super_xd.nlp.prompts.research'),
+                           gateway=importlib.import_module('super_xd.nlp.orchestration.gateway'),
+                           wire=importlib.import_module('super_xd.nlp.contracts.gateway_v1'),
+                           policy=importlib.import_module('super_xd.nlp.policy.product'),
+                           fixtures=importlib.import_module('super_xd.demo.devices.simulator'),
+                           resources=importlib.import_module('super_xd.demo.resources.runtime'),
+                           local_gateway=importlib.import_module('super_xd.demo.gateway'),
+                           catalog=importlib.import_module('super_xd.nlp.catalog.vehicle'),
+                           persona=importlib.import_module('super_xd.nlp.prompts.persona'),
+                           models=importlib.import_module('super_xd.nlp.adapters.models.service'),
+                           settings=importlib.import_module('super_xd.nlp.defaults'))
 
 
 class CaptureOnlyModel:
@@ -129,7 +133,7 @@ async def capture_case(runtime, case, fixed_time):
                 'context': {'query_mode': mode, 'query_domain': 'weather' if mode == 'quick' else 'general'}}
         instance = object.__new__(task_runner.TaskRunner)
         messages = instance._messages(task, current_utc=fixed_time)
-        tools = deepcopy(task_runner.QUICK_TOOLS if mode == 'quick' else task_runner.THINKER_TOOLS)
+        tools = deepcopy(runtime.research.QUICK_TOOLS if mode == 'quick' else runtime.research.THINKER_TOOLS)
         if mode == 'quick':
             tools = [item for item in tools if item['function']['name'] in {'get_weather_forecast', 'ask_clarification'}]
         return {'messages': messages, 'tools': tools, 'thinker': mode == 'research',
@@ -144,7 +148,7 @@ async def capture_case(runtime, case, fixed_time):
 
 
 async def capture(args):
-    from backend.services.config import load_services_config, resolved
+    from super_xd.nlp.config.services import load_services_config, resolved
     suite = json.loads(Path(args.cases).read_text())
     runtime = import_runtime()
     config = load_services_config()
@@ -222,7 +226,7 @@ def compare_captures(before, after, examples):
 
 
 def compare(args):
-    from backend.prompt_templates import load_examples
+    from super_xd.nlp.prompts.templates import load_examples
     before, after = (json.loads(Path(path).read_text()) for path in (args.before, args.after))
     report = compare_captures(before, after, load_examples())
     report['inputs'] = {'before': args.before, 'after': args.after}
@@ -289,7 +293,7 @@ def structural_check(case, message, tools):
 
 def replay_request(llm, request, case_role):
     """Use the captured experiment exactly, without production role overrides."""
-    from backend.services.contracts import LLMRequest
+    from super_xd.nlp.contracts.providers import ModelRequest
     supported = {'messages', 'tools', 'thinker', 'stream', 'model', 'max_tokens', 'temperature', 'thinking', 'tool_choice'}
     if request.keys() - supported:
         raise ValueError('Capture contains unsupported model request options')
@@ -307,16 +311,16 @@ def replay_request(llm, request, case_role):
     settings = llm.config.document['llm']['profiles'][profile]
     if thinking['type'] == 'enabled' and settings['provider'] == 'openai_compatible' and not settings.get('reasoning_field'):
         raise ValueError('Selected provider cannot represent captured enabled reasoning')
-    exact = LLMRequest(request['messages'], request['tools'], role, request['model'],
+    exact = ModelRequest(request['messages'], request['tools'], role, request['model'],
                        thinking['type'] == 'enabled', request['max_tokens'], request.get('tool_choice'))
     return llm.providers[profile], exact, {'profile': profile, 'provider': settings['provider'],
                                          'model': exact.model, 'role': role}
 
 
 async def replay(args):
-    from backend.models import sanitized_error
-    from backend.services.factory import create_llm
-    from backend.services.contracts import redact
+    from super_xd.nlp.adapters.common import sanitized_error
+    from super_xd.nlp.adapters.factory import create_llm
+    from super_xd.nlp.contracts.providers import redact
     if type(args.concurrency) is not int or args.concurrency <= 0:
         raise ValueError('Replay concurrency must be a positive integer')
     source = Path(args.input)

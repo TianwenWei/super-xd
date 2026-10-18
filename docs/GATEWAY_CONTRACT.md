@@ -1,6 +1,6 @@
 # NLP / Gateway V1契约
 
-这是本项目实现的目标集成契约，尚未经外部Gateway团队确认。wire模型位于`backend/harness/gateway_contracts.py`，内部运行数据在`contracts.py`、策略/诊断端口在`ports.py`，后台请求与任务账本协议在`background.py`、`task_transport.py`；HTTP入口位于`backend/nlp_app.py`。`gateway-v1`是业务协议版本。未知字段、错误类型、非有限数值、无时区时间戳均拒绝。
+这是本项目实现的目标集成契约，尚未经外部Gateway团队确认。以下路径均相对于 `src/super_xd/nlp/`：wire 模型位于 `contracts/gateway_v1.py`，内部运行数据在 `contracts/run.py`，策略/诊断端口在 `orchestration/ports.py`，后台请求在 `contracts/tasks.py`，任务账本端口与 HTTP 适配分别在 `orchestration/tasks/ports.py` 和 `adapters/gateway/tasks.py`；HTTP 入口位于 `api/app.py`。`gateway-v1` 是业务协议版本。未知字段、错误类型、非有限数值、无时区时间戳均拒绝。
 
 ## 导出可对接的Schema
 
@@ -8,7 +8,7 @@
 .venv/bin/python -m scripts.export_gateway_contract --out data/contracts/gateway-v1
 ```
 
-脚本直接从生产Pydantic模型导出9份独立Draft2020-12 JSON Schema，并逐份校验；不加载配置、凭证或供应商实例。生成物保存在忽略的data目录，不提交Git，可提供给Gateway团队生成客户端/执行契约测试。业务约束与错误/恢复语义仍以本文和实际实现为准。
+脚本直接从生产Pydantic模型导出14份独立Draft2020-12 JSON Schema（运行接口、任务快照/交付请求及通知仲裁数据），并逐份校验；不加载配置、凭证或供应商实例。生成物保存在忽略的data目录，不提交Git，可提供给Gateway团队生成客户端/执行契约测试。业务约束与错误/恢复语义仍以本文和实际实现为准。
 
 ## 所有权
 
@@ -20,7 +20,7 @@ Gateway提供原话与事实，不提交system prompt、工具schema或模型参
 
 ## HTTP入口
 
-启动：`.venv/bin/python -m uvicorn backend.nlp_app:configured_app --factory --port 8001`。必填`NLP_GATEWAY_URL`指向下文账本/诊断协议；模型与检索服务仍使用`config/services.toml`。
+启动：`.venv/bin/python -m uvicorn super_xd.nlp.api.app:configured_app --factory --port 8001`。必填`NLP_GATEWAY_URL`指向下文账本/诊断协议；模型与检索服务仍使用`config/services.toml`。
 
 | 方法/路径 | 请求 | 响应 |
 | --- | --- | --- |
@@ -58,11 +58,11 @@ Gateway提供原话与事实，不提交system prompt、工具schema或模型参
 
 `context`包含整体revision/observed_at，独立版本的vehicle与capabilities，environment（IANA timezone、带来源location），cockpit领域状态，以及带来源的tasks/places/media。run/task/conversation等通用标识最大128字符，place_ref最大300字符，媒体content_id最大500字符；带时区时间遵循ISO8601。能力列表最多128行，可包含前台Planner使用的非热车控，不因此扩大Talker固定26工具。NLP给Talker的模型副本只展开常驻工具的声明，冷车控按skill列出available/unavailable/missing名称及可用数；完整StartRequest声明仍用于前台动作校验，压缩不授予新能力。
 
-工具能力显式区分`operation=query/control`、`execution_location=cloud/device`、`action`和`content_kind`。部署binding与能力事实必须同时匹配；缺能力不静默改执行位置。媒体/导航状态需要非负version；其字段契约沿用`backend/cockpit/controller.py`的真实状态/回执校验。
+工具能力显式区分`operation=query/control`、`execution_location=cloud/device`、`action`和`content_kind`。部署binding与能力事实必须同时匹配；缺能力不静默改执行位置。媒体/导航状态需要非负version；其字段契约沿用`src/super_xd/nlp/policy/cockpit.py`的真实状态/回执校验。
 
 历史原生工具组须闭合；最后未完组可标记`pending_tool_group`，编译时剔除。主动任务历史带`source_task`。assistant消息保留完整生成内容；`playback_status=unknown/not_started/partial/completed`与`heard_text`独立描述实际播放，默认unknown，not_started不能带非空heard_text。打断另带`interrupted_playback`。模型可用完整生成内容理解追问，但不能把未播出的全文当作已听；未知反馈也不能将答案替换为空。POI必须保留provider、source_turn_id、presented_to_user；本轮刚搜到的POI不视为用户选择。媒体ID来源于真实目录/本轮已接受的目录回执，不能来自模型编造URL。
 
-历史工具调用可带`extra_content`对象（单个最多64 KiB），原样保存模型返回的续推元数据，例如Gemini的`google.thought_signature`。Gateway从可信模型transcript持久化并回传，不能生成、拼接、截断或改写签名；该字段不授予工具权限，也不送入设备执行参数。同一run的checkpoint及后续模型请求同样保留原值；更换模型策略必须启动新run。
+历史工具调用可带`extra_content`对象（单个最多64 KiB）；assistant记录另可带`provider_metadata={"extra_content": {...}}`（整个provider_metadata最多64 KiB，仅允许extra_content对象），用于保存供应商顶层续推数据。两者原样保存模型返回的续推元数据，例如Gemini的`google.thought_signature`。Gateway从可信模型transcript持久化并回传，不能生成、拼接、截断或改写签名；该字段不授予工具权限，也不送入设备执行参数。同一run的checkpoint及后续模型请求同样保留原值；更换模型策略必须启动新run。
 
 发生新的用户输入、说话位置或会影响决策的上下文变更时，终止旧决策，使用新身份与新context revision启动新run。resume不能替换原话、上下文或版本。迟到回执只用于审计/刷新下一轮事实，不能重贴新identity后注入新run。
 
@@ -82,7 +82,7 @@ Gateway提供原话与事实，不提交system prompt、工具schema或模型参
 
 每条request保留`invocation_id/tool_call_id/name/arguments/idempotency_key`；`dispatch`包含操作/位置、领域、`execution_arguments`、`prepared_command`和`depends_on`。原始模型参数用于审计，归一化执行参数与命令准备单独表示，不能悄悄篡改模型历史。内容ID解析、真实播放URL及厂商命令编码由对应执行适配器完成。
 
-NLP内部执行`delegate_vehicle_control/delegate_task/manage_task`：前台Planner产出并校验计划后，只释放真实设备动作；TaskService收到Gateway登记确认后才返回registered。不是把NLP调度请求交给外部重新实现。后台运行由独立任务执行接口推进。
+NLP内部执行`delegate_vehicle_control/delegate_task/manage_task`：前台Planner产出并校验计划后，只释放真实设备动作；TaskService收到Gateway登记确认后才返回registered。登记ACK确认后TaskCommit保持confirmed，后续前台等待/交付失败以`task_delivery_unconfirmed`单独报告，不能改成unknown登记或自动新建任务。不是把NLP调度请求交给外部重新实现。后台运行由独立任务执行接口推进。
 
 前台计划逐项推进；复合媒体/导航按依赖等待实际回执后重新准备。同组独立工具可一起交接。前一步失败、未知或缺少必需真实车况时，不能按模拟expected继续。纯控制/登记成功采用回执完成路径，避免额外模型调用；查询与需要解释的失败按真实结果继续推理。
 
@@ -100,7 +100,7 @@ NLP内部执行`delegate_vehicle_control/delegate_task/manage_task`：前台Plan
 
 业务协议仍为`gateway-v1`，运行wire checkpoint为`run.checkpoint_version=2`。它包含原StartRequest、本轮新生成消息（不重复固定prompt/schema/history前缀）、预算/sequence、子计划与回执账本。`prepared_digest`绑定完整编译结果；恢复时用原StartRequest与同版本编译器重建前缀并校验摘要，改动原话、事实或工具定义都会拒绝。子编排车况按领域保存相对初始车况的差量。旧checkpoint_version=1不自动迁移。
 
-checkpoint另绑定三个版本：源码+prompt的`release_id`、实际模型、任务预算及检索提供商配置的`model_policy_id`、业务bindings的`semantic_policy_id`。生产组合根在启动时解析并冻结上述配置、计算版本，任一变化拒绝继续旧checkpoint；部署升级应保留旧版本完成/取消或启动新run，不自动迁移。
+checkpoint另绑定三个版本：源码+prompt的`release_id`、实际模型、任务预算、前台软等待期限及检索提供商配置的`model_policy_id`、业务bindings的`semantic_policy_id`。生产组合根在启动时解析并冻结上述配置、计算版本，任一变化拒绝继续旧checkpoint；部署升级应保留旧版本完成/取消或启动新run，不自动迁移。
 
 checkpoint只允许Gateway可信服务器存储回传，不能发给终端UI。内部包含完整上下文。一致性校验不等于数字签名，不能证明任意客户端构造的数据真实性。
 
@@ -124,26 +124,39 @@ NLP以POST调用`NLP_GATEWAY_URL`，不自动重试写入。若设置`NLP_GATEWA
 | --- | --- | --- |
 | read | 无 | `{task: snapshot或null}` |
 | refresh | 无 | `{task: snapshot或null}`，原子应用待处理更新并核对执行租约 |
-| create | goal、context、idempotency_key | `{task: snapshot}`，稳定task_id，初始revision=1；重复相同请求返回同一注册记录 |
+| create | goal、context、delivery_mode=foreground/background、idempotency_key | `{task: snapshot}`，稳定task_id，初始revision=1；重复相同请求返回同一注册记录 |
+| delivery-mode | expected_revision、expected_delivery_mode=foreground、delivery_mode=background、idempotency_key | `{task: snapshot}`；仅变更交付模式，原revision及执行租约保持 |
 | mutate | expected_revision、action=reply/update/cancel、text、idempotency_key | `{task: snapshot}`；reply/update正文不能为空 |
 | save | expected_revision、fields | `{applied: bool}`；状态、checkpoint、events原子提交，须有效租约 |
 | expire | max_age_seconds | `{accepted:true}`；按已累积实际时长/澄清规则原子过期 |
 | notify-progress | 无 | `{applied:bool}`；只生成符合阶段与去重规则的进度事件 |
 | usage | 无 | `{execution_seconds:非负数,lookup_count:非负整数}` |
 
-snapshot至少包括`id/session_id/goal/revision/status/deadline_at`。执行字段含`running_seconds/running_since/constraints/context/steps/checkpoint/sources/transcript`，保留JSON型业务字段。`session_id`必须等于conversation_id，id必须等于路径task_id；时间显式带时区。context保留登记时的release_id/model_policy_id及输入事实，Gateway不可自行替换推理版本。
+snapshot至少包括`id/session_id/goal/revision/status/deadline_at`，另有`delivery_mode=foreground/background`（旧快照未提供时按background读取）。执行字段含`running_seconds/running_since/constraints/context/steps/checkpoint/sources/transcript`，保留JSON型业务字段。`session_id`必须等于conversation_id，id必须等于路径task_id；时间显式带时区。context保留登记时的release_id/model_policy_id及输入事实，Gateway不可自行替换推理版本。
 
 Gateway拥有任务计时与状态规则：排队时间计入60秒上限，澄清暂停；回复后正确恢复剩余时间；同一revision只能有一个有效执行租约。reply/update/cancel成功提交均返回expected_revision+1；reply/update进入queued，cancel进入cancelling/cancelled并使旧执行写入失效；状态与事件同事务提交。执行中撤销/过期租约必须让refresh/save拒绝，不能只在execute入口检查一次。
+
+`delivery-mode`在非执行scope下调用，execution_id/lease_token为null，不是获取或撤销执行租约的操作。Gateway验证会话所属、expected_revision和预期交付模式，原子修改delivery_mode、记录delivery_changed事件及幂等结果；与checkpoint保存串行化，但不得清空/回退当前checkpoint。状态、revision、执行者、租约、steps、累计运行时间与证据均保持。相同幂等键/请求返回同一结果；不同请求复用键应冲突。已经background可幂等返回；已取消/正在取消保持取消状态。失败或响应未知不允许自动换键重试。
+
+`TaskDeliveryRequest={conversation_id,task_id,expected_revision,idempotency_key}`是NLP内部交付方法的数据契约，对应上述Gateway账本操作，不新增`/v1/tasks` HTTP路由。前台等待默认8秒，等待到期或断线时尝试解除前台交付；已持租约的原执行者继续任务。Gateway仍需独立调度`execute`，本项目不通过该操作实施跨worker租约迁移。completed与切换可能竞争，Gateway须保留实际完成快照，并保证结果通过前台或后续事件获得交付。
 
 `TaskExecutionRequest`要求conversation_id、task_id、revision、execution_id、lease_token、release_id、model_policy_id。NLP重新读取真实任务后执行；返回requested_revision、stale及最新任务快照。Gateway应先取得有效租约，断线后先核对任务和租约再恢复，不能并发启动同一revision的两个执行者。
 
 `TaskMutationRequest`要求conversation_id、task_id、expected_revision、action、text、idempotency_key。外部用户权限由Gateway判断，NLP核对任务和版本后写入。所有成功响应代表实际账本已提交，不能先ACK再异步保存。
 
-`TaskPresentationRequest={conversation_id,task_id,revision,expected_status,persona_id}`用于后台回流。NLP读取真实任务后核对版本/状态；不匹配返回stale且无speech/card，匹配则返回稳定event_key、kind、speech与card。表达复用既有话术与人设，不额外调用模型。Gateway以event_key去重，并在播放前再次核对当前任务/对话版本。建议动作仅作参考，要执行须在新的用户授权run中重新校验。
+`TaskPresentationRequest={conversation_id,task_id,revision,expected_status,persona_id}`用于后台回流。NLP读取真实任务后核对版本/状态；不匹配返回stale且无speech/card，匹配则返回稳定event_key、kind、speech与card。前后台表达共用task_presentation，按context.read_details选口语摘要或格式清理后的全文，再应用表达层人设，不额外调用模型。Gateway以event_key去重，并在播放前再次核对当前任务/对话版本。建议动作仅作参考，要执行须在新的用户授权run中重新校验。
+
+## 通知仲裁
+
+导出的`TaskNotice`包含event_id/task_id/revision/status/kind/priority/created_at/expires_at；时间必须显式带时区。`SpeakingContext`包含connected、user_speaking、assistant_speaking、generating、in_call、demanding_driving事实。`PresentationDecision`为`speak/defer/screen_only/drop`及reason；这是纯策略数据契约，当前没有独立HTTP仲裁路由。
+
+生产Gateway持有队列、真实注意力事实、去重和交付状态。过期/旧版本通知丢弃，普通progress只更新界面；对话忙、断线、通话和繁忙驾驶时延后，澄清优先。Demo提供同规则的actor队列，普通结果有效期10分钟、澄清使用clarification_expires_at（执行deadline_at在澄清时暂停），重复事件不延长有效期。展示数据读取失败按0.25秒至15秒退避且不超过通知有效期；已交付/过期/过时通知的迟到回调不能触发新播报。实际播放前仍须核对任务与对话版本；模型生成文字不证明用户已经听到。
 
 ## 诊断
 
 普通运行诊断POST `/internal/nlp/diagnostics`，body为`{records:[DiagnosticRecord,...],idempotency_key}`。idempotency_key为脱敏后整批内容的稳定哈希，Gateway原子持久化整批后返回`{accepted:true}`，重复批次不能重复记账。增量文字在单次运行内临时批量缓冲，模型完成、挂起/终态和流关闭前提交，避免每个token同步一次HTTP。任务诊断POST `/internal/nlp/conversations/{conversation_id}/traces`。诊断包括模型输入输出/元信息、工具交接、回执、任务阶段；不得向终端展示原始内容。
+
+车控规划的完整模型观察、技能加载资料和中间事件记录为`DiagnosticRecord(kind="orchestration.event")`，不属于`VehiclePlan`业务字段。计划、工具结果和checkpoint不得携带`model_observations/load_evidence/trace_events`诊断副本；预算计数、来源、校验与动作账本仍完整保存，业务结果不能因诊断体积而被截断。
 
 任务trace body为共同scope字段加`record={kind,data,...}`，响应`{accepted:true}`。usage需在相关trace确认后可见，防止恢复时重置quick查询预算。Gateway负责trace幂等、存储和读取权限。
 

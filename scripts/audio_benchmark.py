@@ -5,7 +5,7 @@ manifest metadata may label each client_request_id with scenario_id/sample_phase
 Missing observations and failed attempts remain in the acceptance denominator.
 """
 if __name__ == "__main__":
-    from backend.local_environment import load_local_environment
+    from super_xd.demo.environment import load_local_environment
     load_local_environment()
 
 import argparse
@@ -77,7 +77,7 @@ def plan(repeats=2, target_ms=TARGET_MS):
             f'Capture every submitted attempt, including failures, cancellation, missing audio and >{target_ms:g}ms.',
             'First nonzero PCM arrival uses the same-page performance.now clock as form submission.',
             'Report Worklet first nonzero render observation separately; it is not acoustic onset.',
-            'Vehicle audio must follow the successful same-turn executor receipt; delegation must be registered.',
+            'Completion claims must follow the same-turn receipt or task registration. Earlier progress speech needs an explicit transcript review.',
             'No static audio, placeholder speech, silent warm-up packets or provider-only clocks count.',
         ],
     }
@@ -94,6 +94,19 @@ def unpack(payload):
     return records, {k: v for k, v in payload.items() if k not in {'records', 'measurements'}}
 
 
+def reviewed_progress(record, before_ms):
+    """Offline human/model review supplies semantics; code only checks its binding."""
+    review = record.get('pre_receipt_speech_review')
+    if not isinstance(review, dict):
+        return False
+    return (review.get('status') == 'reviewed' and review.get('kind') == 'progress'
+            and review.get('turn_id') == record.get('turn_id')
+            and review.get('reviewer') in {'human', 'model'}
+            and isinstance(review.get('text'), str) and bool(review['text'].strip())
+            and review.get('text') == record.get('pre_receipt_spoken_text')
+            and number(review.get('through_perf_ms')) and review['through_perf_ms'] >= before_ms)
+
+
 def semantic_errors(record, scenario, first_audio, evidence=()):
     if not scenario:
         return ['unknown_scenario_semantics_not_verified']
@@ -108,7 +121,8 @@ def semantic_errors(record, scenario, first_audio, evidence=()):
         registered = record.get('task_registered_perf_ms')
         if not task_ids:
             errors.append('missing_registered_task')
-        if not number(registered) or not number(first_audio) or registered > first_audio:
+        if (not number(registered) or not number(first_audio)
+                or registered > first_audio and not reviewed_progress(record, registered)):
             errors.append('task_registration_not_observed_before_audio')
         if receipts:
             errors.append('unexpected_vehicle_action')
@@ -154,8 +168,12 @@ def semantic_errors(record, scenario, first_audio, evidence=()):
             if receipt.get('turn_id') != record.get('turn_id'):
                 errors.append('vehicle_receipt_wrong_turn')
             received = receipt.get('received_perf_ms')
-            if not number(received) or not number(first_audio) or received > first_audio:
+            if (not number(received) or not number(first_audio)
+                    or received > first_audio and not reviewed_progress(record, received)):
                 errors.append('vehicle_receipt_not_observed_before_audio')
+            completed = record.get('completion_claim_perf_ms')
+            if completed is not None and (not number(completed) or not number(received) or completed < received):
+                errors.append('completion_claim_before_vehicle_receipt')
             # Receipt state validates the executed value, not just the ACK.
             state = result.get('state') if isinstance(result, dict) else None
             if scenario['scenario_id'] == 'temperature':

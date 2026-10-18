@@ -3,18 +3,19 @@
 Uses the existing synthetic Xiaohe fixture, never the physical microphone.
 """
 if __name__ == "__main__":
-    from backend.local_environment import load_local_environment
+    from super_xd.demo.environment import load_local_environment
     load_local_environment()
 
 import argparse
 import asyncio
+from scripts.reports import report_path, write_report
 from datetime import datetime, timezone
 import json
 from pathlib import Path
 import tempfile
 import time
 
-from backend.vad import FRAME_BYTES, SileroVAD, SpeechGate, vad_info
+from super_xd.demo.audio.vad import FRAME_BYTES, SileroVAD, SpeechGate, vad_info
 
 
 def measure(pcm):
@@ -42,9 +43,9 @@ def measure(pcm):
 
 async def live(pcm, output):
     from contextlib import AsyncExitStack
-    from backend.services.audio import build_asr, build_tts
-    from backend.services.config import load_services_config
-    from backend.services.factory import create_llm, resolved_profile
+    from super_xd.demo.audio.providers import build_asr, build_tts
+    from super_xd.nlp.config.services import load_services_config
+    from super_xd.nlp.adapters.factory import create_llm, resolved_profile
 
     config = load_services_config()
     if any(config.profile(domain)['provider'] != 'volcengine' for domain in ('asr', 'tts')):
@@ -62,9 +63,9 @@ async def live(pcm, output):
 
 
 async def probe_live(pcm, output, ark, asr, tts, config):
-    from backend.db import Database
-    from backend.handsfree_endpoint import listen_socket
-    from backend.session import SessionActor
+    from super_xd.demo.tasks.database import Database
+    from super_xd.demo.audio.handsfree_endpoint import listen_socket
+    from super_xd.demo.session.actor import SessionActor
 
     report = {'physical_microphone_tested': False, 'browser_aec_tested': False,
               'events': [], 'first_reply_pcm': False, 'reply_interrupted': False,
@@ -159,7 +160,7 @@ async def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--fixture', default='data/asr-chinese-probe.pcm')
     parser.add_argument('--live', action='store_true')
-    parser.add_argument('--out', default='data/local-vad-probe.json')
+    parser.add_argument('--out', type=Path, default=report_path('local-vad-probe'))
     args = parser.parse_args()
     pcm, output = Path(args.fixture).read_bytes(), Path(args.out)
     report = {'started_at': datetime.now(timezone.utc).isoformat(), 'vad': vad_info(),
@@ -167,8 +168,7 @@ async def main():
               'inference': await asyncio.to_thread(measure, pcm)}
     if args.live:
         report['live'] = await live(pcm, output)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
+    write_report(report, output)
     print(json.dumps(report, ensure_ascii=False, indent=2))
     if not report['inference']['ok'] or (args.live and not report['live']['ok']):
         raise SystemExit(1)

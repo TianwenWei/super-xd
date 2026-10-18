@@ -54,16 +54,6 @@ const dependencyModules = {
       getMetrics() { return undefined; }
     }
   `),
-  './StreamingRecognition': moduleUrl(`${runtimeAccess}
-    export class StreamingRecognition {
-      active = false; cancellations = [];
-      constructor(callbacks) { this.callbacks = callbacks; runtime().recognition = this; }
-      isCurrent() { return false; }
-      cancel(reason) { this.cancellations.push(reason); }
-      markSubmitted() {}
-      dispose() {}
-    }
-  `),
   './HandsFreeRecognition': moduleUrl(`${runtimeAccess}
     export class HandsFreeRecognition {
       active = false; starts = []; cancellations = []; discards = []; submissions = []; captureId = '';
@@ -96,10 +86,6 @@ const dependencyModules = {
       dispose() { this.cancel('disposed'); }
     }
     function assertActive(engine) { if (!engine.active) throw new Error('The test microphone was not started.'); }
-  `),
-  './requestViews': moduleUrl(`
-    export const groupRequestTasks = (_requests, tasks) => ({ ungrouped: tasks });
-    export const mergeRequest = (current, next) => [...current.filter(item => item.request_id !== next.request_id), next];
   `),
   './DeviceQueries': moduleUrl(`${runtimeAccess}
     export class DeviceQueryRegistry {

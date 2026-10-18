@@ -22,8 +22,20 @@ local-vad = ["numpy>=2,<3", "onnxruntime>=1.20,<2"]
 [dependency-groups]
 dev = ["pytest>=8,<10", "pytest-asyncio>=0.25,<2", "mypy>=1.15,<2", "ruff>=0.14,<1"]
 
-[tool.uv]
-package = false
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/super_xd"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"prompts" = "super_xd/resources/prompts"
+"config/services.toml" = "super_xd/resources/config/services.toml"
+"config/regions.toml" = "super_xd/resources/config/regions.toml"
+
+[tool.hatch.build.targets.sdist]
+include = ["src/super_xd", "prompts", "config/services.toml", "config/regions.toml", "pyproject.toml", "README.md"]
 
 [tool.ruff]
 target-version = "py312"
@@ -33,7 +45,7 @@ select = ["E9", "F821", "F822", "F823"]
 
 [tool.mypy]
 python_version = "3.12"
-files = ["backend/nlp_settings.py", "backend/harness/observability.py", "backend/harness/model_execution.py", "backend/local_environment.py", "backend/harness/contracts.py", "backend/harness/gateway_contracts.py"]
+files = ["src/super_xd/nlp/settings.py", "src/super_xd/nlp/observability.py", "src/super_xd/nlp/engine/models.py", "src/super_xd/demo/environment.py", "src/super_xd/nlp/contracts"]
 follow_imports = "silent"
 check_untyped_defs = true
 disallow_untyped_defs = true
@@ -44,5 +56,5 @@ no_implicit_optional = true
 # Existing contracts are checked, including typed function bodies; annotation
 # completeness is tightened incrementally rather than hiding their type errors.
 [[tool.mypy.overrides]]
-module = ["backend.harness.contracts", "backend.harness.gateway_contracts"]
+module = ["super_xd.nlp.contracts.run", "super_xd.nlp.contracts.gateway_v1"]
 disallow_untyped_defs = false

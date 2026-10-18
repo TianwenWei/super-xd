@@ -26,7 +26,7 @@ flowchart LR
 
 音乐、视频、电台是三个独立内容来源，可以共用端侧播放器控制协议。曲库、账户和授权仍分别绑定。车书也是独立资源接口：本地 RAG 是一个实现，embedding 是它的内部依赖。
 
-`backend/services/contracts.py` 定义契约，`factory.py` 在进程启动时装配共享客户端并注入业务。`GET /api/services` 返回实际配置、能力和执行位置；`configured` 只表示配置齐全，不等于外部账号、API 开通或服务连通已验证。提供商数量不会增加模型工具数量，Talker 固定为26个工具。
+`src/super_xd/nlp/contracts/providers.py` 定义契约，`src/super_xd/nlp/adapters/factory.py` 创建生产客户端；Demo 的完整服务集合由 `src/super_xd/demo/assembly.py` 装配并注入业务。Demo 的 `GET /api/services` 返回实际配置、能力和执行位置；`configured` 只表示配置齐全，不等于外部账号、API 开通或服务连通已验证。提供商数量不会增加模型工具数量，Talker 固定为26个工具。
 
 ## 已实现的适配器
 
@@ -51,7 +51,7 @@ HTTP 网关是本项目定义的适配协议，需要你方网关转换实际 CP
 
 ### 地区预设
 
-启动前设置 `SERVICE_REGION=europe` 或 `SERVICE_REGION=china`，由 `config/regions.toml` 一次性绑定四个模型角色与 ASR/TTS。没有 IP 自动识别，也没有请求失败后的跨地区切换。仓库未设置该变量时仍使用 `services.toml` 的显式绑定（基础配置为火山 LLM/ASR/TTS）；本机 `.env` 选择欧洲只影响该本地部署，不改变仓库默认值。
+启动前设置 `SERVICE_REGION=europe` 或 `SERVICE_REGION=china`，由 `config/regions.toml` 一次性绑定四个模型角色与 ASR/TTS。没有 IP 自动识别，也没有请求失败后的跨地区切换。仓库未设置该变量时仍使用 `services.toml` 的显式绑定（基础配置为火山 LLM/ASR/TTS）。
 
 | `SERVICE_REGION` | Talker / Finalizer | Planner / Thinker | ASR | TTS |
 | --- | --- | --- | --- | --- |
@@ -137,7 +137,7 @@ radio = "radio_gateway"
 | 车书 | `/v1/manual/search` | `{query,max_results}` |
 | 各媒体 CP | `/v1/media/search`、`/v1/media/resolve` | `{kind,query,max_results}`、`{content_id}` |
 
-搜索/正文响应含 `results:[{url,title?,content?,raw_content?}]`；地点含 `places:[{place_id,name,location:{latitude,longitude},...}]`。天气和路线必须提供真实测量、日期、时区、单位及来源。完整字段校验见 `backend/services/reads.py`、`routes.py` 和契约测试；车书见 [独立车书接口](MANUAL_PROVIDERS.md)。成功路线查询不代表导航已启动。
+搜索/正文响应含 `results:[{url,title?,content?,raw_content?}]`；地点含 `places:[{place_id,name,location:{latitude,longitude},...}]`。天气和路线必须提供真实测量、日期、时区、单位及来源。完整字段校验见 `src/super_xd/nlp/adapters/reads/services.py`、`routes.py` 和契约测试；车书见 [独立车书接口](MANUAL_PROVIDERS.md)。成功路线查询不代表导航已启动。
 
 ## 运行与验证
 

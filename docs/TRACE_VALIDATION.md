@@ -21,7 +21,7 @@ Talker首帧以真实PCM为准：`server_first_audio_ms` / `server_first_nonzero
 - Demo分页游标跨页无遗漏/重复；筛选不串会话，长内容能完整展开/复制，增量记录不强制改变阅读位置。
 
 ```sh
-.venv/bin/python -m pytest -q tests/test_traces.py tests/test_gateway_diagnostics.py tests/test_gateway_recovery.py
+.venv/bin/python -m pytest -q tests/demo/test_traces.py tests/nlp/test_gateway_diagnostics.py tests/nlp/test_gateway_recovery.py
 ```
 
 生成的完整trace和截图放在忽略的 `data/validation/`，不提交Git。报告记录版本、样本身份、检查项和失败理由，不宣称旧历史是当前已验收结果。

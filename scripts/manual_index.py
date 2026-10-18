@@ -1,6 +1,6 @@
 """Standalone single-manual SQLite vector index; no changes to actor routing."""
 if __name__ == "__main__":
-    from backend.local_environment import load_local_environment
+    from super_xd.demo.environment import load_local_environment
     load_local_environment()
 
 import argparse
@@ -14,10 +14,10 @@ import time
 import numpy as np
 from pypdf import PdfReader
 
-from backend.services.factory import create_embedding_provider
-from backend.prompt_templates import load_prompt
-from backend.manual_search import load_index
-from backend.settings import ROOT
+from super_xd.demo.assembly import create_embedding_provider
+from super_xd.nlp.prompts.templates import load_prompt
+from super_xd.demo.resources.manual_search import load_index
+from super_xd.demo.settings import ROOT
 
 DEFAULT_PDF = ROOT / 'output/pdf/腾势D9用户手册-中文右舵版.pdf'
 DEFAULT_DB = ROOT / 'data/manuals/denza_d9.sqlite3'

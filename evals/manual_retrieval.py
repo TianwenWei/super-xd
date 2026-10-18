@@ -1,6 +1,7 @@
 """Grade manual retrieval by source page IDs, never by generated answer text."""
 import argparse
 import asyncio
+from scripts.reports import report_path, write_report
 from contextlib import redirect_stdout
 import io
 import json
@@ -8,7 +9,7 @@ from pathlib import Path
 from statistics import median
 from types import SimpleNamespace
 
-from backend.settings import ROOT
+from super_xd.demo.settings import ROOT
 from scripts.manual_index import DEFAULT_DB, search
 
 
@@ -31,8 +32,7 @@ async def run(args):
               'embedding_ms_p50': median(item['retrieval']['embedding_ms'] for item in results),
               'local_search_ms_p50': median(item['retrieval']['local_search_ms'] for item in results),
               'results': results}
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
+    write_report(report, args.out)
     print(json.dumps({key: value for key, value in report.items() if key != 'results'}))
     return report['passed'] == report['total']
 
@@ -42,7 +42,7 @@ def main():
     parser.add_argument('--cases', type=Path, default=Path(__file__).with_name('manual_retrieval_cases.json'))
     parser.add_argument('--db', type=Path, default=DEFAULT_DB)
     parser.add_argument('--repeat', type=int, choices=range(1, 11), default=1)
-    parser.add_argument('--out', type=Path, default=ROOT / 'data/evals/manual_retrieval.json')
+    parser.add_argument('--out', type=Path, default=report_path('manual-retrieval'))
     args = parser.parse_args()
     raise SystemExit(0 if asyncio.run(run(args)) else 1)
 

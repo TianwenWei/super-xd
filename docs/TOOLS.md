@@ -1,6 +1,6 @@
 # 模拟车控工具目录
 
-统一目录在 `backend/catalog.py`，精确包含100个唯一函数、10个skill。热工具是其中15个函数的子集，其余85个只能通过Pro车控规划层使用。Talker调用`delegate_vehicle_control`，系统传递未经改写的整句；`load_skill`仅在Pro内按子系统读取详细目录，不计入100个车端函数，也不扩展Talker工具集合。
+统一目录在 `src/super_xd/nlp/catalog/vehicle.py`，精确包含100个唯一函数、10个skill。热工具是其中15个函数的子集，其余85个只能通过Pro车控规划层使用。Talker调用`delegate_vehicle_control`，系统传递未经改写的整句；`load_skill`仅在Pro内按子系统读取详细目录，不计入100个车端函数，也不扩展Talker工具集合。
 
 所有车控均只修改会话内模拟状态，不接触真实车辆。车机收到command后回传执行确认，由服务端模拟车端校验并执行，返回结构化result和完整新状态。浏览器展示按skill分组的状态，可直接核对结果。导航只记录目的地、途经点与偏好，不进行真实路线计算、订座或支付。
 

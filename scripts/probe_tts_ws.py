@@ -1,20 +1,19 @@
 """Live Speech-only V3 streaming probe; never a query-to-browser benchmark."""
 if __name__ == "__main__":
-    from backend.local_environment import load_local_environment
+    from super_xd.demo.environment import load_local_environment
     load_local_environment()
 
 import argparse
 import asyncio
+from scripts.reports import report_path, write_report
 from datetime import datetime, timezone
 import json
 from pathlib import Path
-import sys
 import time
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from backend.tts import VolcanoTTS, XIAOHE_VOICE, TTS_RESOURCE_ID
-from backend.speech_stream import STREAM_TTS_URL
+from super_xd.demo.audio.volcengine_tts import VolcanoTTS, XIAOHE_VOICE, TTS_RESOURCE_ID
+from super_xd.demo.audio.speech_stream import STREAM_TTS_URL
 
 
 async def sample(tts, index):
@@ -63,7 +62,7 @@ async def sample(tts, index):
 async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--samples', type=int, default=2)
-    parser.add_argument('--output', default='docs/tts-ws-live.json')
+    parser.add_argument('--output', type=Path, default=report_path('tts-ws-live'))
     args = parser.parse_args()
     tts = VolcanoTTS(timeout_seconds=15)
     report = {'provider': 'volcengine-speech-tts', 'endpoint': STREAM_TTS_URL,
@@ -82,11 +81,11 @@ async def main():
     finally:
         await tts.aclose()
         destination = Path(args.output)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
+        write_report(report, destination)
     print(json.dumps({'output': str(destination), 'prewarm': report['prewarm'],
                       'all_ok': all(item['ok'] for item in report['samples'])}), flush=True)
+    return 0 if report['samples'] and all(item['ok'] for item in report['samples']) else 1
 
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    raise SystemExit(asyncio.run(main()))

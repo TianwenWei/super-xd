@@ -1,72 +1,52 @@
-# Prompt 配置
+# 专家模板与实际运行协议
 
-模型主提示词只有三个角色入口。每个文件按 `## [section: 名称]` 分段；运行时选择当前需要的段，不把整份文件发给模型。
+本轮采用外部专家 `Talker–Reasoner 提示词框架 v0.2` 的八模板组织，保留“所处系统—用户处境—怎样决定—怎样做事—怎样交付”的叙述。原材料来自 `talker_reasoner_prompts/prompts/*.txt`；当前文件是与本仓库真实工具、权限和交付协议对齐后的版本。
 
-| 入口 | 职责 | 每次如何选择 |
-|---|---|---|
-| [talker.md](talker.md) | 前台对话、工具决策、表达风格、上下文包装 | 固定 `system` 与 `cold_catalog`；当前一个人设；历史；动态快照与本轮输入 |
-| [reasoner_foreground.md](reasoner_foreground.md) | 前台复杂车控计划，只规划、不执行 | `system`；仅提交协议不符时使用 `retry` |
-| [reasoner_background.md](reasoner_background.md) | 后台快速核验、多步研究与结果交付 | `common` 加 `quick` 或 `research`；按运行阶段使用其余段 |
+| 文件 | 用途与组装 |
+| --- | --- |
+| [common.md](common.md) | 共享的用户处境、数据边界、诚实与安全；各角色固定前缀 |
+| [talker.md](talker.md) | 用户轮即时回应、直接工具和前后台委托 |
+| [talker_event.md](talker_event.md) | 事件表达契约，禁止新增业务工具操作；当前事件交付走确定性播报，未增加事件模型调用 |
+| [reasoner.md](reasoner.md) | 只读研究的目标、查询、证据和交付 |
+| [reasoner_foreground.md](reasoner_foreground.md) | 用户等待时尽快交付；等待期限由运行时管理 |
+| [reasoner_background.md](reasoner_background.md) | 异步补充条件和中性结果，不预设播报时刻 |
+| [persona.md](persona.md) | 保留专家原文；只注入选中的人设 JSON，不再追加重复人设段 |
+| [context.md](context.md) | 注入当前 Gateway 快照，包含当前音区、能力、地点、时间、任务与播放事实 |
 
-工具 schema、预算、权限、执行校验与检查点协议由 Python 代码负责；Prompt 不能放宽这些边界。
+Talker 组装顺序为 `common → talker → 完整冷车控目录 → persona → 原生示例 → 历史 → context → 本轮输入`。固定规则、工具和示例可以缓存；实时事实留在当前输入前，历史不会覆盖本轮音区。能力投影不按用户关键词筛选，Talker 仍固定 26 工具。
 
-## 段与兼容接口
+研究请求为 `common → reasoner → query_mode 对应的查询说明 → delivery_mode 对应的交付说明 → 任务快照与过程`。前后台使用同一个任务与累计预算；两者都没有车辆执行、发送或支付权限。查询方式 `quick/research` 与交付方式 `foreground/background` 是独立维度。
 
-`backend/prompt_templates.py` 是 section、变量与组合关系的严格契约。原有 `load_prompt(name)` / `render_prompt(name, **variables)` 名字继续使用，旧碎片文件已经删除，不存在两份提示词来源。
+[vehicle_planner.md](vehicle_planner.md) 是实际车控计划协议：只提交 `submit_vehicle_plan`，不宣称执行完成。[runtime.md](runtime.md) 仅保存短的上下文归属、能力数据包装、重试、修订和收尾消息。它们保留严格命名 section，避免把运行时协议与专家角色叙述混杂。
 
-| 文件内 section | Python 模板名 | 变量 / 时机 |
-|---|---|---|
-| Talker `system` | `talker` | `hot_tool_names`、`skill_index`；固定规则 |
-| Talker `cold_catalog` | `talker_cold_catalog` | `catalog_json`；按skill组织的完整冷能力语义目录，启动构造并缓存 |
-| Talker `persona` | `persona` | `persona_json`；表达边界和当前 PersonaConfig 数据 |
-| Talker `persona_professional` / `persona_warm` / `persona_playful` | 同名 | 只选当前预设段；自定义人设保留自己的完整配置，不隐式套其他预设 |
-| Talker `history_attribution` | 同名 | `attribution_json`；主动播报的来源标注 |
-| Talker `session_snapshot` | 同名 | `snapshot_json`、`speaker_name`；动态事实放在历史之后 |
-| Talker `speaker_context` | 同名 | `speaker_json`；由需要音区数据的编译器复用，数据不授予权限 |
-| Talker `current_turn` / `task_snapshot_notice` / `prewarm` | 同名 | 分别用于本轮边界、任务车况快照说明、预热；不混入其他请求 |
-| Foreground `system` / `retry` | `vehicle_planner` / `planner_retry` | 无变量 |
-| Background `common` + `quick` | `thinker_quick` | 快速核验，不包含研究模式或车辆建议工具说明 |
-| Background `common` + `research` | `thinker_research` | `skill_guide`；多步研究 |
-| Background `finalize` / `revision` / `retry` / `source_selection` | `thinker_` 加段名 | 只在收尾、条件更新、提交重试或来源选择时使用 |
+## 与专家原稿的必要差异
 
-文件首行标题和全部 section 名须与代码一致；缺段、多段、重复段、空段、段外正文、占位变量增删都会在启动时报错。`{{变量}}` 只做一次替换，不递归解释变量值。更改文件后需重启进程；没有请求时读文件或热重载路径。
+- 专家的 `delegate_to_reasoner` 分别映射为现有 `delegate_vehicle_control` 与 `delegate_task(mode=...)`。整组车控的计划校验和回执链保留；没有让研究器直接执行车辆动作。
+- `ask_user/finish` 映射为实际的 `ask_clarification/finish_task`。澄清通过暂停任务、接收后续回答继续，不声称模型调用会同步收到用户回答。
+- 当前未接入 `screen_tap`、`confirm_with_user`、`call_agent`、`schedule_action` 等工具，已删除相关调用示例和能力承诺。不可逆能力不能靠提示词模拟开通。
+- 前台研究的 `spoken_summary` 由运行时直接交付；研究器输出保持中性，不读取人设，以便同一任务安全转后台。没有额外的 Talker 润色调用。
+- 专家 XML 上下文中若干字段尚无生产契约。这里保留实际的版本化 JSON 快照，不虚构屏幕、记忆或第三方 Agent。生成历史完整保留，实际播放状态独立传入。
+- 专家的“一秒左右”是设计目标，未写成系统已经满足的承诺；验收以实际 TTS 首帧 PCM 为准。
 
-Talker 的消息顺序保持：
+## 工具和资源
 
-```text
-固定规则与能力语义目录 → 当前人设 → 原生示例 → 历史 → 会话快照 → 本轮提示与用户输入
-```
+工具用法放在所属 TOML，参数类型、范围和权限仍在 Python 契约中。原生 [talker/examples.json](talker/examples.json) 只展示少量调用协议，使用真实工具名与 schema；示例数据不是当前用户事实，不抄评测原句。
 
-地点、时间、音区与任务状态不会进入固定规则前缀。人设只改变表达，工具选择与参数必须仍由跨人设评测约束。后台没有人设段。
+固定播报保留在 `speech/`；车书 embedding 指令保留在 `manual/`。本轮未改变 embedding 指令或模型，不需要因此重建索引。
 
-## 证据、播放与能力事实
+所有文件、命名 section、文字 key、变量及示例工具协议在启动时严格校验并缓存。请求只处理内存中的已编译模板；资源清单由 `PROMPT_RESOURCE_FILES` 声明，新增、遗留或漏装文件都会导致验证失败。
 
-三角色共享行为原则：咨询不自动执行；答案的对象、时段、粒度和确定性须与返回材料一致；局部检索未命中不能证明功能不存在。Talker 一次模型调用同时选择动作并表达。一次用户任务通常只做一次查询预告，内部重试无新增进展时直接用已有材料收束。
+## 本轮文本测量
 
-历史 assistant 消息保留完整生成内容，`playback_history` 独立记录 `unknown / not_started / partial / completed` 和已确认听到的片段；未知播放不等于空答案。动态快照先列当前 `speaker` 与变化标志，自指使用当前音区，明确回指才沿用历史对象。固定目录从catalog现有文字配置生成85项完整中文说明，不按本轮原话筛选。Talker仍只有26工具，快照只展开这些固定工具的执行事实；`vehicle_skill_capabilities` 按模块列出冷车控 `available / unavailable / missing` 名称及可用数量。完整能力仍保留在 StartRequest 中给 Planner 和执行校验，目录存在或 feature 为 true 不补足缺失的执行声明。
+同一代码口径、紧凑 JSON、Unicode 字符数：
 
-`harness/evidence.py` 根据来源 ID、版本、内容指纹记录检索新证据；重复回执幂等，进展账本跨 checkpoint 恢复。范围注解只描述来源与粒度，不宣称答案已被证据支持。泛化评测在 `evals/cases/general_principles.json`；`evals/response_review.py` 使用配置中的独立评测模型逐项审查 rubric，缺失或失败的审查不能计为语义通过。
+| 项目 | 原版 | 专家模板版 |
+| --- | ---: | ---: |
+| Talker 固定核心，含完整冷车控目录 | 11,026 | 7,947 |
+| 原生示例消息数 | 104 | 31 |
+| 示例工具调用数 | 34 | 9 |
+| 原生示例序列化字符数 | 14,591 | 3,490 |
 
-## 独立保留的配置
+这些是字符与消息数量，不是供应商 token，也不代表实际延迟下降。共享模板使某些研究/规划请求的文字增加，需要与行为通过率、模型调用次数和真实首帧数据一起评估。
 
-- [talker/examples.json](talker/examples.json)：原生 `user / assistant tool_calls / tool` 示例。维护成对调用与回执；启动时校验工具名、参数 schema 和消息协议。
-- `talker/tools.toml`、`planner/tools.toml`、`thinker/tools.toml`、`cockpit/tools.toml`、`vehicle/functions.toml`：工具与参数的文字说明；类型、范围、枚举、路由和权限仍在代码。
-- `speech/*.toml`、`cockpit/feedback.toml`：固定回执、标签、播报和人设配置。`speech/persona.toml` 仍提供界面与固定回执使用的 PersonaConfig 预设；三个模型风格段位于 Talker 主文件。
-- `manual/embedding_document.md`、`manual/embedding_query.md`：独立向量任务指令。修改后必须重建车书索引，与对话角色无关。
-
-没有删除原生示例。Talker 主规则仅移除五组已被原生示例覆盖的箭头示例（热工具组合与保持、非热工具整体委托、天气、网页实时事实、情绪回应）；纠正、历史指代、状态查询、导航与任务续接等其余示例保留。快照里的对象优先级长段与固定规则重复，改为简短提醒。后台共用证据、来源、条件变更和交付契约，预算时机以运行时为准，不再写死一分钟。Talker 与 Foreground 的定位、路线、车控和车书来源规则以本轮能力及事实为准，不再写死模拟车、无 GPS 或某一本手册；Demo 的模拟模式仍须明确标识。
-
-## 本地验证
-
-```sh
-.venv/bin/python -m scripts.validate_prompt_config
-.venv/bin/python -m pytest -q tests/test_prompt_templates.py tests/test_role_prompts.py tests/test_prompt_config.py tests/test_persona.py tests/test_structured_prompt_capture.py
-.venv/bin/python -m scripts.validate_structured_prompts capture --output data/evals/prompt-after.json
-.venv/bin/python -m scripts.validate_structured_prompts compare --before data/evals/prompt-before.json --after data/evals/prompt-after.json --output data/evals/prompt-comparison.json
-```
-
-`validate_prompt_config` 输出段数、模板字符数和原生示例消息/调用数。`capture` 和 `compare` 完全离线；比较完整请求的消息数、内容字符、序列化字符、模型配置、工具 schema、非 system 消息以及完整原生示例。输出使用新文件名，避免覆盖证据。
-
-比较旧版本时，在每个 checkout 的独立 Python 进程里 capture；模型配置、默认地点/音区/时区和 suite 的固定时间须相同。原 `--source` 混合模块导入入口已移除。需要排除本地环境文件影响时设置 `PYTHON_DOTENV_DISABLED=1`，并显式设置相同的非敏感模型及环境参数。
-
-字符减少和离线契约测试不证明模型行为变好，也不等同于提供商 token 数或延迟。Prompt 内容变化仍需按行为评测检查工具与参数、禁止动作、跨人设一致性及真实调用延迟；离线验证不会擅自调用付费模型。发布清单覆盖三份入口、示例、文字配置与编译源码，版本变化使旧检查点失效，迁移须由明确协议处理。
+验证入口：`.venv/bin/python -m scripts.validate_prompt_config`；相关离线测试在 `tests/nlp/test_role_prompts.py` 和 `test_prompt_templates.py`。本次新增泛化回归集为 `evals/cases/expert_prompt_contracts.json`，真实行为验收至少重复三次。

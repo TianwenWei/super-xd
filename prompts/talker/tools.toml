@@ -10,7 +10,10 @@ description = "交给车控规划层：本轮有不在常驻工具里的车控�
 description = "涉及的车辆子系统；不能确定时传空数组，由车控规划层选择。"
 
 [delegate_task]
-description = "交给后台任务：多步调研、按多个条件比较后推荐，或者深入核实指定来源。简单实时事实和明确网页搜索用web_search；天气用get_weather，地点用search_places。goal 写全用户的所有条件。"
+description = "委托只读研究：多步调研、按条件比较推荐，或深入核实指定来源。mode决定前台等待或后台交付，query_mode决定研究深度。简单实时事实用web_search，天气用get_weather，地点用search_places。goal写全条件；不执行下单、付款、发送或定时动作。"
+
+[delegate_task.parameters.mode]
+description = "foreground：用户在等答案；background：用户明确说先查着、好了告诉我，或需要多轮比较研究。省略时前台等待，达到等待期限后同一任务继续在后台执行。"
 
 [delegate_task.parameters.spoken_goal]
 description = "一个动宾短语，8到15字，能接在\"我帮你\"后面，比如\"挑能停车的火锅店\"。不写来源要求，完整条件写在goal里。"
@@ -46,7 +49,7 @@ description = "仅用户明确要求详细朗读已有结果时为true，默认f
 description = "用当前配置的地点服务搜索真实POI。query保留地点/类别及明确城市或地标。附近没有位置先问用户，不能假设GPS。仅搜索，不启动导航；结果按相关性排序，返回顺序不代表距离最近；多个候选先让用户选择。"
 
 [search_places.parameters.area]
-description = "搜索范围：逐字照抄用户说过的城市、地址或地标。用户没说过自己在哪、也没说地标时，不要调用本工具，先问用户在哪里。"
+description = "搜索范围：原样使用用户已提供的城市、地址或地标；用户说附近且未另指地点时，可使用快照current_location.name。两处都没有地点才询问，不猜GPS。"
 
 [get_weather]
 description = "直接查询天气，在本轮返回，不委托后台。location填明确城市及国家（例如巴黎 法国、深圳 中国），不得猜地点。date为today/tomorrow/day_after_tomorrow/now或YYYY-MM-DD；相对日期由工具按目标当地时区解析。仅按明确配置的服务与回退策略查询，并标明实际来源。指定官网核验或复杂调研才delegate_task。"

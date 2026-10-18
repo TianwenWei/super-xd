@@ -1,4 +1,4 @@
-# 车控能力说明。只修改文字；参数类型、范围、枚举与执行逻辑在 backend/catalog.py。
+# 车控能力说明。只修改文字；参数类型、范围、枚举与执行逻辑在 src/super_xd/nlp/catalog/vehicle.py。
 # description 包含发给模型的完整工具说明；parameters 只包含说明文字。
 
 [skills.climate]

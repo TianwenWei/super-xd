@@ -17,13 +17,13 @@ from pathlib import Path
 import time
 
 if __name__ == '__main__':
-    from backend.local_environment import load_local_environment
+    from super_xd.demo.environment import load_local_environment
     load_local_environment()
 
-from backend.demo.resources import freeze_local_model
-from backend.harness.diagnostics import safe_diagnostic
-from backend.harness.release import get_release_manifest
-from backend.models import utcnow
+from super_xd.demo.resources.runtime import freeze_local_model
+from super_xd.nlp.diagnostics import safe_diagnostic
+from super_xd.nlp.release import get_release_manifest
+from super_xd.nlp.adapters.common import utcnow
 from evals.gateway_driver import EvaluationGateway, model_secrets
 from evals.harness import percentile, text_latency_counts
 
@@ -160,7 +160,7 @@ async def main(argv=None):
         parser.error('--pause-seconds must be finite and nonnegative')
     if args.max_first_text_ms is not None and (not math.isfinite(args.max_first_text_ms) or args.max_first_text_ms <= 0):
         parser.error('--max-first-text-ms must be finite and positive')
-    from backend.services.factory import create_llm
+    from super_xd.nlp.adapters.factory import create_llm
     model = create_llm()
     try:
         frozen = freeze_local_model(model)

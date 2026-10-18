@@ -16,3 +16,7 @@ data/*
 
 # Browser screenshots and full trace exports belong to local validation output.
 frontend/validation/
+
+# Local migration notes and verification logs are not source artifacts.
+/work/
+/dist/

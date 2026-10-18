@@ -41,7 +41,7 @@ route 独立调用配置的真实路线 provider。起点优先本次明确指�
 
 ## 验证边界
 
-`tests/test_cockpit.py` 验证内容来源、设备身份绑定、失败保留状态、过期隔离、控制串行、一次版本恢复和导航来源。`evals/cases/cockpit.json` 使用明确的测试目录及模拟设备回执，报告标记 `cockpit_device_mode=explicit_eval_fixture`；它验证真实模型的路由和参数，**不证明浏览器已经发出声音或腾讯授权已连通**。浏览器实际播放验收单独记录。
+`tests/demo/test_cockpit.py` 验证内容来源、设备身份绑定、失败保留状态、过期隔离、控制串行、一次版本恢复和导航来源。`evals/cases/cockpit.json` 使用明确的测试目录及模拟设备回执，报告标记 `cockpit_device_mode=explicit_eval_fixture`；它验证真实模型的路由和参数，**不证明浏览器已经发出声音或腾讯授权已连通**。浏览器实际播放验收单独记录。
 
 ## 音乐、视频、电台 CP 隔离
 

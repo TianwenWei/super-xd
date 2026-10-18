@@ -5,11 +5,12 @@ The local PCM fixture can be reused; credentials and request headers are never
 written to the report. This does not measure physical microphone capture.
 """
 if __name__ == "__main__":
-    from backend.local_environment import load_local_environment
+    from super_xd.demo.environment import load_local_environment
     load_local_environment()
 
 import argparse
 import asyncio
+from scripts.reports import report_path, write_report
 import audioop
 from datetime import datetime, timezone
 import json
@@ -17,8 +18,8 @@ from pathlib import Path
 import time
 from uuid import uuid4
 
-from backend.asr import VolcanoASR
-from backend.tts import VolcanoTTS
+from super_xd.demo.audio.volcengine_asr import VolcanoASR
+from super_xd.demo.audio.volcengine_tts import VolcanoTTS
 
 TEXT = '你好，请把空调温度设为二十三度。'
 
@@ -83,8 +84,7 @@ async def run(args):
         await asr.aclose()
     report['total_probe_ms'] = round((time.perf_counter() - started) * 1000, 3)
     target = Path(args.output)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
+    write_report(report, target)
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0 if report['ok'] else 1
 
@@ -92,5 +92,5 @@ async def run(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--fixture', default='data/asr-chinese-probe.pcm')
-    parser.add_argument('--output', default='docs/asr-live.json')
+    parser.add_argument('--output', type=Path, default=report_path('asr-live'))
     raise SystemExit(asyncio.run(run(parser.parse_args())))

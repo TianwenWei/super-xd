@@ -13,6 +13,7 @@ unreviewed and make the CLI return nonzero; they are never scored as passes.
     .venv/bin/python -m evals.speech_review data/evals/run.json --out data/evals/run.speech.json
 """
 from __future__ import annotations
+from super_xd.nlp.contracts.providers import ModelRequest
 
 import argparse
 import asyncio
@@ -24,12 +25,12 @@ import sys
 from pathlib import Path
 
 if __name__ == '__main__':
-    from backend.local_environment import load_local_environment
+    from super_xd.demo.environment import load_local_environment
     load_local_environment()
 
-from backend.models import sanitized_error
-from backend.services.factory import create_llm
-from backend.textutil import decode_json_object
+from super_xd.nlp.adapters.common import sanitized_error
+from super_xd.nlp.adapters.factory import create_llm
+from super_xd.nlp.textutil import decode_json_object
 
 PROMPT = """你在审阅车载语音助手说给司机听的话。只根据给出的内容判断，输出一个 JSON 对象，不要输出其他文字。
 
@@ -95,9 +96,8 @@ def reparse_report(report):
 
 async def review_turn(llm, model, turn):
     payload = {'user': turn['input'], 'preface': turn.get('preface') or '', 'full_reply': turn.get('text') or ''}
-    request = llm.request([{'role': 'system', 'content': PROMPT},
-                           {'role': 'user', 'content': json.dumps(payload, ensure_ascii=False)}],
-                          role='thinker', thinking=False, max_tokens=300)
+    request = llm.resolve(ModelRequest([{'role': 'system', 'content': PROMPT},
+                           {'role': 'user', 'content': json.dumps(payload, ensure_ascii=False)}], role='thinker', reasoning=False, max_tokens=300))
     if model is not None:
         if not model.strip():
             raise ValueError('Review model must be a nonblank identifier')

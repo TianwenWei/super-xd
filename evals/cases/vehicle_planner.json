@@ -1,6 +1,195 @@
 [
-  {"id": "cold_mixed_delegated_once", "tags": ["planner"], "personas": ["professional", "warm", "playful"], "turns": [{"input": "把副驾按摩打开，顺便把雨刷调到自动", "expect": {"talker_calls": [{"name": "delegate_vehicle_control"}], "commands": [{"name": "set_seat_massage", "arguments": {"seat": "front_passenger"}}, {"name": "set_wiper_mode", "arguments": {"mode": "auto"}}], "state": {"wipers.mode": "auto"}}}]},
-  {"id": "cold_single_mirror_heating", "tags": ["planner"], "turns": [{"input": "打开后视镜加热", "expect": {"talker_calls": [{"name": "delegate_vehicle_control"}], "commands": [{"name": "set_mirror_heating", "arguments": {"enabled": true}}], "state": {"mirrors.heating": true}}}]},
-  {"id": "planner_hold_kept", "tags": ["planner", "hold"], "turns": [{"input": "打开后视镜加热，方向盘加热别动", "expect": {"commands": [{"name": "set_mirror_heating", "arguments": {"enabled": true}}], "forbid_commands": [{"name": "set_steering_heating"}], "unchanged": ["seats.steering_heating"]}}], "vehicle": {"seats.steering_heating": true}},
-  {"id": "planner_dependency_order", "tags": ["planner"], "turns": [{"input": "先解锁全部车门，再打开尾门", "expect": {"talker_calls": [{"name": "delegate_vehicle_control"}], "commands": [{"name": "unlock_all_doors"}, {"name": "set_tailgate_open", "arguments": {"open": true}}]}}]}
+  {
+    "id": "cold_mixed_delegated_once",
+    "tags": [
+      "planner"
+    ],
+    "personas": [
+      "professional",
+      "warm",
+      "playful"
+    ],
+    "turns": [
+      {
+        "input": "把副驾按摩打开，顺便把雨刷调到自动",
+        "expect": {
+          "talker_calls": [
+            {
+              "name": "delegate_vehicle_control"
+            }
+          ],
+          "commands": [
+            {
+              "name": "set_seat_massage",
+              "arguments": {
+                "seat": "front_passenger"
+              }
+            },
+            {
+              "name": "set_wiper_mode",
+              "arguments": {
+                "mode": "auto"
+              }
+            }
+          ],
+          "state": {
+            "wipers.mode": "auto"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "id": "cold_single_mirror_heating",
+    "tags": [
+      "planner"
+    ],
+    "turns": [
+      {
+        "input": "打开后视镜加热",
+        "expect": {
+          "talker_calls": [
+            {
+              "name": "delegate_vehicle_control"
+            }
+          ],
+          "commands": [
+            {
+              "name": "set_mirror_heating",
+              "arguments": {
+                "enabled": true
+              }
+            }
+          ],
+          "state": {
+            "mirrors.heating": true
+          }
+        }
+      }
+    ],
+    "personas": [
+      "professional",
+      "warm",
+      "playful"
+    ]
+  },
+  {
+    "id": "planner_hold_kept",
+    "tags": [
+      "planner",
+      "hold"
+    ],
+    "turns": [
+      {
+        "input": "打开后视镜加热，方向盘加热别动",
+        "expect": {
+          "commands": [
+            {
+              "name": "set_mirror_heating",
+              "arguments": {
+                "enabled": true
+              }
+            }
+          ],
+          "forbid_commands": [
+            {
+              "name": "set_steering_heating"
+            }
+          ],
+          "unchanged": [
+            "seats.steering_heating"
+          ]
+        }
+      }
+    ],
+    "vehicle": {
+      "seats.steering_heating": true
+    }
+  },
+  {
+    "id": "planner_dependency_order",
+    "tags": [
+      "planner"
+    ],
+    "turns": [
+      {
+        "input": "先解锁全部车门，再打开尾门",
+        "expect": {
+          "talker_calls": [
+            {
+              "name": "delegate_vehicle_control"
+            }
+          ],
+          "commands": [
+            {
+              "name": "unlock_all_doors"
+            },
+            {
+              "name": "set_tailgate_open",
+              "arguments": {
+                "open": true
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "planner_mixed_actions_preserve_explicit_window",
+    "tags": [
+      "planner",
+      "hold"
+    ],
+    "vehicle": {
+      "windows.positions.front_passenger": 40
+    },
+    "turns": [
+      {
+        "input": "主驾座椅通风设为二档，再打开后视镜加热，副驾车窗保持现在这样。",
+        "expect": {
+          "talker_calls": [
+            {
+              "name": "delegate_vehicle_control"
+            }
+          ],
+          "commands": [
+            {
+              "name": "set_seat_ventilation",
+              "arguments": {
+                "seat": "driver",
+                "level": 2
+              }
+            },
+            {
+              "name": "set_mirror_heating",
+              "arguments": {
+                "enabled": true
+              }
+            }
+          ],
+          "commands_exact": true,
+          "unchanged": [
+            "windows.positions.front_passenger"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "planner_missing_seat_target_clarifies_whole_group",
+    "tags": [
+      "planner",
+      "clarification"
+    ],
+    "turns": [
+      {
+        "input": "调整一下我的座椅位置，然后打开氛围灯。",
+        "expect": {
+          "no_commands": true,
+          "tasks_created": 0
+        }
+      }
+    ]
+  }
 ]
